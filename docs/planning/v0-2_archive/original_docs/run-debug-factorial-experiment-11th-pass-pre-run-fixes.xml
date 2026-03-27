@@ -1,0 +1,328 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>11th Pass Pre-Run Fixes — MLflow 413, Duration Monitoring, Spot Recovery</title>
+    <branch>fix/11th-pass-pre-run-fixes</branch>
+    <date>2026-03-27</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — blocks ALL experiment execution until deployed</priority>
+    <issues>#878, #952, #755, #960</issues>
+    <estimated-time>2-4 hours (includes Docker build + push + pulumi up)</estimated-time>
+    <approach>Infrastructure-first: deploy → verify → code changes → rebuild → re-verify</approach>
+    <key-constraint>
+      This plan MUST be executed in ONE session. No "continue in fresh session."
+      Context compaction is acceptable. Session switching is NOT.
+      The fix is NOT DONE until runtime verification passes (Task T8).
+    </key-constraint>
+  </metadata>
+
+  <context>
+    <summary>
+      The MLflow 413 error has persisted across 10 experiment passes because the fix
+      requires 5 coordinated layers (dependency + Docker + Pulumi + YAML + verification)
+      and each session only completed 1-2 layers before declaring victory.
+
+      This plan addresses ALL layers in strict sequence with runtime verification gates.
+      NO task is marked complete until its verification criterion passes.
+
+      Reviewer agent identified 2 MISSING prerequisites the original analysis overlooked:
+      (1) Dockerfile.mlflow-gcp must be built and pushed to GAR BEFORE pulumi up
+      (2) enable_cloud_run must be set to true in Pulumi.dev.yaml BEFORE pulumi up
+    </summary>
+
+    <previous-failures>
+      See: mlflow-constant-issue-with-413-mlflow-and-claude-refusal-to-fix.xml
+      See: .claude/metalearning/2026-03-27-mlflow-413-10-passes-never-fixed-self-reflection.md
+    </previous-failures>
+
+    <reviewer-findings>
+      Critical findings from DevOps reviewer agent:
+      1. google-cloud-storage is ALREADY a transitive dep via dvc[gs] — explicit addition
+         is defensive (belt-and-suspenders), not the root cause fix
+      2. The ROOT CAUSE is: enable_cloud_run=false in Pulumi.dev.yaml → Cloud Run MLflow
+         never deployed → no GCS artifact root → HTTP fallback → 413
+      3. Dockerfile.mlflow-gcp must be built+pushed to GAR BEFORE pulumi up
+      4. .env must be updated with Cloud Run URL from pulumi stack output
+      5. Removing file_mounts breaks spot recovery unless checkpoint resume reads from MLflow
+      6. Old experiments may have stale artifact roots pointing to HTTP
+    </reviewer-findings>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: DEPLOY MLFLOW CLOUD RUN WITH GCS ARTIFACT STORE           -->
+  <!-- This phase requires USER interaction (auth, pulumi, Docker push)    -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Deploy MLflow Cloud Run with GCS Artifacts">
+    <description>
+      Deploy the MLflow server to Cloud Run with --no-serve-artifacts and
+      MLFLOW_DEFAULT_ARTIFACT_ROOT=gs://. This is the CORE fix for 413.
+      Requires user to run commands (Docker push, pulumi up need auth).
+    </description>
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <title>Build and push Dockerfile.mlflow-gcp to GAR</title>
+      <description>
+        The MLflow server image must exist in GAR before Cloud Run can deploy it.
+        This is the SERVER-SIDE image with --no-serve-artifacts.
+      </description>
+      <commands>
+        <!-- User must run these commands -->
+        cd deployment/docker
+        docker build -f Dockerfile.mlflow-gcp -t europe-north1-docker.pkg.dev/minivess-mlops/minivess/mlflow-gcp:latest .
+        docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/mlflow-gcp:latest
+      </commands>
+      <verification>
+        docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/mlflow-gcp:latest
+        # Must return a valid manifest with the correct creation date
+      </verification>
+      <prerequisite>gcloud auth configure-docker europe-north1-docker.pkg.dev</prerequisite>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <title>Enable Cloud Run in Pulumi config and deploy</title>
+      <description>
+        Pulumi.dev.yaml has enable_cloud_run: "false". Must flip to true and run
+        pulumi up. The Pulumi code (commit 893c414) already has the correct config:
+        - MLFLOW_DEFAULT_ARTIFACT_ROOT = gs://minivess-mlops-mlflow-artifacts
+        - --no-serve-artifacts in the Docker entrypoint
+        - Cloud SQL backend store
+      </description>
+      <commands>
+        cd deployment/pulumi/gcp
+        pulumi config set minivess-gcp:enable_cloud_run true
+        pulumi up
+      </commands>
+      <verification>
+        pulumi stack output mlflow_url
+        # Must return a Cloud Run URL like https://minivess-mlflow-xxxxx-lz.a.run.app
+        curl -s $(pulumi stack output mlflow_url)/api/2.0/mlflow/experiments/list
+        # Must return valid JSON (not 404 or error)
+      </verification>
+      <depends-on>T1</depends-on>
+    </task>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <title>Update .env with Cloud Run MLflow URL</title>
+      <description>
+        After pulumi up, the MLFLOW_TRACKING_URI must point to the new Cloud Run URL.
+        SkyPilot reads this from .env via --env-file.
+      </description>
+      <commands>
+        # Get the URL from pulumi
+        MLFLOW_URL=$(cd deployment/pulumi/gcp &amp;&amp; pulumi stack output mlflow_url)
+        # Update .env (or .env.cloud or whatever the SkyPilot env-file is)
+        # Verify the value
+        grep MLFLOW_TRACKING_URI .env
+      </commands>
+      <verification>
+        # The URI must be https://, not file:// or http://localhost
+        grep MLFLOW_TRACKING_URI .env | grep -q "https://"
+      </verification>
+      <depends-on>T2</depends-on>
+    </task>
+
+    <task id="T4" status="NOT_STARTED" priority="P0">
+      <title>Verify MLflow Cloud Run records GCS artifact root</title>
+      <description>
+        Create a test experiment and verify its artifact_location uses gs://.
+        This confirms the server-side fix is active.
+      </description>
+      <commands>
+        uv run python -c "
+        import mlflow
+        import os
+        mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+        exp = mlflow.set_experiment('test-gcs-artifact-root')
+        print(f'Artifact location: {exp.artifact_location}')
+        assert exp.artifact_location.startswith('gs://'), f'Expected gs://, got {exp.artifact_location}'
+        print('SUCCESS: MLflow records GCS artifact root')
+        # Clean up
+        mlflow.delete_experiment(exp.experiment_id)
+        "
+      </commands>
+      <verification>
+        # artifact_location must start with gs://minivess-mlops-mlflow-artifacts
+      </verification>
+      <depends-on>T3</depends-on>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: FIX TRAINING CONTAINER (dependency + Docker rebuild)       -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Fix Training Container">
+    <description>
+      Ensure the training Docker image has google-cloud-storage explicitly in
+      main dependencies (belt-and-suspenders — it's already transitive via dvc[gs]
+      but explicit is safer). Rebuild and push.
+    </description>
+
+    <task id="T5" status="NOT_STARTED" priority="P1">
+      <title>Add google-cloud-storage to main dependencies explicitly</title>
+      <description>
+        Currently in [project.optional-dependencies].sky. Move to [project.dependencies]
+        as a defensive measure. The reviewer confirmed it's already a transitive dep
+        via dvc[gs], but explicit is safer against future dependency changes.
+      </description>
+      <files>
+        <file action="modify">pyproject.toml</file>
+      </files>
+      <tdd-spec>
+        <red>
+          uv run python -c "import google.cloud.storage; print('OK')"
+          # This already passes (transitive dep). The test is that uv lock succeeds.
+        </red>
+        <green>
+          Add "google-cloud-storage>=3.9.0" to [project.dependencies] in pyproject.toml.
+          Remove from [project.optional-dependencies].sky (avoid duplication).
+          Run: uv lock
+        </green>
+        <verify>
+          uv run python -c "import google.cloud.storage; print(google.cloud.storage.__version__)"
+          make test-staging  # Ensure nothing broke
+        </verify>
+      </tdd-spec>
+    </task>
+
+    <task id="T6" status="NOT_STARTED" priority="P0">
+      <title>Rebuild and push training Docker base image to GAR</title>
+      <description>
+        Rebuild Dockerfile.base with the updated dependencies. Push to GAR.
+        Tag with both :latest and :$(git rev-parse --short HEAD) for rollback safety.
+      </description>
+      <commands>
+        make build-base-gpu
+        docker tag minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        docker tag minivess-base:latest europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:$(git rev-parse --short HEAD)
+        docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        docker push europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:$(git rev-parse --short HEAD)
+      </commands>
+      <verification>
+        docker manifest inspect europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        # Verify the image contains google-cloud-storage:
+        docker run --rm minivess-base:latest python -c "import google.cloud.storage; print('GCS OK:', google.cloud.storage.__version__)"
+      </verification>
+      <depends-on>T5</depends-on>
+      <note>Image is ~9 GB. Push may take 30-60 min on residential internet.</note>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: CLEAN UP COMPETING MECHANISMS + DURATION MONITORING        -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Clean Up and Harden">
+
+    <task id="T7" status="NOT_STARTED" priority="P1">
+      <title>Remove competing file_mounts from train_factorial.yaml</title>
+      <description>
+        Remove the GCS checkpoint bucket mount (lines 54-61). This eliminates
+        the competing persistence mechanism (KG invariant violation).
+
+        IMPORTANT (reviewer finding): Removing file_mounts means spot recovery
+        can no longer read checkpoints from local disk after preemption. The
+        spot recovery code in train_flow.py:706-719 reads from LOCAL checkpoint_dir.
+        After preemption, that dir is empty (ephemeral disk).
+
+        Two options:
+        (a) Keep file_mounts temporarily until spot recovery reads from MLflow (P2 task)
+        (b) Remove file_mounts now and accept that spot preemption = restart from epoch 0
+
+        For a 2-epoch debug run, option (b) is acceptable. For production, option (a)
+        is needed. The plan recommends (b) for the 11th pass debug run.
+      </description>
+      <files>
+        <file action="modify">deployment/skypilot/train_factorial.yaml</file>
+      </files>
+      <acceptance-criteria>
+        <criterion>file_mounts section removed from train_factorial.yaml</criterion>
+        <criterion>No reference to gs://minivess-mlops-checkpoints in SkyPilot YAMLs</criterion>
+      </acceptance-criteria>
+      <note>For the 2-epoch debug run, spot preemption = restart from epoch 0 is acceptable.
+        The cost of 2 extra epochs (~5 min) is negligible vs the cost of a competing
+        persistence mechanism that masks the real 413 bug.</note>
+    </task>
+
+    <task id="T8" status="NOT_STARTED" priority="P0">
+      <title>RUNTIME VERIFICATION: End-to-end artifact upload test</title>
+      <description>
+        Launch a SINGLE test job (DynUNet, cheapest, fastest) and verify:
+        1. Logs show GCSArtifactRepository (not HttpArtifactRepository)
+        2. Checkpoint appears in gs://minivess-mlops-mlflow-artifacts/
+        3. No 413 error in logs
+        4. MLflow UI shows the artifact
+
+        Then launch a SINGLE SAM3 Hybrid test job and verify:
+        5. 900 MB checkpoint uploads without timeout
+        6. No 413 error
+
+        THIS IS THE REAL ACCEPTANCE CRITERION. Everything before this is preparation.
+      </description>
+      <commands>
+        # Launch DynUNet test job
+        cd deployment/skypilot
+        sky jobs launch train_factorial.yaml \
+          --env MODEL_FAMILY=dynunet \
+          --env LOSS_NAME=dice_ce \
+          --env WITH_AUX_CALIB=false \
+          --env FOLD_ID=0 \
+          --env MAX_EPOCHS=2 \
+          --env EXPERIMENT_NAME=test_gcs_upload \
+          -y
+
+        # Wait for completion, then check logs
+        sky jobs logs &lt;job_id&gt; 2&gt;&amp;1 | grep -i "artifact\|GCS\|413\|HttpArtifact"
+
+        # Verify artifact in GCS
+        gsutil ls gs://minivess-mlops-mlflow-artifacts/
+      </commands>
+      <verification>
+        <criterion>Job logs contain "GCSArtifactRepository" (not "HttpArtifactRepository")</criterion>
+        <criterion>Job logs contain NO "413" or "Request Entity Too Large"</criterion>
+        <criterion>gsutil ls shows checkpoint file in GCS bucket</criterion>
+        <criterion>MLflow UI shows the run with artifacts</criterion>
+      </verification>
+      <depends-on>T6</depends-on>
+      <failure-action>
+        If this task FAILS, do NOT proceed to the 11th pass experiment.
+        Debug the failure, fix it, and re-verify. The 413 is the #1 blocker.
+      </failure-action>
+    </task>
+
+    <task id="T9" status="NOT_STARTED" priority="P1">
+      <title>Add expected-duration-minutes to experiment XML schema</title>
+      <description>
+        The factorial-monitor skill needs per-job expected duration to detect anomalies.
+        Add to the experiment XML schema and to the debug factorial config.
+
+        Expected durations for debug (2 epochs, half data, 1 fold):
+        - DynUNet: 10 min (5 min training + 5 min setup)
+        - MambaVesselNet: 10 min
+        - SAM3 variants: 25 min (longer weight loading + gradient checkpointing)
+        - Zero-shot: 15 min (no training, just eval)
+        - Max acceptable: 3x expected (30 min DynUNet, 75 min SAM3)
+      </description>
+      <files>
+        <file action="modify">configs/factorial/debug.yaml</file>
+      </files>
+      <acceptance-criteria>
+        <criterion>debug.yaml contains expected_duration_minutes per model family</criterion>
+        <criterion>debug.yaml contains max_duration_minutes per model family</criterion>
+      </acceptance-criteria>
+    </task>
+  </phase>
+
+  <verification>
+    <gate name="staging">make test-staging (must pass before Docker rebuild)</gate>
+    <gate name="runtime">T8 runtime verification (must pass before 11th pass launch)</gate>
+    <gate name="no-413">Zero "413" or "Request Entity Too Large" in test job logs</gate>
+    <gate name="gcs-artifact">Checkpoint file visible in gs://minivess-mlops-mlflow-artifacts/</gate>
+  </verification>
+
+  <anti-patterns-to-avoid>
+    <anti-pattern>Marking any task as DONE based on code changes alone</anti-pattern>
+    <anti-pattern>Switching to a fresh session before T8 runtime verification passes</anti-pattern>
+    <anti-pattern>Writing a metalearning doc about 413 without deploying the fix</anti-pattern>
+    <anti-pattern>Running full factorial before single-job verification</anti-pattern>
+    <anti-pattern>Using spot instances for SAM3 in the debug pass (use on-demand)</anti-pattern>
+  </anti-patterns-to-avoid>
+</plan>

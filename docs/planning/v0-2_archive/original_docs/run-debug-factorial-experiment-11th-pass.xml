@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>11th Pass Debug Factorial — Failed Conditions Only</title>
+    <branch>fix/11th-pass-pre-run-fixes</branch>
+    <date>2026-03-28</date>
+    <status>blocked-on-pre-run-fixes</status>
+    <priority>P0 — validates infrastructure fixes from pre-run-fixes.xml</priority>
+    <prerequisite>run-debug-factorial-experiment-11th-pass-pre-run-fixes.xml T8 MUST pass first</prerequisite>
+    <approach>
+      Run ONLY the conditions that failed in passes 9-10. Do NOT re-run DynUNet or
+      MambaVesselNet (20/20 succeeded). Focus on SAM3 + zero-shot + artifact upload.
+    </approach>
+  </metadata>
+
+  <context>
+    <previous-pass-results>
+      <!-- From 9th pass report + 10th pass -->
+      <model name="dynunet" status="SUCCEEDED" passes="8th+9th" count="12/12">
+        All conditions passed. No re-run needed.
+        NOTE: Checkpoints were LOST due to 413 (saved only via file_mounts workaround).
+        The 11th pass MUST verify DynUNet checkpoints land in GCS via MLflow.
+      </model>
+      <model name="mambavesselnet" status="SUCCEEDED" passes="8th" count="8/8">
+        All conditions passed. No re-run needed.
+        Same checkpoint loss caveat as DynUNet.
+      </model>
+      <model name="sam3_topolora" status="FAILED" passes="9th" count="0/8">
+        All 20 attempts FAILED. Root causes:
+        (a) OOM in check_gradient_flow() — fixed by skip_gradient_flow when gradient_checkpointing=true
+        (b) Spot preemption exhaustion (3 recoveries, then FAILED)
+        (c) 80% preemption rate on L4 spot in europe-west4
+      </model>
+      <model name="sam3_hybrid" status="NOT_SUBMITTED" passes="10th" count="0/8">
+        10th pass: job #154 ran 12+ hours. Training completed in 5 min but
+        post-training subflow + spot preemption + 413 = 12h.
+      </model>
+      <model name="sam3_vanilla_zeroshot" status="NOT_SUBMITTED" passes="10th" count="0/1">
+        Never completed. Setup failures + 413.
+      </model>
+      <model name="vesselfm_zeroshot" status="FAILED_SETUP" passes="10th" count="0/1">
+        3 attempts, all FAILED_SETUP. Likely HF download or DVC pull issues.
+      </model>
+    </previous-pass-results>
+
+    <what-changed-since-10th-pass>
+      <change>10th pass double-check: 67 new tests (NaN guards, OOM diagnostics, etc.)</change>
+      <change>11th pass pre-run fixes: MLflow GCS deployment, Docker rebuild, file_mounts removal</change>
+      <change>Cancelled all stale jobs (IDs 108-157)</change>
+    </what-changed-since-10th-pass>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: INFRASTRUCTURE VALIDATION (3 focused test jobs)            -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Infrastructure Validation — 3 Focused Jobs">
+    <description>
+      Before running any factorial conditions, validate the infrastructure fixes
+      with 3 carefully chosen test jobs. Each tests a different code path.
+      Use ON-DEMAND for SAM3 (no spot preemption during validation).
+    </description>
+
+    <job id="J1" name="dynunet-dice_ce-calibfalse-f0" purpose="Baseline + GCS artifact verify">
+      <model>dynunet</model>
+      <loss>dice_ce</loss>
+      <aux_calib>false</aux_calib>
+      <fold>0</fold>
+      <use_spot>true</use_spot>
+      <expected_duration_minutes>10</expected_duration_minutes>
+      <max_duration_minutes>30</max_duration_minutes>
+      <verification>
+        <criterion>Training completes in &lt;10 min</criterion>
+        <criterion>Checkpoint appears in gs://minivess-mlops-mlflow-artifacts/ (NOT 413)</criterion>
+        <criterion>MLflow UI shows run with metrics and artifacts</criterion>
+        <criterion>No "HttpArtifactRepository" in logs</criterion>
+      </verification>
+    </job>
+
+    <job id="J2" name="sam3_hybrid-cbdice_cldice-calibfalse-f0" purpose="SAM3 large checkpoint + GCS upload">
+      <model>sam3_hybrid</model>
+      <loss>cbdice_cldice</loss>
+      <aux_calib>false</aux_calib>
+      <fold>0</fold>
+      <use_spot>false</use_spot>
+      <note>ON-DEMAND — no spot preemption during validation. ~$0.35/hr × 0.5h = ~$0.18</note>
+      <expected_duration_minutes>25</expected_duration_minutes>
+      <max_duration_minutes>60</max_duration_minutes>
+      <verification>
+        <criterion>SAM3 weights load successfully (1468 params)</criterion>
+        <criterion>NaN guard fires on cbdice_cldice init (expected, not a bug)</criterion>
+        <criterion>Training completes 2 epochs without OOM</criterion>
+        <criterion>~900 MB checkpoint uploads to GCS without 413</criterion>
+        <criterion>VRAM peak &lt;16 GB (L4 has 24 GB)</criterion>
+      </verification>
+    </job>
+
+    <job id="J3" name="sam3_vanilla-zeroshot-minivess-f0" purpose="Zero-shot path verification">
+      <model>sam3_vanilla</model>
+      <zero_shot>true</zero_shot>
+      <eval_dataset>minivess</eval_dataset>
+      <fold>0</fold>
+      <use_spot>true</use_spot>
+      <expected_duration_minutes>15</expected_duration_minutes>
+      <max_duration_minutes>45</max_duration_minutes>
+      <verification>
+        <criterion>Zero-shot evaluation completes (no training)</criterion>
+        <criterion>eval/ metrics logged to MLflow</criterion>
+        <criterion>No 413 on metric/artifact logging</criterion>
+      </verification>
+    </job>
+
+    <gate>
+      ALL 3 jobs must succeed before proceeding to Phase 2.
+      If ANY job fails, diagnose and fix BEFORE launching the factorial.
+      Do NOT "just retry" — understand the failure.
+    </gate>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: REMAINING FACTORIAL CONDITIONS (failed in passes 9-10)     -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Failed Factorial Conditions">
+    <description>
+      Run the conditions that failed in previous passes. DynUNet and MambaVesselNet
+      are EXCLUDED (20/20 succeeded). Only SAM3 variants + zero-shot baselines.
+
+      Use ON-DEMAND for SAM3 (spot had 80% preemption rate, economically irrational).
+      Use SPOT for zero-shot baselines (short jobs, preemption recoverable).
+    </description>
+
+    <conditions>
+      <!-- SAM3 Hybrid: 0/8 from 10th pass — all 8 conditions -->
+      <condition model="sam3_hybrid" loss="cbdice_cldice" calib="true" spot="false"/>
+      <condition model="sam3_hybrid" loss="cbdice_cldice" calib="false" spot="false"/>
+      <condition model="sam3_hybrid" loss="dice_ce" calib="true" spot="false"/>
+      <condition model="sam3_hybrid" loss="dice_ce" calib="false" spot="false"/>
+      <condition model="sam3_hybrid" loss="dice_ce_cldice" calib="true" spot="false"/>
+      <condition model="sam3_hybrid" loss="dice_ce_cldice" calib="false" spot="false"/>
+      <condition model="sam3_hybrid" loss="bce_dice_05cldice" calib="true" spot="false"/>
+      <condition model="sam3_hybrid" loss="bce_dice_05cldice" calib="false" spot="false"/>
+
+      <!-- SAM3 TopoLoRA: 0/8 from 9th pass — all 8 conditions -->
+      <condition model="sam3_topolora" loss="cbdice_cldice" calib="true" spot="false"/>
+      <condition model="sam3_topolora" loss="cbdice_cldice" calib="false" spot="false"/>
+      <condition model="sam3_topolora" loss="dice_ce" calib="true" spot="false"/>
+      <condition model="sam3_topolora" loss="dice_ce" calib="false" spot="false"/>
+      <condition model="sam3_topolora" loss="dice_ce_cldice" calib="true" spot="false"/>
+      <condition model="sam3_topolora" loss="dice_ce_cldice" calib="false" spot="false"/>
+      <condition model="sam3_topolora" loss="bce_dice_05cldice" calib="true" spot="false"/>
+      <condition model="sam3_topolora" loss="bce_dice_05cldice" calib="false" spot="false"/>
+
+      <!-- Zero-shot baselines: 0/2 from 10th pass -->
+      <condition model="sam3_vanilla" zero_shot="true" eval_dataset="minivess" spot="true"/>
+      <condition model="vesselfm" zero_shot="true" eval_dataset="deepvess" spot="true"/>
+    </conditions>
+
+    <total-conditions>18</total-conditions>
+
+    <cost-estimate>
+      <!-- SAM3 on-demand L4: $0.70/hr -->
+      <!-- 16 SAM3 conditions × 25 min = 6.7 hours × $0.70 = $4.67 -->
+      <!-- 2 zero-shot spot: 15 min × $0.21 × 2 = $0.11 -->
+      <!-- Total: ~$4.78 -->
+      <sam3-on-demand>16 jobs × 25 min × $0.70/hr = ~$4.67</sam3-on-demand>
+      <zeroshot-spot>2 jobs × 15 min × $0.21/hr = ~$0.11</zeroshot-spot>
+      <total>~$4.78</total>
+      <note>Compared to 10th pass: $23.30 wasted with zero useful output</note>
+    </cost-estimate>
+
+    <monitoring>
+      <poll-interval>60s</poll-interval>
+      <duration-alarm>
+        SAM3 jobs: WARN at 45 min, CANCEL at 90 min
+        Zero-shot jobs: WARN at 30 min, CANCEL at 60 min
+      </duration-alarm>
+      <kill-switch>3+ identical failures within 5 min → cancel all same-config jobs</kill-switch>
+    </monitoring>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: RE-VERIFY DYNUNET + MAMBAVESSELNET ARTIFACTS              -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Re-verify Previously Succeeded Conditions">
+    <description>
+      DynUNet and MambaVesselNet succeeded in training but LOST checkpoints due to 413.
+      After the GCS fix, we need to verify that ARTIFACT UPLOAD works for these models.
+      We do NOT need to re-train — just re-run 1 condition each to verify the upload path.
+    </description>
+
+    <conditions>
+      <condition model="dynunet" loss="cbdice_cldice" calib="false" spot="true" purpose="Verify 68MB checkpoint uploads to GCS"/>
+      <condition model="mambavesselnet" loss="cbdice_cldice" calib="false" spot="true" purpose="Verify MambaVesselNet checkpoint uploads"/>
+    </conditions>
+
+    <note>
+      If Phase 1 J1 (DynUNet) already verified artifact upload, Phase 3 can be skipped
+      for DynUNet. Only run MambaVesselNet verification.
+    </note>
+  </phase>
+
+  <success-criteria>
+    <criterion>ALL 18 failed conditions complete successfully</criterion>
+    <criterion>ALL checkpoints visible in gs://minivess-mlops-mlflow-artifacts/</criterion>
+    <criterion>ZERO "413" or "Request Entity Too Large" in any job log</criterion>
+    <criterion>ZERO jobs exceeding max_duration_minutes</criterion>
+    <criterion>Total cost &lt; $10 (budget for debug run)</criterion>
+    <criterion>MLflow UI shows all runs with metrics and artifacts</criterion>
+  </success-criteria>
+</plan>
