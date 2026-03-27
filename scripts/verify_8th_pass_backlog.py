@@ -145,7 +145,7 @@ def check_production_yaml_uses_gar() -> None:
             _check(f"{name} exists", False, "file not found")
             continue
         content = yaml_path.read_text(encoding="utf-8")
-        has_gar = "europe-north1-docker.pkg.dev" in content
+        has_gar = "europe-west4-docker.pkg.dev" in content
         no_ghcr = "ghcr.io" not in content
         _check(f"{name} uses GAR", has_gar, "GAR registry not found")
         _check(f"{name} no GHCR", no_ghcr, "GHCR registry still present")

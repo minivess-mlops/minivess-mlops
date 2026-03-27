@@ -60,7 +60,7 @@ decisions:
     implementation: [configs/registry/dockerhub.yaml, configs/registry/gar.yaml, configs/registry/ghcr.yaml]
     per_environment:
       runpod_dev: dockerhub  # petteriteikari/minivess-base:latest (public, no auth for pull)
-      gcp_staging_prod: gar  # europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+      gcp_staging_prod: gar  # europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
       github_actions_ci: ghcr  # ghcr.io/petteriteikari/minivess-base:latest (internal CI only)
 
   secrets_management:

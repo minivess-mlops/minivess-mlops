@@ -229,7 +229,7 @@ region config excludes europe-north1 from L4 lists. A test guards this:
 Verified format that `sky.Task.from_yaml()` parses correctly:
 ```yaml
 resources:
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
   cloud: gcp
   use_spot: true
   disk_size: 100
@@ -256,8 +256,8 @@ SkyPilot treats `ordered:` as the priority-ordered resource specification list.
 
 ### Controller location
 
-`.sky.yaml` pins the controller to `gcp/europe-west1` (NOT europe-north1, which
-has CPUS_PER_VM_FAMILY=0 for n4). This is correct and should not be changed.
+`.sky.yaml` pins the controller to `gcp/europe-west4` (co-located with GAR/GCS/Cloud SQL).
+This is correct and should not be changed.
 
 ### YAML contract
 

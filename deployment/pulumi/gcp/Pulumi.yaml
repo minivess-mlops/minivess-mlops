@@ -8,15 +8,15 @@ description: >
   MinIVess MLOps — GCP Full Stack.
   Provisions GCS buckets (artifacts, DVC, checkpoints), Cloud SQL PostgreSQL,
   Artifact Registry (Docker), and Cloud Run MLflow server.
-  All same-region (europe-north1) for fast artifact uploads from SkyPilot spot GPUs.
+  All same-region (europe-west4) for fast artifact uploads from SkyPilot spot GPUs.
   One command: pulumi up.
 config:
   minivess-gcp:project:
     default: minivess-mlops
     description: GCP project ID
   minivess-gcp:region:
-    default: europe-north1
-    description: GCP region (europe-north1 = Finland, closest to Helsinki)
+    default: europe-west4
+    description: GCP region (europe-west4 = Netherlands, L4 GPU availability)
   minivess-gcp:mlflow_admin_password:
     secret: true
     description: Password for MLflow basic auth admin user

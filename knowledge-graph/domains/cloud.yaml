@@ -99,7 +99,7 @@ providers:
     role: "Production-grade. Full managed cloud stack. All infrastructure via Pulumi IaC."
     status: active
     project: minivess-mlops
-    region: europe-north1  # Finland — closest to Helsinki
+    region: europe-west4  # Netherlands — L4 GPU availability, co-located with GAR/GCS
     compute: "SkyPilot (cloud: gcp), L4 spot preferred"
     storage: "GCS (Google Cloud Storage)"
     mlflow: "Cloud Run MLflow server (optional, enable_cloud_run config)"
@@ -132,7 +132,7 @@ providers:
     # Docker registry (Artifact Registry)
     docker_registry:
       type: gar  # Google Artifact Registry
-      url: europe-north1-docker.pkg.dev/minivess-mlops/minivess
+      url: europe-west4-docker.pkg.dev/minivess-mlops/minivess
       config: configs/registry/gar.yaml
 
     # Cloud SQL

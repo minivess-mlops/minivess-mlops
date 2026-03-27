@@ -6,7 +6,7 @@
 #
 # ROOT CAUSE FIX: Controller was zone-hopping across US (us-central1-b → us-east1-d
 # → us-east4-b → us-east1-c) with "[Errno 101] Network is unreachable" because
-# config only set cloud: gcp with NO region. Fix: pin to europe-north1.
+# config only set cloud: gcp with NO region. Fix: pin to europe-west4.
 
 # Restrict to project's two cloud providers (CLAUDE.md: two providers only).
 allowed_clouds:
@@ -17,8 +17,8 @@ allowed_clouds:
 jobs:
   controller:
     resources:
-      # europe-west1 (Netherlands): n4 quota available. europe-north1 has CPUS_PER_VM_FAMILY=0 for n4.
-      # TODO: Request n4 quota increase in europe-north1 to co-locate controller with data.
-      infra: gcp/europe-west1
-      cpus: 4+
+      # europe-west4 (Netherlands): co-located with GAR, GCS, Cloud SQL.
+      infra: gcp/europe-west4
+      cpus: 2+
+      memory: 4+
       disk_size: 50

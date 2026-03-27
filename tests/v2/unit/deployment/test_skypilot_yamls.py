@@ -127,10 +127,14 @@ class TestDockerImage:
 
     def test_image_id_points_to_gar(self) -> None:
         """Docker image must be from GAR (same region as training VMs)."""
+        gar_config = yaml.safe_load(
+            Path("configs/registry/gar.yaml").read_text(encoding="utf-8")
+        )
+        expected_server = gar_config["server"]
         config = _load_yaml(FACTORIAL_YAML)
         image_id = config.get("resources", {}).get("image_id", "")
-        assert "europe-north1-docker.pkg.dev" in image_id, (
-            f"Image must be from GAR europe-north1: {image_id}"
+        assert expected_server in image_id, (
+            f"Image must be from GAR {expected_server}: {image_id}"
         )
 
 

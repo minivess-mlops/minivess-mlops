@@ -17,7 +17,7 @@
 # Requirements:
 #   - .env file with HF_TOKEN, GCP credentials
 #   - SkyPilot configured for GCP: sky check gcp
-#   - Docker image pushed to GAR: europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+#   - Docker image pushed to GAR: europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
 #   - DVC data on GCS: gs://minivess-mlops-dvc-data
 #
 # This script is PURE sky jobs launch calls in a loop.

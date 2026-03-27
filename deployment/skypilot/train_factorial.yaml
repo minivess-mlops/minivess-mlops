@@ -25,11 +25,11 @@
 name: minivess-factorial
 
 resources:
-  # GAR image — Docker registry in europe-north1.
+  # GAR image — Docker registry in europe-west4.
   # Cross-region GAR pull adds ~5-10 min but is acceptable vs 12+ hr PENDING.
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. T4 BANNED. A100 requires explicit user authorization.
-  # EU-preferred, US-fallback: europe-north1 has NO L4 GPUs (root cause of 12+ hr PENDING).
+  # EU-preferred, US-fallback: europe-west4 has NO L4 GPUs (root cause of 12+ hr PENDING).
   # Verified with sky.Task.from_yaml() — ordered: parses correctly.
   cloud: gcp
   use_spot: true

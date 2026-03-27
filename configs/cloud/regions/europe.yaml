@@ -1,10 +1,10 @@
-# EU-only regions — lowest egress cost, closest to GCS europe-north1.
-# NOTE: europe-north1 itself has NO L4 GPUs.
+# EU-only regions — lowest egress cost, closest to GCS europe-west4.
+# NOTE: europe-west4 itself has NO L4 GPUs.
 #
 # Override per-lab: create configs/cloud/regions/lab_<name>.yaml
 # Usage: set region_config: europe in configs/factorial/<experiment>.yaml
 
-description: "EU regions only — lowest latency to GCS europe-north1"
+description: "EU regions only — lowest latency to GCS europe-west4"
 
 regions:
   gcp:

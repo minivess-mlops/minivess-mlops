@@ -62,9 +62,9 @@ resources:
     - accelerators: L4:1
       use_spot: false    # on-demand fallback
   cloud: gcp
-  region: europe-north1
+  region: europe-west4
   disk_size: 100
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/minivess-train:latest
+  image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/minivess-train:latest
 ```
 
 SkyPilot tries resources in order: spot L4 first, then on-demand L4 if spot is

@@ -20,8 +20,8 @@ def _make_skypilot_env() -> dict[str, str]:
         "SKYPILOT_NUM_GPUS_PER_NODE": "1",
         "SKYPILOT_ACCELERATOR_TYPE": "L4",
         "SKYPILOT_CLOUD": "gcp",
-        "SKYPILOT_REGION": "europe-north1",
-        "SKYPILOT_ZONE": "europe-north1-b",
+        "SKYPILOT_REGION": "europe-west4",
+        "SKYPILOT_ZONE": "europe-west4-b",
         "SKYPILOT_INSTANCE_TYPE": "g2-standard-4",
         "SKYPILOT_USE_SPOT": "True",
     }
@@ -54,7 +54,7 @@ class TestCostParamsLoggedToMlflow:
 
         assert params["cost/instance_type"] == "g2-standard-4"
         assert params["cost/gpu_type"] == "L4"
-        assert params["cost/region"] == "europe-north1"
+        assert params["cost/region"] == "europe-west4"
         assert params["cost/provider"] == "gcp"
 
 

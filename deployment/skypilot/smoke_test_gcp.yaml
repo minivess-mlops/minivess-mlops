@@ -2,7 +2,7 @@
 #
 # GCP provides VM-based instances with Docker preinstalled.
 # Spot instances: 60-91% cheaper than on-demand.
-# Same-region as GCS/Cloud SQL/MLflow (europe-north1, Finland).
+# Same-region as GCS/Cloud SQL/MLflow (europe-west4, Finland).
 # ALL infrastructure on GCP — no cross-Atlantic artifact uploads.
 #
 # Launch:
@@ -30,7 +30,7 @@ name: minivess-gcp-smoke-test
 
 resources:
   # Docker image from GCP Artifact Registry (same-region = fastest pulls, ~15 min for 9 GB)
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. A100 removed — unauthorized. T4 BANNED (no BF16).
   # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
   accelerators: L4:1

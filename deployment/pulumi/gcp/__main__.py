@@ -1,6 +1,6 @@
 """MinIVess MLOps — GCP Full Stack via Pulumi.
 
-Deploys same-region infrastructure in europe-north1 (Finland):
+Deploys same-region infrastructure in europe-west4 (Netherlands):
   - GCS buckets (MLflow artifacts, DVC data, checkpoints)
   - Cloud SQL PostgreSQL (MLflow backend + Optuna)
   - Artifact Registry (Docker images for SkyPilot)
@@ -27,7 +27,7 @@ import pulumi_gcp as gcp
 
 config = pulumi.Config("minivess-gcp")
 project = config.get("project") or "minivess-mlops"
-region = config.get("region") or "europe-north1"
+region = config.get("region") or "europe-west4"
 mlflow_password = config.require_secret("mlflow_admin_password")
 db_password = config.require_secret("db_password")
 
@@ -141,7 +141,7 @@ docker_repo = gcp.artifactregistry.Repository(
 )
 
 # GAR remote repository cache — pulls nvidia/cuda base layers from Docker Hub
-# and caches them in europe-north1 (same-region as training VMs).
+# and caches them in europe-west4 (same-region as training VMs).
 # Cuts Docker pull from ~10 min to <30s on subsequent SkyPilot launches.
 # See: docs/planning/docker-pull-runpod-provisioning-mlflow-cloud-run-multipart-upload-report.md
 docker_remote_repo = gcp.artifactregistry.Repository(
@@ -152,7 +152,7 @@ docker_remote_repo = gcp.artifactregistry.Repository(
     mode="REMOTE_REPOSITORY",
     description="Docker Hub remote repo cache (nvidia base layers, same-region)",
     remote_repository_config=gcp.artifactregistry.RepositoryRemoteRepositoryConfigArgs(
-        description="Caches Docker Hub pulls in europe-north1",
+        description="Caches Docker Hub pulls in europe-west4",
         docker_repository=gcp.artifactregistry.RepositoryRemoteRepositoryConfigDockerRepositoryArgs(
             public_repository="DOCKER_HUB",
         ),

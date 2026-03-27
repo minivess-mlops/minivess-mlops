@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 PREFLIGHT = Path("scripts/preflight_gcp.py")
 
@@ -137,8 +138,12 @@ class TestCheckDockerImageMocked:
         with patch.object(mod, "_run", return_value=mock):
             ok, msg = mod.check_docker_image()
         assert ok is True
-        # Verify the message references the actual GAR image
-        assert "europe-north1-docker.pkg.dev" in msg
+        # Verify the message references the actual GAR image (read from config)
+        gar_config = yaml.safe_load(
+            Path("configs/registry/gar.yaml").read_text(encoding="utf-8")
+        )
+        expected_server = gar_config["server"]
+        assert expected_server in msg
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +201,7 @@ class TestCheckControllerHealthMocked:
         mod = _import_preflight()
         mock = MagicMock(
             returncode=0,
-            stdout="sky-jobs-controller-abc123  UP  gcp  n2-standard-4  europe-north1\n",
+            stdout="sky-jobs-controller-abc123  UP  gcp  n2-standard-4  europe-west4\n",
         )
         with patch.object(mod, "_run", return_value=mock):
             ok, msg = mod.check_controller_health()

@@ -9,7 +9,7 @@ description: "EU-preferred, US-fallback — best L4 spot availability"
 regions:
   gcp:
     L4:
-      # EU regions first (closest to GCS data in europe-north1)
+      # EU regions first (closest to GCS data in europe-west4)
       - region: europe-west4     # Netherlands — 3 zones, best EU L4 pool
         zones: 3
       - region: europe-west1     # Belgium — 2 zones

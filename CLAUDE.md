@@ -95,9 +95,9 @@ Details: `deployment/CLAUDE.md` (Docker, volumes, GPU, compose files).
 
 **GCP Project Details** (see `deployment/pulumi/gcp/CLAUDE.md` for full reference):
 - **Project**: `minivess-mlops`
-- **Region**: `europe-north1` (Finland)
+- **Region**: `europe-west4` (Netherlands)
 - **GCS Buckets**: `minivess-mlops-dvc-data`, `minivess-mlops-mlflow-artifacts`, `minivess-mlops-checkpoints`
-- **Docker Registry**: GAR (`europe-north1-docker.pkg.dev/minivess-mlops/minivess`)
+- **Docker Registry**: GAR (`europe-west4-docker.pkg.dev/minivess-mlops/minivess`)
 - **IaC**: Pulumi (`deployment/pulumi/gcp/`)
 - **Setup guide**: `docs/planning/gcp-setup-tutorial.md`
 

@@ -7,7 +7,7 @@ Multi-region rotation (Lambda): automatically tries all 17 Lambda regions,
 starting from unpopular EU/Asia regions where capacity is more likely available.
 3 retries per region before moving to the next. Zero manual work required.
 
-GCP: Uses GAR (same-region as GCS/Cloud SQL/MLflow in europe-north1).
+GCP: Uses GAR (same-region as GCS/Cloud SQL/MLflow in europe-west4).
 No GHCR auth needed — GAR image is public.
 
 Usage:

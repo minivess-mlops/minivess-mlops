@@ -51,8 +51,14 @@ class TestDockerImageConsistency:
 
     def test_gar_image_source_constant_exists(self) -> None:
         """preflight_gcp.py must define GAR_IMAGE constant."""
+        gar_config = yaml.safe_load(
+            Path("configs/registry/gar.yaml").read_text(encoding="utf-8")
+        )
+        expected_server = gar_config["server"]
         gar_image = _extract_gar_image()
-        assert "europe-north1-docker.pkg.dev" in gar_image
+        assert expected_server in gar_image, (
+            f"GAR_IMAGE must use server from gar.yaml ({expected_server}): {gar_image}"
+        )
         assert "minivess-mlops" in gar_image
 
     @pytest.mark.parametrize("yaml_path", GAR_SKYPILOT_YAMLS, ids=lambda p: p.name)

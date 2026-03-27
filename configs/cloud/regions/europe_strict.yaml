@@ -1,0 +1,13 @@
+# Single-region europe-west4 — same region as GAR, GCS, Cloud SQL.
+# Zero cross-region egress. Lowest latency to all GCP infrastructure.
+#
+# Use for debug runs where cost predictability matters more than availability.
+# For production runs with US fallback, use europe_us.yaml.
+
+description: "Single-region europe-west4 — zero cross-region egress"
+
+regions:
+  gcp:
+    L4:
+      - region: europe-west4     # Netherlands — 3 zones, co-located with GAR/GCS
+        zones: 3
