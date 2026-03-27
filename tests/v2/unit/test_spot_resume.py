@@ -6,8 +6,13 @@ epoch_latest.yaml for spot recovery on GCP.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 
+import pytest
+import torch
 import yaml
 
 
@@ -79,6 +84,84 @@ class TestCheckResumeState:
 
         result = check_resume_state_task(ckpt_dir)
         assert result is None  # FINISHED, not RUNNING → stale
+
+
+class TestResumeMLflowRetry:
+    """check_resume_state_task must retry MLflow and fall back to checkpoint."""
+
+    def test_resume_mlflow_unreachable_with_checkpoint(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When MLflow is unreachable but checkpoint exists, resume from file."""
+        from minivess.orchestration.flows.train_flow import check_resume_state_task
+
+        ckpt_dir = tmp_path / "checkpoints"
+        ckpt_dir.mkdir()
+
+        state = {"epoch": 25, "mlflow_run_id": "fake-run-id", "checkpoint_dir": str(ckpt_dir)}
+        (ckpt_dir / "epoch_latest.yaml").write_text(yaml.dump(state), encoding="utf-8")
+        torch.save({"model_state_dict": {}}, ckpt_dir / "epoch_latest.pth")
+
+        with (
+            patch("mlflow.get_run", side_effect=ConnectionError("MLflow down")),
+            caplog.at_level(logging.WARNING),
+        ):
+            result = check_resume_state_task(ckpt_dir)
+
+        assert result is not None, "Should resume from checkpoint when MLflow unreachable"
+        assert result["epoch"] == 25
+        assert any("unreachable" in r.message.lower() for r in caplog.records)
+
+    def test_resume_mlflow_unreachable_no_checkpoint(self, tmp_path: Path) -> None:
+        """When MLflow is unreachable and no checkpoint, start fresh."""
+        from minivess.orchestration.flows.train_flow import check_resume_state_task
+
+        ckpt_dir = tmp_path / "checkpoints"
+        ckpt_dir.mkdir()
+
+        state = {"epoch": 25, "mlflow_run_id": "fake-run-id"}
+        (ckpt_dir / "epoch_latest.yaml").write_text(yaml.dump(state), encoding="utf-8")
+        # No epoch_latest.pth file
+
+        with patch("mlflow.get_run", side_effect=ConnectionError("MLflow down")):
+            result = check_resume_state_task(ckpt_dir)
+
+        assert result is None, "Should start fresh when MLflow unreachable and no checkpoint"
+
+    def test_resume_mlflow_transient_failure_then_success(self, tmp_path: Path) -> None:
+        """If MLflow fails once then succeeds, resume normally."""
+        import mlflow
+
+        from minivess.orchestration.flows.train_flow import check_resume_state_task
+
+        mlflow_dir = tmp_path / "mlruns"
+        mlflow.set_tracking_uri(str(mlflow_dir))
+        mlflow.set_experiment("retry_test")
+
+        run = mlflow.start_run()
+        run_id = run.info.run_id
+
+        state = {"epoch": 15, "mlflow_run_id": run_id}
+        ckpt_dir = tmp_path / "checkpoints"
+        ckpt_dir.mkdir()
+        (ckpt_dir / "epoch_latest.yaml").write_text(yaml.dump(state), encoding="utf-8")
+
+        original_get_run = mlflow.get_run
+        call_count = 0
+
+        def flaky_get_run(rid: str) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("Transient failure")
+            return original_get_run(rid)
+
+        with patch("mlflow.get_run", side_effect=flaky_get_run):
+            result = check_resume_state_task(ckpt_dir)
+
+        assert result is not None, "Should resume after transient MLflow failure"
+        assert result["epoch"] == 15
+        mlflow.end_run()
 
 
 class TestResumeWiringInFlow:

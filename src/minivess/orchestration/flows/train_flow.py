@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -315,16 +316,45 @@ def check_resume_state_task(checkpoint_dir: Path) -> dict[str, Any] | None:
     if not run_id:
         return None
 
-    # Validate the referenced MLflow run is still RUNNING
-    try:
-        import mlflow
+    # Validate the referenced MLflow run is still RUNNING (with retry for spot recovery)
+    import mlflow
 
-        run = mlflow.get_run(run_id)
-        if run.info.status == "RUNNING":
-            return state
-    except Exception:
-        logger.debug("Could not fetch MLflow run %s — treating as stale", run_id)
+    _RESUME_MAX_RETRIES = 3
+    for attempt in range(_RESUME_MAX_RETRIES):
+        try:
+            run = mlflow.get_run(run_id)
+            if run.info.status == "RUNNING":
+                return state
+            else:
+                return None  # Run ended, don't resume
+        except Exception:
+            if attempt < _RESUME_MAX_RETRIES - 1:
+                backoff = 10 * (attempt + 1)
+                logger.warning(
+                    "MLflow unreachable (attempt %d/%d) for run %s — retrying in %ds",
+                    attempt + 1,
+                    _RESUME_MAX_RETRIES,
+                    run_id,
+                    backoff,
+                )
+                time.sleep(backoff)
+            else:
+                logger.warning(
+                    "MLflow unreachable after %d attempts for run %s",
+                    _RESUME_MAX_RETRIES,
+                    run_id,
+                )
 
+    # Checkpoint-based fallback when MLflow is down
+    epoch_pth = checkpoint_dir / "epoch_latest.pth"
+    if epoch_pth.exists():
+        logger.warning(
+            "MLflow unreachable but checkpoint exists at %s — resuming from file",
+            epoch_pth,
+        )
+        return state
+
+    logger.warning("MLflow unreachable and no checkpoint — starting fresh")
     return None
 
 
