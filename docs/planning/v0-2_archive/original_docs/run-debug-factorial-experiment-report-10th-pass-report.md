@@ -7,15 +7,18 @@
 
 ## Executive Summary
 
-- **Total cells**: 18 (all submitted)
-- **Succeeded**: 0 (jobs queuing — 1 L4 GPU quota, sequential execution)
-- **Failed**: 0
-- **Cost**: TBD (estimated: ~$5 per preflight)
-- **Pre-launch issues found**: 6 (stale Docker, stale loop, network instability, duplicate submissions, HF 404, HF login)
-- **Test gaps identified**: 63 across 6 domains (12 CRITICAL, 18 HIGH) — via 7 reviewer agents
+- **Total cells**: 18 submitted + 14 DynUNet/MambaVesselNet from earlier launch
+- **Succeeded**: 0
+- **Running**: 1 (job 146: sam3_hybrid-dice_ce-calibtrue-f0, 1h 28m execution)
+- **Failed**: 2 (jobs 113, 116: DynUNet cbdice_cldice — **NaN loss at init**)
+- **Pending**: 31
+- **Cost**: TBD (estimated ~$8-10 for full debug pass)
+- **Pre-launch issues found**: 7 (stale Docker, stale loop, network, duplicates, HF 404, HF login, **NaN loss**)
+- **Test gaps identified**: 115+ across 8 domains (14 CRITICAL, 20+ HIGH) — via 11 reviewer agents
 - **New tests written**: 88 (staging: 6558 passed, 0 failed, 0 skipped)
 - **Bugs fixed**: 3 (HF repo regression, stale loop, stale Docker image)
-- **Status**: MONITORING — 36 jobs queuing on GCP L4 spot (tight market)
+- **NEW bug discovered**: DynUNet + cbdice_cldice → NaN at initialization (job 116/113)
+- **Status**: Day 2 — L4 spot market extremely tight, 13+ hr PENDING queues
 
 ## Pre-Launch Validation
 
@@ -552,6 +555,104 @@ The test infrastructure passed all robustness checks:
 | P2 | GraphTopologyLoss all zero weights | loss_functions.py:512 | Silent zero loss | LOW |
 | P2 | GCS bucket consistency | 13 files | Wrong data source | LOW |
 
+## Production Readiness Analysis (Wave 4 — 3 Agents)
+
+### NEW BUG: NaN Loss at Init for DynUNet + cbdice_cldice
+
+**Root cause**: `SoftclDiceLoss.forward()` in MONAI's `cldice.py` produces NaN
+when soft skeleton computation yields near-zero values with random model weights.
+
+**Mechanism** (confirmed by code review):
+1. Random logits → uniform ~0.5 probabilities for all classes
+2. `soft_skel()` applies 10 iterations of morphological erosion → near-zero skeleton
+3. `tprec = (sum(skel_pred * y_true) + smooth) / (sum(skel_pred) + smooth)` → ~1.0
+4. `tsens = (sum(skel_true * y_pred) + smooth) / (sum(skel_true) + smooth)` → ~1.0
+5. `cl_dice = 1.0 - 2.0 * (tprec * tsens) / (tprec + tsens)` → NaN from FP32 rounding
+
+**Why it breaks**: With 98% background brain vessel data, foreground skeleton is
+extremely thin. Random predictions have no spatial structure → degenerate skeleton.
+The combination of class-balanced dice + clDice is particularly fragile at init.
+
+**Why dice_ce doesn't break**: Standard dice uses `(2*intersection + smooth) / (union + smooth)`.
+No division-by-zero possible because union ≥ smooth > 0.
+
+**Mitigation options**:
+1. Increase smooth constant in SoftclDiceLoss (from 1e-5 to 1e-3)
+2. Skip loss_sanity check for clDice-containing losses (they stabilize after ~5 epochs)
+3. Add NaN guard: `if torch.isnan(cl_dice): return torch.tensor(0.0, requires_grad=True)`
+4. Initialize model weights with better strategy (not uniform random)
+
+**Test to write**: `test_cbdice_cldice_nan_at_init` — create random logits + vessel GT,
+compute CbDiceClDiceLoss, verify loss is finite. This would have caught this on day 1.
+
+### Scaling: Debug → Production
+
+| Dimension | Debug | Production | Risk | Mitigation |
+|-----------|-------|-----------|------|------------|
+| Epochs | 2 | 50 | 25x longer wall time per cell | Checkpoint resume every epoch |
+| Data | 23/12 train/val | 47/23 | 2x memory (~4.7 GB, fits L4) | Adaptive cache rate |
+| Folds | 1 | 3 | 3x total jobs (54 cells + 6 zero-shot) | run_factorial.sh handles multi-fold |
+| Total jobs | ~18 | ~60 | Sequential on 1 L4 = weeks | **Request quota increase** |
+| Cost | ~$5 | ~$3 (L4 spot very cheap) | Low | Cost logging per cell |
+| Wall time | ~17 GPU-hrs | ~500 GPU-hrs at 1 L4 = 21 days | **CRITICAL BOTTLENECK** | Quota increase to 4+ L4 |
+| Preemptions | ~2 in debug | ~15 expected at 15% rate | Resume from epoch checkpoint | GCS mount persists |
+| SWAG | 2//5=0 → 2 | 50//5=10 epochs | Untested at 10 epochs | Write SWAG scaling test |
+
+**GPU quota is the #1 bottleneck**: 60 sequential jobs on 1 L4 = 21+ days. With 4 L4s
+in parallel, this drops to ~5 days. Request quota increase BEFORE production launch.
+
+### Spot Preemption Resilience — MOSTLY READY
+
+| Capability | Status | Gap |
+|-----------|--------|-----|
+| Epoch-level checkpoints | IMPLEMENTED | Atomic write (pth then yaml) |
+| GCS persistence | IMPLEMENTED | MOUNT_CACHED survives preemption |
+| Resume from epoch N | IMPLEMENTED | Skips epochs 0..N-1 correctly |
+| MLflow run status check | IMPLEMENTED | Must be RUNNING to resume |
+| SkyPilot recovery | EXIT 33/34 → EAGER_NEXT_REGION | Max 3 restarts |
+
+**Critical gaps for production:**
+1. **MLflow unreachable → silent fresh start**: No retry on resume check. If Cloud Run
+   is slow during recovery, all 25 completed epochs are re-run.
+2. **MOUNT_CACHED async lag**: If training writes checkpoints faster than GCS upload,
+   preemption loses the latest checkpoint. Risk: low (epochs are 10+ min each).
+3. **No per-cell cost tracking**: Preempted cells that restart waste partial credits.
+   No reporting mechanism for total cost including preemption waste.
+
+### Training Log Observability Gap (User-Identified)
+
+**Current state**: `sky jobs logs <ID> --no-follow` streams logs from the controller.
+This is:
+- Slow to connect (20-30s SSH + log pipe setup)
+- Blocks the calling process (no timeout, must be killed)
+- Unstructured text (ANSI codes, PID prefixes, no JSON/JSONL)
+- Not LLM-parseable (interleaved stderr/stdout, progress bars)
+
+**Production impact**: With 60+ jobs, manual log inspection is infeasible. Claude Code
+spent 10+ minutes in this session just trying to get logs from a RUNNING job.
+
+**Improvement opportunities**:
+1. **JSONL structured logging**: Emit key events as JSON lines (epoch start/end, loss,
+   VRAM, validation DSC) to a separate file. LLM reads JSONL, not raw logs.
+2. **Heartbeat file**: Write `heartbeat.json` to GCS mount every 60s with:
+   `{"epoch": 12, "loss": 0.45, "vram_gb": 9.2, "wall_time_s": 3600}`
+3. **Summary artifact**: At job end, write `run_summary.json` to GCS with all key metrics.
+   Claude Code reads this instead of streaming full logs.
+4. **SkyPilot log API**: Instead of `sky jobs logs`, query the controller's API directly
+   with filters (last N lines, grep pattern).
+
 ## Go/No-Go Decision
 
-<!-- After all 18 cells: ready for full production run? -->
+### Debug Pass: NOT YET COMPLETE
+- 1/18 target cells actively running (job 146: sam3_hybrid, 1h 36m)
+- 2 DynUNet cells FAILED (NaN loss — new bug)
+- 31 cells still PENDING (L4 spot market very tight)
+- Need at least 1 SAM3 SUCCEEDED before declaring debug pass ready
+
+### Production Launch Prerequisites
+1. **GPU quota increase**: Request 4+ L4 GPUs (current: 1 = 21 days)
+2. **NaN loss fix**: cbdice_cldice init NaN must be resolved (affects 25% of cells)
+3. **All 18 target cells SUCCEEDED** in debug pass
+4. **JSONL structured logging** for production observability
+5. **MLflow resume retry** for preemption resilience
+6. **Docker image verification gate** in run_factorial.sh (not just preflight)
