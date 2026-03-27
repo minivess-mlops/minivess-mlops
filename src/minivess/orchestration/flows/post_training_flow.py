@@ -656,19 +656,36 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
     import torch
 
     if not checkpoint_paths:
-        return
+        msg = "Cannot average 0 checkpoints — checkpoint_paths is empty."
+        raise ValueError(msg)
 
     # Load first checkpoint as base
     avg_state = torch.load(checkpoint_paths[0], weights_only=True)
     state_dict = avg_state.get("model_state_dict", avg_state)
 
+    # Key mismatch detection across all checkpoints
+    all_keys = [set(state_dict.keys())]
+
     # Accumulate remaining checkpoints
     for ckpt_path in checkpoint_paths[1:]:
         loaded = torch.load(ckpt_path, weights_only=True)
         other_state = loaded.get("model_state_dict", loaded)
+        all_keys.append(set(other_state.keys()))
         for key in state_dict:
             if key in other_state:
                 state_dict[key] = state_dict[key] + other_state[key]
+
+    # Warn on key mismatch between checkpoints
+    if len(all_keys) > 1:
+        union = set.union(*all_keys)
+        intersection = set.intersection(*all_keys)
+        if union != intersection:
+            missing = union - intersection
+            logger.warning(
+                "Checkpoint key mismatch: %d keys not in all folds: %s",
+                len(missing),
+                list(missing)[:5],
+            )
 
     # Average
     n = len(checkpoint_paths)
