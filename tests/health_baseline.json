@@ -1,0 +1,27 @@
+{
+  "updated": "2026-03-28T04:25:20.126420+00:00",
+  "updated_by_commit": "bbba3fe",
+  "schema_version": 1,
+  "test_staging": {
+    "collected": 7031,
+    "passed": 6691,
+    "failed": 0,
+    "skipped": 0,
+    "deselected": 729,
+    "known_skips": {}
+  },
+  "ruff": {
+    "error_count": 0
+  },
+  "deployment_state": {
+    "docker_base_gpu_commit": "f5a1d41",
+    "docker_base_gpu_pushed_to_gar": true,
+    "pulumi_last_up_commit": "86a5ef1",
+    "pulumi_pending_changes": false,
+    "pyproject_toml_sha256": "017e404bd81158de675d0a473e3bba08b64d897b9b4b762b3bae8ba545d050d3",
+    "uv_lock_sha256": "d65e18c2aa948e13d0cf16c3c429a06549f045b067ee887b53c13001e3f2b8de",
+    "gar_region": "europe-west4",
+    "cloud_run_url": "https://minivess-mlflow-a7w6hliydq-ez.a.run.app"
+  },
+  "failure_recurrence": {}
+}

@@ -88,6 +88,22 @@ test-prod:
 	  --ignore=tests/v2/cloud/ \
 	  --timeout=300
 
+# Staging without -x: shows ALL failures (for session health check, not whac-a-mole)
+test-staging-no-stop:
+	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -q --maxfail=200 \
+	  -m "not model_loading and not slow and not integration and not cloud_mlflow and not skypilot_cloud and not gpu" \
+	  --ignore=tests/v2/quasi_e2e/ \
+	  --ignore=tests/v2/cloud/ \
+	  --timeout=60 --tb=line
+
+# Health check: run at session start to surface ALL issues before new work.
+session-health-check:  ## Run session health check (all tests, lint, deployment staleness)
+	@bash scripts/session_health_check.sh
+
+# Health baseline: update after fixing lint/tests or after Docker/Pulumi deploy.
+health-baseline-update:  ## Update tests/health_baseline.json with current state
+	@uv run python scripts/update_health_baseline.py
+
 # E2E: Full pipeline via Docker. Requires Docker daemon, GPU, MiniVess data,
 # .env configured (from .env.example), Docker images built, minivess-network created.
 # Runtime: ~40-60 min. Uses pytest-docker to manage Docker Compose lifecycle.
