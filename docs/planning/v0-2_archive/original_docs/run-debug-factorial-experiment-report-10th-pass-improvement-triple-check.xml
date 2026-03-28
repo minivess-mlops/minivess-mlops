@@ -1,0 +1,1499 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>10th Pass Triple-Check: Comprehensive Verification of 27 Code Fixes + MLflow 413 + FinOps Migration</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-27</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — gates 11th pass production launch</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <approach>VERIFY-ONLY: read source, read tests, run tests. No new code.</approach>
+    <estimated-time>2-3 hours</estimated-time>
+    <verification>Every task has: (1) source file check, (2) test file check, (3) test run command</verification>
+    <prior-plans>
+      <plan ref="10th-pass-improvement.xml">12 original tasks (T1-T12) — loss NaN, MLflow retry, empty guards, checkpoint safety, observability, consistency</plan>
+      <plan ref="10th-pass-improvement-double-check.xml">15 double-check tasks (T1-T15) — FP16 dtype, HL1ACE NaN, AuxCalib isolation, OOM diagnostics, all-background, memory, Betti matching</plan>
+      <plan ref="mlflow-constant-issue-with-413-mlflow-and-claude-refusal-to-fix.xml">MLflow 413 root cause: 5 layers (dependency, Docker, Pulumi, file_mounts, runtime)</plan>
+      <plan ref="run-debug-factorial-experiment-11th-pass-finops-execution.xml">FinOps: migrate all GCP resources from europe-north1 to europe-west4</plan>
+    </prior-plans>
+  </metadata>
+
+  <context>
+    <summary>
+      This plan is a PURE VERIFICATION pass. It creates zero new code.
+      It reads existing source files, reads existing test files, and runs
+      existing tests to confirm all prior fixes are in place and passing.
+
+      Three categories:
+        Category 1: 27 code fixes from the 10th pass + double-check plans
+        Category 2: MLflow 413 fix (6 layers)
+        Category 3: FinOps europe-west4 migration
+
+      Every verification task follows the same structure:
+        1. SOURCE CHECK — read the source file, confirm the fix/guard exists
+        2. TEST CHECK — read the test file, confirm coverage exists
+        3. RUN — execute the test file, confirm it passes
+        4. VERDICT — PASS/FAIL with specific evidence
+    </summary>
+
+    <cold-start-instructions>
+      To execute this plan from a fresh session:
+
+      1. Read THIS file completely
+      2. Read CLAUDE.md (project rules)
+      3. Invoke /self-learning-iterative-coder
+      4. Execute each verification task in order
+      5. Report a PASS/FAIL summary table at the end
+
+      This is a READ-ONLY verification plan. If any check FAILS, do NOT fix it
+      inline — create a GitHub issue with the failure details and continue to the
+      next task. The goal is a complete inventory of what works and what does not.
+    </cold-start-instructions>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 1: 10th PASS ORIGINAL PLAN (12 tasks, T1-T12)            -->
+  <!-- ================================================================== -->
+  <category id="1A" name="10th Pass Original — 12 Code Fixes">
+    <description>
+      Verify ALL 12 fixes from run-debug-factorial-experiment-report-10th-pass-improvement.xml.
+      Grouped by theme for efficient verification.
+    </description>
+
+    <!-- THEME: Loss NaN Guards -->
+    <phase id="1A.1" name="Loss NaN Guards (T1, T6, T12)">
+
+      <task id="V1.01" status="NOT_STARTED" verifies="10th-pass T1">
+        <title>VERIFY: NaN loss guard for cbdice_cldice (VesselCompoundLoss)</title>
+        <source-check>
+          <file>src/minivess/pipeline/loss_functions.py</file>
+          <what>Lines ~120-125: isnan/isinf guard on cldice_loss in VesselCompoundLoss.forward()</what>
+          <command>uv run python -c "
+import ast, pathlib
+src = pathlib.Path('src/minivess/pipeline/loss_functions.py').read_text(encoding='utf-8')
+tree = ast.parse(src)
+found = any('isnan' in ast.dump(node) for node in ast.walk(tree) if isinstance(node, ast.Call))
+print('NaN guard found:', found)
+"</command>
+          <expected>NaN guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/test_loss_nan_check.py</file>
+          <what>Tests for cbdice_cldice with all-background labels producing finite loss</what>
+          <command>uv run python -c "
+import ast, pathlib
+src = pathlib.Path('tests/v2/unit/test_loss_nan_check.py').read_text(encoding='utf-8')
+tree = ast.parse(src)
+funcs = [n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+nan_tests = [f for f in funcs if 'nan' in f.lower() or 'all_background' in f.lower() or 'cbdice' in f.lower()]
+print('NaN-related tests:', nan_tests)
+print('Count:', len(nan_tests))
+"</command>
+          <expected>At least 1 test covering NaN/all-background for cbdice_cldice</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/test_loss_nan_check.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED, 0 failures</expected>
+        </run>
+      </task>
+
+      <task id="V1.02" status="NOT_STARTED" verifies="10th-pass T6">
+        <title>VERIFY: SkeletonRecallLoss warns on empty skeleton fallback</title>
+        <source-check>
+          <file>src/minivess/pipeline/vendored_losses/skeleton_recall.py</file>
+          <what>Warning logged when skeletonize() returns empty and fallback to full foreground mask</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/pipeline/vendored_losses/skeleton_recall.py').read_text(encoding='utf-8')
+has_warning = 'logger.warning' in src and ('skeleton' in src.lower() and 'empty' in src.lower() or 'fallback' in src.lower())
+print('Skeleton empty warning found:', has_warning)
+"</command>
+          <expected>Skeleton empty warning found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_skeleton_recall_edge_cases.py</file>
+          <what>Tests for thin structure warning and normal structure no-warning</what>
+          <command>uv run pytest tests/v2/unit/losses/test_skeleton_recall_edge_cases.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 1 test collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_skeleton_recall_edge_cases.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V1.03" status="NOT_STARTED" verifies="10th-pass T12">
+        <title>VERIFY: Topology loss edge case tests (all-zero weights, ccDice, BettiLoss)</title>
+        <source-check>
+          <file>tests/v2/unit/losses/test_topology_loss_edge_cases.py</file>
+          <what>Parametrized edge case tests for topology losses</what>
+          <command>uv run pytest tests/v2/unit/losses/test_topology_loss_edge_cases.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple tests collected covering edge cases</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_topology_loss_edge_cases.py</file>
+          <what>Same file — it IS the test</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_topology_loss_edge_cases.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Checkpoint Safety -->
+    <phase id="1A.2" name="Checkpoint Safety (T4, T7)">
+
+      <task id="V1.04" status="NOT_STARTED" verifies="10th-pass T4">
+        <title>VERIFY: load_checkpoint rejects >50% missing keys</title>
+        <source-check>
+          <file>src/minivess/ensemble/builder.py</file>
+          <what>Lines ~497-507: Pre-check for gross key mismatch before load_state_dict</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/ensemble/builder.py').read_text(encoding='utf-8')
+has_guard = '50%' in src or '0.5' in src
+has_missing = 'missing' in src.lower() and 'keys' in src.lower()
+print('50% key mismatch guard found:', has_guard and has_missing)
+"</command>
+          <expected>50% key mismatch guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/ensemble/test_checkpoint_load_safety.py</file>
+          <what>Tests for mismatched keys raises and valid keys succeeds</what>
+          <command>uv run pytest tests/v2/unit/ensemble/test_checkpoint_load_safety.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 2 tests collected (mismatch + valid)</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/ensemble/test_checkpoint_load_safety.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V1.05" status="NOT_STARTED" verifies="10th-pass T7">
+        <title>VERIFY: _average_checkpoints warns on key mismatch, raises on empty</title>
+        <source-check>
+          <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+          <what>Lines ~658-688: Empty list guard + key mismatch warning in _average_checkpoints</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/orchestration/flows/post_training_flow.py').read_text(encoding='utf-8')
+has_empty_guard = 'Cannot average 0' in src or 'empty' in src.lower()
+has_key_mismatch = 'key mismatch' in src.lower() or 'not in all folds' in src.lower()
+print('Empty guard:', has_empty_guard)
+print('Key mismatch warning:', has_key_mismatch)
+"</command>
+          <expected>Both guards found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_checkpoint_averaging.py</file>
+          <what>Tests for empty list raises, mismatched keys warns, single checkpoint identity</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_checkpoint_averaging.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 3 tests collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_checkpoint_averaging.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Training Flow Guards -->
+    <phase id="1A.3" name="Training Flow Guards (T2, T3, T5, T11)">
+
+      <task id="V1.06" status="NOT_STARTED" verifies="10th-pass T2">
+        <title>VERIFY: MLflow resume retry with checkpoint fallback</title>
+        <source-check>
+          <file>src/minivess/orchestration/flows/train_flow.py</file>
+          <what>Lines ~322-358: Retry loop (3 attempts) for mlflow.get_run with checkpoint fallback</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/orchestration/flows/train_flow.py').read_text(encoding='utf-8')
+has_retry = 'attempt' in src and ('range(3)' in src or 'retry' in src.lower())
+has_fallback = 'epoch_latest' in src and 'exists()' in src
+print('Retry logic found:', has_retry)
+print('Checkpoint fallback found:', has_fallback)
+"</command>
+          <expected>Both retry and fallback found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_spot_resume.py</file>
+          <what>Tests for MLflow unreachable with/without checkpoint</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_spot_resume.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Tests covering resume scenarios collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_spot_resume.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V1.07" status="NOT_STARTED" verifies="10th-pass T3">
+        <title>VERIFY: Empty folds_to_run and empty dataloaders raise ValueError</title>
+        <source-check>
+          <file>src/minivess/orchestration/flows/train_flow.py</file>
+          <what>Line ~850-852: Guard on empty folds_to_run raising ValueError</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/orchestration/flows/train_flow.py').read_text(encoding='utf-8')
+has_folds_guard = 'folds_to_run is empty' in src or ('not folds_to_run' in src and 'raise' in src)
+print('Folds guard found:', has_folds_guard)
+"</command>
+          <expected>Folds guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_train_flow_empty_guards.py</file>
+          <what>Tests for empty folds and empty dataloaders raising ValueError</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_train_flow_empty_guards.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 2 tests collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_train_flow_empty_guards.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V1.08" status="NOT_STARTED" verifies="10th-pass T5">
+        <title>VERIFY: Calibration metrics handle all-zero/all-one labels</title>
+        <source-check>
+          <file>src/minivess/pipeline/calibration_metrics.py</file>
+          <what>Lines ~83-90: Guard on single-class labels before LogisticRegression.fit()</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/pipeline/calibration_metrics.py').read_text(encoding='utf-8')
+has_guard = 'unique' in src.lower() and ('single-class' in src.lower() or 'len(unique' in src)
+print('Single-class guard found:', has_guard)
+"</command>
+          <expected>Single-class guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/test_calibration_edge_cases.py</file>
+          <what>Tests for all-zero, all-one, and normal case</what>
+          <command>uv run pytest tests/v2/unit/test_calibration_edge_cases.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 2 tests collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/test_calibration_edge_cases.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V1.09" status="NOT_STARTED" verifies="10th-pass T11">
+        <title>VERIFY: Legacy POST_TRAINING_METHOD (singular) removed</title>
+        <source-check>
+          <file>src/minivess/orchestration/flows/train_flow.py</file>
+          <what>Only POST_TRAINING_METHODS (plural) exists, no singular fallback</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/orchestration/flows/train_flow.py').read_text(encoding='utf-8')
+# Check that singular form does not appear as env var key
+# Plural form should exist, singular should NOT
+lines = src.split('\n')
+singular_refs = [i+1 for i, l in enumerate(lines) if 'POST_TRAINING_METHOD\"' in l and 'METHODS' not in l]
+plural_refs = [i+1 for i, l in enumerate(lines) if 'POST_TRAINING_METHODS' in l]
+print('Singular POST_TRAINING_METHOD references (should be 0):', len(singular_refs), singular_refs)
+print('Plural POST_TRAINING_METHODS references:', len(plural_refs))
+"</command>
+          <expected>Singular references: 0, Plural references: >= 1</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_post_training_method_canonical.py</file>
+          <what>Tests that singular form is absent and plural is parsed correctly</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_post_training_method_canonical.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 1 test collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_post_training_method_canonical.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Observability -->
+    <phase id="1A.4" name="Observability (T8)">
+
+      <task id="V1.10" status="NOT_STARTED" verifies="10th-pass T8">
+        <title>VERIFY: JSONL structured training event logging</title>
+        <source-check>
+          <file>src/minivess/observability/structured_logging.py</file>
+          <what>StructuredEventLogger class with log_event() and update_heartbeat() methods</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/observability/structured_logging.py').read_text(encoding='utf-8')
+has_class = 'StructuredEventLogger' in src
+has_log_event = 'def log_event' in src
+has_heartbeat = 'def update_heartbeat' in src
+print('StructuredEventLogger class:', has_class)
+print('log_event method:', has_log_event)
+print('update_heartbeat method:', has_heartbeat)
+"</command>
+          <expected>All three: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/observability/test_structured_logging.py</file>
+          <what>Tests for JSONL writing, heartbeat, and no-op without dir</what>
+          <command>uv run pytest tests/v2/unit/observability/test_structured_logging.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 2 tests collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/observability/test_structured_logging.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Cross-file Consistency -->
+    <phase id="1A.5" name="Cross-file Consistency (T9, T10)">
+
+      <task id="V1.11" status="NOT_STARTED" verifies="10th-pass T9">
+        <title>VERIFY: Docker image GAR path consistency tests</title>
+        <source-check>
+          <file>tests/v2/unit/deployment/test_docker_image_consistency.py</file>
+          <what>Tests that verify GAR image path is consistent across SkyPilot YAMLs and configs</what>
+          <command>uv run pytest tests/v2/unit/deployment/test_docker_image_consistency.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple parametrized tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/deployment/test_docker_image_consistency.py</file>
+          <what>Same file — it IS the test</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/deployment/test_docker_image_consistency.py -v --tb=short 2>&amp;1 | tail -30</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V1.12" status="NOT_STARTED" verifies="10th-pass T10">
+        <title>VERIFY: GCS bucket name consistency tests</title>
+        <source-check>
+          <file>tests/v2/unit/deployment/test_gcs_bucket_consistency.py</file>
+          <what>Tests that verify GCS bucket names are consistent across all config files</what>
+          <command>uv run pytest tests/v2/unit/deployment/test_gcs_bucket_consistency.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/deployment/test_gcs_bucket_consistency.py</file>
+          <what>Same file — it IS the test</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/deployment/test_gcs_bucket_consistency.py -v --tb=short 2>&amp;1 | tail -30</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 1B: DOUBLE-CHECK PLAN (15 tasks, T1-T15)                 -->
+  <!-- ================================================================== -->
+  <category id="1B" name="Double-Check Plan — 15 Additional Fixes">
+    <description>
+      Verify ALL 15 fixes from run-debug-factorial-experiment-report-10th-pass-improvement-double-check.xml.
+      Grouped by theme for efficient verification.
+    </description>
+
+    <!-- THEME: FP16 / Dtype Safety -->
+    <phase id="1B.1" name="FP16 Dtype Safety (DC-T1)">
+
+      <task id="V2.01" status="NOT_STARTED" verifies="double-check T1">
+        <title>VERIFY: GraphTopologyLoss FP16 accumulator forced to float32</title>
+        <source-check>
+          <file>src/minivess/pipeline/loss_functions.py</file>
+          <what>Line ~540: Accumulator uses dtype=torch.float32 (not logits.dtype)</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/pipeline/loss_functions.py').read_text(encoding='utf-8')
+# Search for the GraphTopologyLoss accumulator initialization
+lines = src.split('\n')
+for i, line in enumerate(lines):
+    if 'torch.tensor(0.0' in line and i > 500:
+        print(f'Line {i+1}: {line.strip()}')
+        if 'float32' in line:
+            print('  -> Uses float32: GOOD')
+        elif 'logits.dtype' in line:
+            print('  -> Uses logits.dtype: BAD (FP16 overflow risk)')
+        else:
+            print('  -> Defaults to float32 (no explicit dtype): ACCEPTABLE')
+"</command>
+          <expected>Accumulator uses float32 or defaults to float32 (no logits.dtype)</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_compound_loss_fp16.py</file>
+          <what>Tests for FP16 input producing float32 output across all compound losses</what>
+          <command>uv run pytest tests/v2/unit/losses/test_compound_loss_fp16.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple tests collected (at least 3)</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_compound_loss_fp16.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: NaN Isolation in Calibration / Compound Losses -->
+    <phase id="1B.2" name="NaN Isolation (DC-T2, DC-T3, DC-T5, DC-T9)">
+
+      <task id="V2.02" status="NOT_STARTED" verifies="double-check T2">
+        <title>VERIFY: HL1ACELoss handles all-empty bins (extreme logits)</title>
+        <source-check>
+          <file>src/minivess/pipeline/calibration_losses.py</file>
+          <what>NaN guard on ace_per_bc after torch.nanmean — replaces NaN with 0.0</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/pipeline/calibration_losses.py').read_text(encoding='utf-8')
+has_nan_guard = 'torch.where' in src and 'isnan' in src and 'zeros_like' in src
+has_nanmean = 'nanmean' in src
+print('nanmean used:', has_nanmean)
+print('NaN guard (torch.where + isnan + zeros_like):', has_nan_guard)
+"</command>
+          <expected>Both nanmean and NaN guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/test_hl1ace_loss.py</file>
+          <what>Tests for extreme logits (all-empty bins) and uniform predictions</what>
+          <command>uv run pytest tests/v2/unit/test_hl1ace_loss.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Tests covering extreme logits edge cases</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/test_hl1ace_loss.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V2.03" status="NOT_STARTED" verifies="double-check T3">
+        <title>VERIFY: AuxCalibCompoundLoss NaN isolation (seg + calib independent)</title>
+        <source-check>
+          <file>src/minivess/pipeline/loss_functions.py</file>
+          <what>Lines ~579-584: NaN guard on seg_val and calib_val independently, ValueError if both NaN</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/pipeline/loss_functions.py').read_text(encoding='utf-8')
+has_seg_nan_guard = 'seg_nan' in src or ('isfinite' in src and 'seg_val' in src)
+has_both_nan = 'both' in src.lower() or ('seg_nan and calib_nan' in src)
+print('Seg NaN guard:', has_seg_nan_guard)
+print('Both-NaN ValueError:', has_both_nan)
+"</command>
+          <expected>Both guards found</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_aux_calib_nan_isolation.py</file>
+          <what>Tests for seg NaN, calib NaN, both NaN, and normal case</what>
+          <command>uv run pytest tests/v2/unit/losses/test_aux_calib_nan_isolation.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 3 tests collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_aux_calib_nan_isolation.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V2.04" status="NOT_STARTED" verifies="double-check T5">
+        <title>VERIFY: ClassBalancedDiceLoss all-background/all-foreground edge cases</title>
+        <source-check>
+          <file>tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py</file>
+          <what>Tests verifying finite loss/gradient for all-background and all-foreground labels</what>
+          <command>uv run pytest tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple tests collected (all-background, all-foreground, normal)</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V2.05" status="NOT_STARTED" verifies="double-check T9">
+        <title>VERIFY: All compound losses survive all-background data</title>
+        <source-check>
+          <file>tests/v2/unit/losses/test_compound_loss_all_background.py</file>
+          <what>Tests all 5+ compound losses with all-background labels are finite</what>
+          <command>uv run pytest tests/v2/unit/losses/test_compound_loss_all_background.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 5 tests (one per compound loss)</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_compound_loss_all_background.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_compound_loss_all_background.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: OOM Diagnostics -->
+    <phase id="1B.3" name="OOM Diagnostics (DC-T4)">
+
+      <task id="V2.06" status="NOT_STARTED" verifies="double-check T4">
+        <title>VERIFY: OOM diagnostic path tested (CPU device, re-raise)</title>
+        <source-check>
+          <file>tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py</file>
+          <what>Tests for OOM diagnostics on CPU device, PyTorch 2.x detection, re-raise</what>
+          <command>uv run pytest tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple OOM-related tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Flow Empty Return Guards -->
+    <phase id="1B.4" name="Flow Empty Return Guards (DC-T6, DC-T7)">
+
+      <task id="V2.07" status="NOT_STARTED" verifies="double-check T6">
+        <title>VERIFY: resolve_checkpoint_paths_from_contract loud failure on empty</title>
+        <source-check>
+          <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+          <what>Guard: empty result with parent_run_id raises ValueError</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/orchestration/flows/post_training_flow.py').read_text(encoding='utf-8')
+has_guard = 'resolve_checkpoint_paths' in src and 'found 0 checkpoints' in src
+print('Empty checkpoint guard found:', has_guard)
+"</command>
+          <expected>Empty checkpoint guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py</file>
+          <what>Tests for None parent returns empty, missing dirs raises, valid paths work</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 2 tests collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V2.08" status="NOT_STARTED" verifies="double-check T7">
+        <title>VERIFY: _discover_runs empty experiment warns loudly</title>
+        <source-check>
+          <file>tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py</file>
+          <what>Tests for missing experiment warning, zero runs warning, valid runs</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 2 tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Cost Estimate Edge Cases -->
+    <phase id="1B.5" name="Cost Estimate Edge Cases (DC-T8)">
+
+      <task id="V2.09" status="NOT_STARTED" verifies="double-check T8">
+        <title>VERIFY: Cost estimate handles zero epochs, zero rate, zero folds</title>
+        <source-check>
+          <file>tests/v2/unit/observability/test_cost_estimate_edge_cases.py</file>
+          <what>Tests for zero epoch_seconds, zero hourly rate, zero folds, normal case</what>
+          <command>uv run pytest tests/v2/unit/observability/test_cost_estimate_edge_cases.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Multiple edge case tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/observability/test_cost_estimate_edge_cases.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/observability/test_cost_estimate_edge_cases.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Checkpoint Averaging Robustness -->
+    <phase id="1B.6" name="Checkpoint Averaging Robustness (DC-T10)">
+
+      <task id="V2.10" status="NOT_STARTED" verifies="double-check T10">
+        <title>VERIFY: _average_checkpoints handles corrupt files with clear error</title>
+        <source-check>
+          <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+          <what>try/except around torch.load in _average_checkpoints with diagnostic message</what>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('src/minivess/orchestration/flows/post_training_flow.py').read_text(encoding='utf-8')
+has_try_except = 'Failed to load checkpoint' in src or 'corrupt' in src.lower()
+print('Corrupt checkpoint guard found:', has_try_except)
+"</command>
+          <expected>Corrupt checkpoint guard found: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_checkpoint_averaging.py</file>
+          <what>Tests for corrupt file raises clear error, one corrupt + one valid</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_checkpoint_averaging.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Corrupt file test cases collected</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_checkpoint_averaging.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Scientific Integrity — Betti/Topology -->
+    <phase id="1B.7" name="Scientific Integrity (DC-T11, DC-T12, DC-T13)">
+
+      <task id="V2.11" status="NOT_STARTED" verifies="double-check T11">
+        <title>VERIFY: BettiLoss gradient edge cases (min spatial dims, all-zero predictions)</title>
+        <source-check>
+          <file>tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py</file>
+          <what>Tests for minimum spatial dims (2x2x2), all-zero predictions, perfect match</what>
+          <command>uv run pytest tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 3 edge case tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V2.12" status="NOT_STARTED" verifies="double-check T12">
+        <title>VERIFY: SkeletonRecallLoss CPU-GPU transfer no memory leak</title>
+        <source-check>
+          <file>tests/v2/unit/losses/test_skeleton_recall_memory.py</file>
+          <what>Tests for detached skeleton, multiple forward passes no leak, batch size scaling</what>
+          <command>uv run pytest tests/v2/unit/losses/test_skeleton_recall_memory.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Memory-related tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/losses/test_skeleton_recall_memory.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/losses/test_skeleton_recall_memory.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V2.13" status="NOT_STARTED" verifies="double-check T13">
+        <title>VERIFY: BettiMatchingLoss gudhi availability and proxy fallback warning</title>
+        <source-check>
+          <file>tests/v2/unit/test_betti_matching_loss.py</file>
+          <what>Tests for gudhi availability, differentiability, all-background, proxy warning</what>
+          <command>uv run pytest tests/v2/unit/test_betti_matching_loss.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Tests covering gudhi and proxy paths</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/test_betti_matching_loss.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/test_betti_matching_loss.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Cross-flow Consistency -->
+    <phase id="1B.8" name="Cross-flow Consistency (DC-T14)">
+
+      <task id="V2.14" status="NOT_STARTED" verifies="double-check T14">
+        <title>VERIFY: Cross-flow EXPERIMENT_NAME consistency</title>
+        <source-check>
+          <file>tests/v2/unit/orchestration/test_cross_flow_experiment_name.py</file>
+          <what>Tests that train_flow, analysis_flow, and SkyPilot YAMLs use consistent experiment names</what>
+          <command>uv run pytest tests/v2/unit/orchestration/test_cross_flow_experiment_name.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>Cross-flow consistency tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/orchestration/test_cross_flow_experiment_name.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/orchestration/test_cross_flow_experiment_name.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Tracker Error Paths -->
+    <phase id="1B.9" name="Tracker Error Paths (DC-T15)">
+
+      <task id="V2.15" status="NOT_STARTED" verifies="double-check T15">
+        <title>VERIFY: ExperimentTracker handles nonexistent files and no active run</title>
+        <source-check>
+          <file>tests/v2/unit/observability/test_tracker_error_paths.py</file>
+          <what>Tests for nonexistent file, no active run, valid file, start_run creates experiment</what>
+          <command>uv run pytest tests/v2/unit/observability/test_tracker_error_paths.py --collect-only -q 2>&amp;1 | head -20</command>
+          <expected>At least 3 error path tests collected</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/observability/test_tracker_error_paths.py</file>
+          <what>Same file</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/observability/test_tracker_error_paths.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 2: MLflow 413 FIX (6 layers)                             -->
+  <!-- ================================================================== -->
+  <category id="2" name="MLflow 413 Fix — CRITICAL">
+    <description>
+      The MLflow 413 "Request Entity Too Large" error persisted across 10 experiment
+      passes. Root cause: training Docker container lacked google-cloud-storage, so
+      MLflow fell back to HTTP proxy through Cloud Run (32 MB limit).
+
+      This category verifies ALL 6 layers of the fix. Each layer is independently
+      necessary — failure of any single layer means the 413 will recur.
+
+      Source: mlflow-constant-issue-with-413-mlflow-and-claude-refusal-to-fix.xml
+    </description>
+
+    <task id="V3.01" status="NOT_STARTED" verifies="MLflow Layer 1">
+      <title>VERIFY: google-cloud-storage in main dependencies (pyproject.toml)</title>
+      <description>
+        google-cloud-storage must be in [project.dependencies] (NOT optional extras).
+        Docker base image uses uv sync --frozen --no-dev, which only installs main deps.
+        If it is in [project.optional-dependencies].sky, the Docker image will NOT have it.
+      </description>
+      <source-check>
+        <file>pyproject.toml</file>
+        <what>google-cloud-storage in [project.dependencies] section</what>
+        <command>uv run python -c "
+import tomllib, pathlib
+data = tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))
+main_deps = data.get('project', {}).get('dependencies', [])
+gcs_in_main = any('google-cloud-storage' in d for d in main_deps)
+print('google-cloud-storage in main dependencies:', gcs_in_main)
+if gcs_in_main:
+    matching = [d for d in main_deps if 'google-cloud-storage' in d]
+    print('  Entry:', matching[0])
+else:
+    # Check if it is in optional deps (wrong location)
+    opt = data.get('project', {}).get('optional-dependencies', {})
+    for group, deps in opt.items():
+        if any('google-cloud-storage' in d for d in deps):
+            print(f'  WARNING: found in optional [{group}] — NOT in main deps!')
+"</command>
+        <expected>google-cloud-storage in main dependencies: True</expected>
+      </source-check>
+      <test-check>
+        <file>tests/v2/unit/deployment/test_mlflow_artifact_store.py</file>
+        <what>Test verifying GCS artifact store configuration</what>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py --collect-only -q 2>&amp;1 | head -20</command>
+        <expected>MLflow artifact store tests collected</expected>
+      </test-check>
+      <run>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py -v --tb=short 2>&amp;1 | tail -20</command>
+        <expected>All tests PASSED</expected>
+      </run>
+    </task>
+
+    <task id="V3.02" status="NOT_STARTED" verifies="MLflow Layer 2">
+      <title>VERIFY: --no-serve-artifacts in Dockerfile.mlflow-gcp</title>
+      <description>
+        The MLflow tracking server must run with --no-serve-artifacts so clients
+        upload directly to GCS (bypassing Cloud Run's 32 MB body limit).
+      </description>
+      <source-check>
+        <file>deployment/docker/Dockerfile.mlflow-gcp</file>
+        <what>CMD or ENTRYPOINT includes --no-serve-artifacts flag</what>
+        <command>uv run python -c "
+import pathlib
+src = pathlib.Path('deployment/docker/Dockerfile.mlflow-gcp').read_text(encoding='utf-8')
+has_flag = '--no-serve-artifacts' in src
+print('--no-serve-artifacts flag present:', has_flag)
+lines = [l.strip() for l in src.split('\n') if '--no-serve-artifacts' in l]
+for l in lines:
+    print('  Line:', l)
+"</command>
+        <expected>--no-serve-artifacts flag present: True</expected>
+      </source-check>
+      <test-check>
+        <file>tests/v2/unit/deployment/test_mlflow_gcp_config.py</file>
+        <what>Test verifying Dockerfile.mlflow-gcp contains --no-serve-artifacts</what>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_gcp_config.py --collect-only -q 2>&amp;1 | head -20</command>
+        <expected>MLflow GCP config tests collected</expected>
+      </test-check>
+      <run>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_gcp_config.py -v --tb=short 2>&amp;1 | tail -20</command>
+        <expected>All tests PASSED</expected>
+      </run>
+    </task>
+
+    <task id="V3.03" status="NOT_STARTED" verifies="MLflow Layer 3">
+      <title>VERIFY: MLFLOW_DEFAULT_ARTIFACT_ROOT=gs:// in Pulumi __main__.py</title>
+      <description>
+        The Pulumi code must set MLFLOW_DEFAULT_ARTIFACT_ROOT to a GCS bucket
+        on the Cloud Run service environment variables.
+      </description>
+      <source-check>
+        <file>deployment/pulumi/gcp/__main__.py</file>
+        <what>MLFLOW_DEFAULT_ARTIFACT_ROOT env var set to gs:// URL</what>
+        <command>uv run python -c "
+import pathlib
+src = pathlib.Path('deployment/pulumi/gcp/__main__.py').read_text(encoding='utf-8')
+has_artifact_root = 'MLFLOW_DEFAULT_ARTIFACT_ROOT' in src
+has_gs = 'gs://' in src and 'mlflow-artifacts' in src
+print('MLFLOW_DEFAULT_ARTIFACT_ROOT env var:', has_artifact_root)
+print('GCS artifact root (gs://):', has_gs)
+"</command>
+        <expected>Both present: True</expected>
+      </source-check>
+      <test-check>
+        <file>tests/v2/unit/deployment/test_mlflow_gcp_config.py</file>
+        <what>May include Pulumi config verification</what>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_gcp_config.py -v --tb=short 2>&amp;1 | tail -20</command>
+        <expected>Tests PASSED</expected>
+      </test-check>
+      <run>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py tests/v2/unit/deployment/test_mlflow_gcp_config.py -v --tb=short 2>&amp;1 | tail -30</command>
+        <expected>All tests PASSED</expected>
+      </run>
+    </task>
+
+    <task id="V3.04" status="NOT_STARTED" verifies="MLflow Layer 4">
+      <title>VERIFY: Cloud Run deployed and live (runtime check)</title>
+      <description>
+        The Cloud Run service must be DEPLOYED with the updated configuration.
+        Code changes without deployment = no fix. This checks LIVE infrastructure.
+
+        NOTE: This may fail if Cloud Run is disabled (enable_cloud_run=false in Pulumi).
+        In that case, the verification is: confirm enable_cloud_run is intentionally false
+        and document why.
+      </description>
+      <source-check>
+        <file>deployment/pulumi/gcp/__main__.py</file>
+        <what>Check if enable_cloud_run flag exists and its current value</what>
+        <command>uv run python -c "
+import pathlib
+src = pathlib.Path('deployment/pulumi/gcp/__main__.py').read_text(encoding='utf-8')
+has_enable_flag = 'enable_cloud_run' in src
+print('enable_cloud_run flag in Pulumi code:', has_enable_flag)
+lines = [l.strip() for l in src.split('\n') if 'enable_cloud_run' in l]
+for l in lines[:5]:
+    print('  ', l)
+"</command>
+        <expected>enable_cloud_run flag documented</expected>
+      </source-check>
+      <test-check>
+        <what>Runtime check — query GCP for Cloud Run service status</what>
+        <command>gcloud run services list --project=minivess-mlops --region=europe-west4 --format="table(SERVICE,REGION,URL,LAST_DEPLOYED)" 2>&amp;1 || echo "Cloud Run not deployed or gcloud not configured"</command>
+        <expected>Either: Cloud Run service listed in europe-west4, OR: intentionally disabled</expected>
+      </test-check>
+      <run>
+        <command>uv run python -c "
+import tomllib, pathlib
+# Check Pulumi stack config for enable_cloud_run
+dev_yaml = pathlib.Path('deployment/pulumi/gcp/Pulumi.dev.yaml')
+if dev_yaml.exists():
+    import yaml
+    data = yaml.safe_load(dev_yaml.read_text(encoding='utf-8'))
+    config = data.get('config', {})
+    enable_cr = config.get('minivess:enable_cloud_run', 'NOT SET')
+    print('enable_cloud_run in Pulumi.dev.yaml:', enable_cr)
+else:
+    print('Pulumi.dev.yaml not found')
+"</command>
+        <expected>enable_cloud_run value documented (true = deployed, false = intentionally disabled)</expected>
+      </run>
+    </task>
+
+    <task id="V3.05" status="NOT_STARTED" verifies="MLflow Layer 5">
+      <title>VERIFY: file_mounts REMOVED from ALL SkyPilot training YAMLs</title>
+      <description>
+        file_mounts to gs://minivess-mlops-checkpoints were a competing persistence
+        mechanism that violates the mlflow_only_artifact_contract. They must be removed
+        from all training SkyPilot YAMLs.
+      </description>
+      <source-check>
+        <what>No active file_mounts in any training SkyPilot YAML</what>
+        <command>uv run python -c "
+import yaml, pathlib, sys
+skypilot_dir = pathlib.Path('deployment/skypilot')
+training_yamls = ['train_factorial.yaml', 'train_production.yaml', 'train_hpo.yaml', 'smoke_test_gcp.yaml']
+all_clean = True
+for name in training_yamls:
+    path = skypilot_dir / name
+    if not path.exists():
+        print(f'  {name}: FILE NOT FOUND')
+        continue
+    data = yaml.safe_load(path.read_text(encoding='utf-8'))
+    has_file_mounts = 'file_mounts' in (data or {})
+    if has_file_mounts:
+        print(f'  {name}: FAIL — file_mounts still present: {data[\"file_mounts\"]}')
+        all_clean = False
+    else:
+        # Also check raw text for commented-out file_mounts (OK) vs active
+        raw = path.read_text(encoding='utf-8')
+        active_mounts = [l for l in raw.split('\n') if 'file_mounts' in l and not l.strip().startswith('#')]
+        if active_mounts:
+            print(f'  {name}: FAIL — uncommented file_mounts line: {active_mounts}')
+            all_clean = False
+        else:
+            print(f'  {name}: PASS — no active file_mounts')
+print()
+print('All training YAMLs clean:', all_clean)
+"</command>
+        <expected>All training YAMLs clean: True</expected>
+      </source-check>
+      <test-check>
+        <file>tests/v2/unit/deployment/test_mlflow_artifact_store.py</file>
+        <what>Should include test that no SkyPilot YAML has competing file_mounts</what>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py -v --tb=short 2>&amp;1 | tail -20</command>
+        <expected>Tests PASSED</expected>
+      </test-check>
+      <run>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py tests/v2/unit/deployment/test_skypilot_yamls.py -v --tb=short 2>&amp;1 | tail -30</command>
+        <expected>All tests PASSED</expected>
+      </run>
+    </task>
+
+    <task id="V3.06" status="NOT_STARTED" verifies="MLflow Layer 6">
+      <title>VERIFY: Runtime — artifact_location uses gs:// (not file:///)</title>
+      <description>
+        The acceptance criterion for the MLflow 413 fix is RUNTIME VERIFIED:
+        an actual experiment's artifact_location starts with gs://.
+
+        This requires either: (a) a live MLflow tracking server to query, or
+        (b) a test that verifies the MLflow client would use GCSArtifactRepository
+        when google-cloud-storage is importable.
+      </description>
+      <source-check>
+        <what>google-cloud-storage importable in current environment</what>
+        <command>uv run python -c "
+try:
+    import google.cloud.storage
+    print('google.cloud.storage importable: True')
+    print('Version:', google.cloud.storage.__version__)
+except ImportError as e:
+    print('google.cloud.storage importable: False')
+    print('Error:', e)
+"</command>
+        <expected>google.cloud.storage importable: True</expected>
+      </source-check>
+      <test-check>
+        <what>Verify MLflow can resolve GCS artifact repository when gcs lib is available</what>
+        <command>uv run python -c "
+try:
+    from mlflow.store.artifact.gcs_artifact_repo import GCSArtifactRepository
+    print('GCSArtifactRepository importable: True')
+except ImportError:
+    print('GCSArtifactRepository importable: False — MLflow will fall back to HTTP proxy!')
+"</command>
+        <expected>GCSArtifactRepository importable: True</expected>
+      </test-check>
+      <run>
+        <command>uv run pytest tests/v2/unit/deployment/test_mlflow_artifact_store.py tests/v2/unit/deployment/test_mlflow_gcp_config.py -v --tb=short 2>&amp;1 | tail -30</command>
+        <expected>All tests PASSED</expected>
+      </run>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 3: FinOps Region Migration (europe-west4)                -->
+  <!-- ================================================================== -->
+  <category id="3" name="FinOps Region Migration — europe-west4">
+    <description>
+      All GCP resources must be in europe-west4 (Netherlands) for zero egress.
+      March 2026 bill was EUR 89 in egress alone from cross-region Docker pulls.
+
+      Source: run-debug-factorial-experiment-11th-pass-finops-execution.xml
+    </description>
+
+    <!-- THEME: Pulumi Infrastructure -->
+    <phase id="3.1" name="Pulumi Infrastructure Config">
+
+      <task id="V4.01" status="NOT_STARTED" verifies="FinOps Pulumi">
+        <title>VERIFY: Pulumi config uses europe-west4</title>
+        <source-check>
+          <file>deployment/pulumi/gcp/Pulumi.dev.yaml</file>
+          <what>gcp:region set to europe-west4</what>
+          <command>uv run python -c "
+import yaml, pathlib
+data = yaml.safe_load(pathlib.Path('deployment/pulumi/gcp/Pulumi.dev.yaml').read_text(encoding='utf-8'))
+region = data.get('config', {}).get('gcp:region', 'NOT SET')
+print('Pulumi.dev.yaml gcp:region:', region)
+print('PASS:', region == 'europe-west4')
+"</command>
+          <expected>gcp:region: europe-west4, PASS: True</expected>
+        </source-check>
+        <test-check>
+          <file>deployment/pulumi/gcp/Pulumi.yaml</file>
+          <what>Default region in Pulumi.yaml</what>
+          <command>uv run python -c "
+import yaml, pathlib
+data = yaml.safe_load(pathlib.Path('deployment/pulumi/gcp/Pulumi.yaml').read_text(encoding='utf-8'))
+template = data.get('template', {}).get('config', {}).get('gcp:region', {})
+default = template.get('default', 'NOT SET') if isinstance(template, dict) else template
+print('Pulumi.yaml default region:', default)
+"</command>
+          <expected>Default region: europe-west4</expected>
+        </test-check>
+        <run>
+          <command>uv run python -c "
+import pathlib
+src = pathlib.Path('deployment/pulumi/gcp/__main__.py').read_text(encoding='utf-8')
+# Check the fallback default in __main__.py
+lines = [l.strip() for l in src.split('\n') if 'europe-west4' in l and 'region' in l.lower()]
+print('europe-west4 region references in __main__.py:')
+for l in lines[:5]:
+    print('  ', l)
+has_old = 'europe-north1' in src
+print('europe-north1 references remaining:', has_old)
+"</command>
+          <expected>europe-west4 references present, europe-north1 references: False</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: GAR Registry -->
+    <phase id="3.2" name="GAR Registry Config">
+
+      <task id="V4.02" status="NOT_STARTED" verifies="FinOps GAR">
+        <title>VERIFY: configs/registry/gar.yaml uses europe-west4</title>
+        <source-check>
+          <file>configs/registry/gar.yaml</file>
+          <what>server and image_prefix use europe-west4-docker.pkg.dev</what>
+          <command>uv run python -c "
+import yaml, pathlib
+data = yaml.safe_load(pathlib.Path('configs/registry/gar.yaml').read_text(encoding='utf-8'))
+server = data.get('server', 'NOT SET')
+prefix = data.get('image_prefix', 'NOT SET')
+print('server:', server)
+print('image_prefix:', prefix)
+print('PASS:', 'europe-west4' in server and 'europe-west4' in prefix)
+"</command>
+          <expected>Both contain europe-west4, PASS: True</expected>
+        </source-check>
+        <test-check>
+          <what>GAR live check (if gcloud configured)</what>
+          <command>gcloud artifacts repositories list --project=minivess-mlops --location=europe-west4 --format="table(REPOSITORY,FORMAT,LOCATION)" 2>&amp;1 || echo "gcloud not configured or no repos in europe-west4"</command>
+          <expected>Repository listed in europe-west4</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/deployment/test_docker_image_consistency.py -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>All consistency tests PASSED (using europe-west4 GAR path)</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: SkyPilot YAMLs -->
+    <phase id="3.3" name="SkyPilot YAML Region References">
+
+      <task id="V4.03" status="NOT_STARTED" verifies="FinOps SkyPilot">
+        <title>VERIFY: ALL SkyPilot YAMLs reference europe-west4 GAR</title>
+        <source-check>
+          <what>All SkyPilot training YAMLs use europe-west4-docker.pkg.dev image_id</what>
+          <command>uv run python -c "
+import yaml, pathlib
+skypilot_dir = pathlib.Path('deployment/skypilot')
+yamls_to_check = [
+    'train_factorial.yaml',
+    'train_production.yaml',
+    'train_hpo.yaml',
+    'hpo_grid_worker.yaml',
+    'smoke_test_gcp.yaml',
+]
+all_pass = True
+for name in yamls_to_check:
+    path = skypilot_dir / name
+    if not path.exists():
+        print(f'  {name}: FILE NOT FOUND')
+        continue
+    raw = path.read_text(encoding='utf-8')
+    data = yaml.safe_load(raw)
+
+    # Check image_id
+    resources = data.get('resources', {})
+    image_id = resources.get('image_id', 'NOT SET')
+    has_ew4 = 'europe-west4' in str(image_id)
+
+    # Check for any europe-north1 references
+    has_old = 'europe-north1' in raw
+
+    status = 'PASS' if has_ew4 and not has_old else 'FAIL'
+    if status == 'FAIL':
+        all_pass = False
+    print(f'  {name}: {status} (image_id has europe-west4: {has_ew4}, has europe-north1: {has_old})')
+
+print()
+print('All SkyPilot YAMLs use europe-west4:', all_pass)
+"</command>
+          <expected>All SkyPilot YAMLs use europe-west4: True</expected>
+        </source-check>
+        <test-check>
+          <file>tests/v2/unit/deployment/test_skypilot_yamls.py</file>
+          <what>SkyPilot YAML validation tests</what>
+          <command>uv run pytest tests/v2/unit/deployment/test_skypilot_yamls.py -v --tb=short 2>&amp;1 | tail -30</command>
+          <expected>All tests PASSED</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/deployment/test_docker_image_consistency.py tests/v2/unit/deployment/test_skypilot_yamls.py -v --tb=short 2>&amp;1 | tail -30</command>
+          <expected>All tests PASSED</expected>
+        </run>
+      </task>
+
+      <task id="V4.04" status="NOT_STARTED" verifies="FinOps hpo_grid_worker hardcoded region">
+        <title>VERIFY: hpo_grid_worker.yaml region field is europe-west4 (was hardcoded europe-north1)</title>
+        <source-check>
+          <file>deployment/skypilot/hpo_grid_worker.yaml</file>
+          <what>Line ~35: region field (if present) uses europe-west4</what>
+          <command>uv run python -c "
+import yaml, pathlib
+path = pathlib.Path('deployment/skypilot/hpo_grid_worker.yaml')
+if path.exists():
+    raw = path.read_text(encoding='utf-8')
+    has_old = 'europe-north1' in raw
+    has_new = 'europe-west4' in raw
+    print('hpo_grid_worker.yaml:')
+    print('  Contains europe-north1:', has_old, '(should be False)')
+    print('  Contains europe-west4:', has_new, '(should be True)')
+    print('  PASS:', not has_old)
+else:
+    print('hpo_grid_worker.yaml: FILE NOT FOUND')
+"</command>
+          <expected>europe-north1: False, europe-west4: True, PASS: True</expected>
+        </source-check>
+        <test-check>
+          <what>Covered by V4.03 SkyPilot YAML check</what>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/deployment/test_skypilot_yamls.py -k "hpo" -v --tb=short 2>&amp;1 | tail -20</command>
+          <expected>HPO-related YAML tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: SkyPilot Controller -->
+    <phase id="3.4" name="SkyPilot Controller Config">
+
+      <task id="V4.05" status="NOT_STARTED" verifies="FinOps .sky.yaml">
+        <title>VERIFY: .sky.yaml uses gcp/europe-west4, cpus 2+</title>
+        <source-check>
+          <file>.sky.yaml</file>
+          <what>infra: gcp/europe-west4, cpus: 2+</what>
+          <command>uv run python -c "
+import yaml, pathlib
+path = pathlib.Path('.sky.yaml')
+if path.exists():
+    data = yaml.safe_load(path.read_text(encoding='utf-8'))
+    raw = path.read_text(encoding='utf-8')
+    has_ew4 = 'europe-west4' in raw
+    has_old = 'europe-north1' in raw or 'europe-west1' in raw
+    print('.sky.yaml region check:')
+    print('  Contains europe-west4:', has_ew4)
+    print('  Contains old region:', has_old, '(should be False)')
+    # Check cpus
+    has_2plus = 'cpus: 2+' in raw or \"cpus: '2+'\" in raw
+    print('  cpus: 2+:', has_2plus)
+    print('  PASS:', has_ew4 and not has_old)
+else:
+    print('.sky.yaml: FILE NOT FOUND')
+"</command>
+          <expected>europe-west4: True, old region: False, PASS: True</expected>
+        </source-check>
+        <test-check>
+          <what>No specific test file — verified via source check</what>
+        </test-check>
+        <run>
+          <command>echo "No specific test for .sky.yaml — verified via source check above"</command>
+          <expected>Acknowledged</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: No Stale europe-north1 References -->
+    <phase id="3.5" name="No Stale europe-north1 in Active Files">
+
+      <task id="V4.06" status="NOT_STARTED" verifies="FinOps no stale references">
+        <title>VERIFY: No europe-north1 in ANY active config/deployment file</title>
+        <description>
+          Search all active (non-archive, non-doc, non-metalearning) files for
+          europe-north1. Any hit is a potential egress cost regression.
+        </description>
+        <source-check>
+          <what>Comprehensive grep for europe-north1 in active files</what>
+          <command>uv run python -c "
+import pathlib
+
+root = pathlib.Path('.')
+active_extensions = {'.py', '.yaml', '.yml', '.toml', '.env', '.sh'}
+exclude_dirs = {'v0-2_archive', 'metalearning', 'docs/planning', '.git', '__pycache__', 'node_modules', '.claude/metalearning'}
+
+hits = []
+for p in root.rglob('*'):
+    if not p.is_file():
+        continue
+    if p.suffix not in active_extensions:
+        continue
+    # Skip archive/docs/metalearning
+    parts_str = str(p)
+    if any(ex in parts_str for ex in exclude_dirs):
+        continue
+    try:
+        content = p.read_text(encoding='utf-8')
+    except (UnicodeDecodeError, PermissionError):
+        continue
+    if 'europe-north1' in content:
+        lines = [f'  L{i+1}: {l.strip()}' for i, l in enumerate(content.split('\n'))
+                 if 'europe-north1' in l and not l.strip().startswith('#')]
+        if lines:  # Only non-comment references
+            hits.append((str(p), lines))
+
+if hits:
+    print(f'WARNING: {len(hits)} active files still reference europe-north1:')
+    for path, lines in hits:
+        print(f'  {path}:')
+        for l in lines[:3]:
+            print(f'    {l}')
+else:
+    print('PASS: No active files reference europe-north1 (excluding comments)')
+"</command>
+          <expected>PASS: No active files reference europe-north1</expected>
+        </source-check>
+        <test-check>
+          <what>FinOps shift-left test suite should catch this</what>
+          <command>uv run pytest tests/v2/unit/finops/test_cost_governance.py -v --tb=short 2>&amp;1 | tail -30</command>
+          <expected>All FinOps governance tests PASSED</expected>
+        </test-check>
+        <run>
+          <command>uv run pytest tests/v2/unit/finops/ -v --tb=short 2>&amp;1 | tail -30</command>
+          <expected>All FinOps tests PASSED</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: GCS Buckets -->
+    <phase id="3.6" name="GCS Bucket Region">
+
+      <task id="V4.07" status="NOT_STARTED" verifies="FinOps GCS">
+        <title>VERIFY: GCS buckets in europe-west4 (live check)</title>
+        <description>
+          Check live GCS bucket locations via gsutil. Buckets are region-immutable
+          — if they are in europe-north1, they must be recreated.
+        </description>
+        <source-check>
+          <what>GCS bucket locations via gsutil</what>
+          <command>gsutil ls -L -b gs://minivess-mlops-dvc-data/ 2>&amp;1 | head -5 || echo "gsutil not configured or bucket does not exist"</command>
+          <expected>Location constraint: EUROPE-WEST4 (or bucket not yet created)</expected>
+        </source-check>
+        <test-check>
+          <command>gsutil ls -L -b gs://minivess-mlops-mlflow-artifacts/ 2>&amp;1 | head -5 || echo "gsutil not configured or bucket does not exist"</command>
+          <expected>Location constraint: EUROPE-WEST4 (or bucket not yet created)</expected>
+        </test-check>
+        <run>
+          <command>gsutil ls -L -b gs://minivess-mlops-checkpoints/ 2>&amp;1 | head -5 || echo "gsutil not configured or bucket does not exist"</command>
+          <expected>Location constraint: EUROPE-WEST4 (or bucket not yet created)</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Cloud SQL -->
+    <phase id="3.7" name="Cloud SQL Region">
+
+      <task id="V4.08" status="NOT_STARTED" verifies="FinOps Cloud SQL">
+        <title>VERIFY: Cloud SQL in europe-west4 (if enabled)</title>
+        <source-check>
+          <what>Cloud SQL instance region via gcloud</what>
+          <command>gcloud sql instances list --project=minivess-mlops --format="table(NAME,REGION,DATABASE_VERSION,STATE)" 2>&amp;1 || echo "No Cloud SQL instances or gcloud not configured"</command>
+          <expected>Either: instance in europe-west4, OR: no instances (Cloud SQL disabled)</expected>
+        </source-check>
+        <test-check>
+          <what>Covered by Pulumi config verification in V4.01</what>
+        </test-check>
+        <run>
+          <command>echo "Cloud SQL region verified via gcloud or Pulumi config"</command>
+          <expected>Acknowledged</expected>
+        </run>
+      </task>
+    </phase>
+
+    <!-- THEME: Cloud Run -->
+    <phase id="3.8" name="Cloud Run Region">
+
+      <task id="V4.09" status="NOT_STARTED" verifies="FinOps Cloud Run">
+        <title>VERIFY: Cloud Run in europe-west4 (if enabled)</title>
+        <source-check>
+          <what>Cloud Run service region via gcloud</what>
+          <command>gcloud run services list --project=minivess-mlops --format="table(SERVICE,REGION,URL)" 2>&amp;1 || echo "No Cloud Run services or gcloud not configured"</command>
+          <expected>Either: service in europe-west4, OR: no services (Cloud Run disabled)</expected>
+        </source-check>
+        <test-check>
+          <what>Covered by Pulumi config verification in V4.01</what>
+        </test-check>
+        <run>
+          <command>echo "Cloud Run region verified via gcloud or Pulumi config"</command>
+          <expected>Acknowledged</expected>
+        </run>
+      </task>
+    </phase>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- BATCH VERIFICATION: Run ALL test files in one pass                -->
+  <!-- ================================================================== -->
+  <category id="4" name="Batch Verification — Full Test Suite">
+    <description>
+      After individual verification tasks, run the full staging test suite
+      to confirm no regressions from the combined changes.
+    </description>
+
+    <task id="V5.01" status="NOT_STARTED" verifies="Full Suite">
+      <title>VERIFY: make test-staging passes (all fixes combined)</title>
+      <run>
+        <command>make test-staging 2>&amp;1 | tail -30</command>
+        <expected>All tests PASSED, 0 failures, 0 skips</expected>
+      </run>
+    </task>
+
+    <task id="V5.02" status="NOT_STARTED" verifies="Lint">
+      <title>VERIFY: ruff check passes</title>
+      <run>
+        <command>uv run ruff check src/ tests/ 2>&amp;1 | tail -10</command>
+        <expected>All checks passed (or specific count with no errors)</expected>
+      </run>
+    </task>
+
+    <task id="V5.03" status="NOT_STARTED" verifies="Category 1 batch">
+      <title>VERIFY: All 10th pass + double-check test files pass in one batch</title>
+      <run>
+        <command>uv run pytest \
+  tests/v2/unit/test_loss_nan_check.py \
+  tests/v2/unit/losses/test_skeleton_recall_edge_cases.py \
+  tests/v2/unit/losses/test_topology_loss_edge_cases.py \
+  tests/v2/unit/ensemble/test_checkpoint_load_safety.py \
+  tests/v2/unit/orchestration/test_checkpoint_averaging.py \
+  tests/v2/unit/orchestration/test_spot_resume.py \
+  tests/v2/unit/orchestration/test_train_flow_empty_guards.py \
+  tests/v2/unit/test_calibration_edge_cases.py \
+  tests/v2/unit/orchestration/test_post_training_method_canonical.py \
+  tests/v2/unit/observability/test_structured_logging.py \
+  tests/v2/unit/deployment/test_docker_image_consistency.py \
+  tests/v2/unit/deployment/test_gcs_bucket_consistency.py \
+  tests/v2/unit/losses/test_compound_loss_fp16.py \
+  tests/v2/unit/test_hl1ace_loss.py \
+  tests/v2/unit/losses/test_aux_calib_nan_isolation.py \
+  tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py \
+  tests/v2/unit/losses/test_compound_loss_all_background.py \
+  tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py \
+  tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py \
+  tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py \
+  tests/v2/unit/observability/test_cost_estimate_edge_cases.py \
+  tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py \
+  tests/v2/unit/losses/test_skeleton_recall_memory.py \
+  tests/v2/unit/test_betti_matching_loss.py \
+  tests/v2/unit/orchestration/test_cross_flow_experiment_name.py \
+  tests/v2/unit/observability/test_tracker_error_paths.py \
+  -v --tb=short 2>&amp;1 | tail -40</command>
+        <expected>All 26 test files PASSED, 0 failures</expected>
+      </run>
+    </task>
+
+    <task id="V5.04" status="NOT_STARTED" verifies="Category 2+3 batch">
+      <title>VERIFY: All MLflow + FinOps test files pass</title>
+      <run>
+        <command>uv run pytest \
+  tests/v2/unit/deployment/test_mlflow_artifact_store.py \
+  tests/v2/unit/deployment/test_mlflow_gcp_config.py \
+  tests/v2/unit/deployment/test_skypilot_yamls.py \
+  tests/v2/unit/deployment/test_docker_image_consistency.py \
+  tests/v2/unit/finops/test_cost_governance.py \
+  -v --tb=short 2>&amp;1 | tail -30</command>
+        <expected>All 5 test files PASSED, 0 failures</expected>
+      </run>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- SUMMARY TEMPLATE                                                   -->
+  <!-- ================================================================== -->
+  <summary-template>
+    <description>
+      After executing all verification tasks, fill in this summary table.
+      Each task gets PASS, FAIL, or SKIP (with reason).
+    </description>
+
+    <table>
+| ID | Task | Category | Verifies | Status | Notes |
+|----|------|----------|----------|--------|-------|
+| V1.01 | NaN loss guard cbdice_cldice | 1A | T1 orig | ? | |
+| V1.02 | SkeletonRecall empty warning | 1A | T6 orig | ? | |
+| V1.03 | Topology loss edge cases | 1A | T12 orig | ? | |
+| V1.04 | load_checkpoint >50% mismatch | 1A | T4 orig | ? | |
+| V1.05 | _average_checkpoints guards | 1A | T7 orig | ? | |
+| V1.06 | MLflow resume retry | 1A | T2 orig | ? | |
+| V1.07 | Empty folds_to_run guard | 1A | T3 orig | ? | |
+| V1.08 | Calibration all-zero labels | 1A | T5 orig | ? | |
+| V1.09 | POST_TRAINING_METHOD removed | 1A | T11 orig | ? | |
+| V1.10 | Structured JSONL logging | 1A | T8 orig | ? | |
+| V1.11 | GAR image consistency | 1A | T9 orig | ? | |
+| V1.12 | GCS bucket consistency | 1A | T10 orig | ? | |
+| V2.01 | FP16 accumulator float32 | 1B | T1 DC | ? | |
+| V2.02 | HL1ACE all-empty bins | 1B | T2 DC | ? | |
+| V2.03 | AuxCalib NaN isolation | 1B | T3 DC | ? | |
+| V2.04 | ClassBalancedDice edge cases | 1B | T5 DC | ? | |
+| V2.05 | Compound loss all-background | 1B | T9 DC | ? | |
+| V2.06 | OOM diagnostics tested | 1B | T4 DC | ? | |
+| V2.07 | resolve_checkpoint_paths guard | 1B | T6 DC | ? | |
+| V2.08 | _discover_runs empty warns | 1B | T7 DC | ? | |
+| V2.09 | Cost estimate edge cases | 1B | T8 DC | ? | |
+| V2.10 | Corrupt checkpoint handling | 1B | T10 DC | ? | |
+| V2.11 | BettiLoss gradient edges | 1B | T11 DC | ? | |
+| V2.12 | SkeletonRecall memory leak | 1B | T12 DC | ? | |
+| V2.13 | BettiMatching gudhi/proxy | 1B | T13 DC | ? | |
+| V2.14 | Cross-flow experiment name | 1B | T14 DC | ? | |
+| V2.15 | Tracker error paths | 1B | T15 DC | ? | |
+| V3.01 | GCS in main deps | 2 | MLflow L1 | ? | |
+| V3.02 | --no-serve-artifacts | 2 | MLflow L2 | ? | |
+| V3.03 | MLFLOW_DEFAULT_ARTIFACT_ROOT | 2 | MLflow L3 | ? | |
+| V3.04 | Cloud Run deployed | 2 | MLflow L4 | ? | |
+| V3.05 | file_mounts removed | 2 | MLflow L5 | ? | |
+| V3.06 | GCS artifact runtime | 2 | MLflow L6 | ? | |
+| V4.01 | Pulumi europe-west4 | 3 | FinOps Pulumi | ? | |
+| V4.02 | GAR europe-west4 | 3 | FinOps GAR | ? | |
+| V4.03 | SkyPilot YAMLs europe-west4 | 3 | FinOps SkyPilot | ? | |
+| V4.04 | hpo_grid_worker region | 3 | FinOps HPO | ? | |
+| V4.05 | .sky.yaml europe-west4 | 3 | FinOps Controller | ? | |
+| V4.06 | No stale europe-north1 | 3 | FinOps Grep | ? | |
+| V4.07 | GCS buckets europe-west4 | 3 | FinOps GCS Live | ? | |
+| V4.08 | Cloud SQL europe-west4 | 3 | FinOps SQL Live | ? | |
+| V4.09 | Cloud Run europe-west4 | 3 | FinOps CR Live | ? | |
+| V5.01 | make test-staging | Batch | Full Suite | ? | |
+| V5.02 | ruff check | Batch | Lint | ? | |
+| V5.03 | All Cat1 tests batch | Batch | 26 files | ? | |
+| V5.04 | All Cat2+3 tests batch | Batch | 5 files | ? | |
+    </table>
+
+    <pass-criteria>
+      LAUNCH GATE for 11th pass:
+      - ALL V1.* tasks: PASS (code fixes verified)
+      - ALL V2.* tasks: PASS (double-check fixes verified)
+      - V3.01-V3.03, V3.05, V3.06: PASS (MLflow 413 code layers)
+      - V3.04: PASS or SKIP with documented reason (Cloud Run may be intentionally disabled)
+      - V4.01-V4.06: PASS (FinOps config verified)
+      - V4.07-V4.09: PASS or SKIP with documented reason (live infra may not be deployed yet)
+      - V5.01: PASS (staging gate)
+      - V5.02: PASS (lint gate)
+      - V5.03-V5.04: PASS (batch tests)
+
+      ANY V1.* or V2.* FAIL = BLOCK launch, fix first.
+      ANY V3.01-V3.03 FAIL = BLOCK launch (MLflow will lose checkpoints again).
+      ANY V4.01-V4.06 FAIL = BLOCK launch (egress costs will recur).
+      V4.07-V4.09 SKIP OK if infrastructure not yet deployed (pre-migration).
+    </pass-criteria>
+  </summary-template>
+</plan>
