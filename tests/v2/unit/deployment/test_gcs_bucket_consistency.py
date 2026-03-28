@@ -89,30 +89,18 @@ class TestGCSBucketConsistency:
         ],
         ids=lambda p: p.name,
     )
-    def test_skypilot_checkpoint_mount_matches(self, yaml_path: Path) -> None:
-        """SkyPilot file_mounts for checkpoints must use CHECKPOINT_BUCKET."""
-        ckpt_bucket = _extract_constant("CHECKPOINT_BUCKET")
-        ckpt_bucket_name = _strip_gs_prefix(ckpt_bucket)
+    def test_skypilot_no_file_mounts(self, yaml_path: Path) -> None:
+        """SkyPilot YAMLs must NOT have file_mounts — MLflow GCS artifact store only.
 
+        The file_mounts to gs://minivess-mlops-checkpoints was a competing persistence
+        mechanism that violated the mlflow_only_artifact_contract KG invariant.
+        """
         with yaml_path.open(encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
         file_mounts = config.get("file_mounts", {})
-        if not file_mounts:
-            pytest.skip(f"{yaml_path.name} has no file_mounts")
-
-        # Check any mount that references the checkpoint bucket
-        for mount_point, mount_config in file_mounts.items():
-            if isinstance(mount_config, dict):
-                source = mount_config.get("source", "")
-            elif isinstance(mount_config, str):
-                source = mount_config
-            else:
-                continue
-
-            if "checkpoint" in source.lower() or "checkpoint" in mount_point.lower():
-                source_name = _strip_gs_prefix(source)
-                assert ckpt_bucket_name in source_name, (
-                    f"{yaml_path.name}: checkpoint mount source '{source}' "
-                    f"does not match CHECKPOINT_BUCKET '{ckpt_bucket}'"
-                )
+        # file_mounts must be empty or absent — MLflow is the only persistence
+        assert not file_mounts, (
+            f"{yaml_path.name} has file_mounts — remove them. "
+            "MLflow GCS artifact store is the only checkpoint persistence mechanism."
+        )

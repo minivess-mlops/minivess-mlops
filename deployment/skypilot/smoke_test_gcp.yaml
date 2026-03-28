@@ -41,13 +41,8 @@ resources:
   job_recovery:
     max_restarts_on_errors: 3
 
-# Checkpoint persistence via GCS bucket mount.
-# The bucket must exist (created by Pulumi). Use 'source' to reference
-# an externally-created bucket rather than letting SkyPilot create one.
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT
+# Checkpoint persistence: MLflow GCS artifact store.
+# file_mounts removed — MLflow is the only persistence mechanism.
 
 envs:
   MODEL_FAMILY: sam3_vanilla

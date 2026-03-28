@@ -405,43 +405,22 @@ class TestDeepVessDataPull:
 # ---------------------------------------------------------------------------
 
 
-class TestFileMounts:
-    """file_mounts must reference valid GCS paths for checkpoint persistence."""
+class TestNoFileMounts:
+    """file_mounts must NOT exist — MLflow GCS artifact store is the only persistence.
 
-    def test_file_mounts_exists(self) -> None:
-        """Must have file_mounts for checkpoint persistence on spot VMs."""
+    The file_mounts to gs://minivess-mlops-checkpoints was a competing persistence
+    mechanism that violated the mlflow_only_artifact_contract KG invariant.
+    Removed in favor of MLflow GCS artifact store (gs://minivess-mlops-mlflow-artifacts).
+    See: .claude/metalearning/2026-03-27-mlflow-413-10-passes-never-fixed-self-reflection.md
+    """
+
+    def test_no_file_mounts(self) -> None:
+        """train_factorial.yaml must NOT have file_mounts (MLflow is the only persistence)."""
         config = _load_yaml(FACTORIAL_YAML)
-        assert "file_mounts" in config, (
-            "Missing file_mounts — checkpoints lost on preemption"
+        assert "file_mounts" not in config, (
+            "file_mounts found — remove it. MLflow GCS artifact store is the "
+            "only checkpoint persistence mechanism (KG invariant)."
         )
-
-    def test_file_mounts_gcs_bucket(self) -> None:
-        """file_mounts must reference a gs:// bucket."""
-        config = _load_yaml(FACTORIAL_YAML)
-        file_mounts = config.get("file_mounts", {})
-        gcs_found = False
-        for _mount_path, mount_config in file_mounts.items():
-            source = ""
-            if isinstance(mount_config, dict):
-                source = mount_config.get("source", "")
-            elif isinstance(mount_config, str):
-                source = mount_config
-            if source.startswith("gs://"):
-                gcs_found = True
-        assert gcs_found, "file_mounts must reference a GCS bucket (gs://)"
-
-    def test_file_mounts_uses_mount_cached(self) -> None:
-        """file_mounts should use MOUNT_CACHED for async checkpoint upload."""
-        config = _load_yaml(FACTORIAL_YAML)
-        file_mounts = config.get("file_mounts", {})
-        for mount_path, mount_config in file_mounts.items():
-            if isinstance(mount_config, dict) and mount_config.get(
-                "source", ""
-            ).startswith("gs://"):
-                mode = mount_config.get("mode", "")
-                assert mode == "MOUNT_CACHED", (
-                    f"file_mount {mount_path} should use MOUNT_CACHED (async upload), not {mode}"
-                )
 
 
 # ---------------------------------------------------------------------------

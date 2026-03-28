@@ -28,11 +28,8 @@ resources:
   job_recovery:
     max_restarts_on_errors: 3
 
-# Checkpoint persistence via GCS bucket mount (#878).
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT_CACHED
+# Checkpoint persistence: MLflow GCS artifact store.
+# file_mounts removed — MLflow is the only persistence mechanism.
 
 envs:
   MODEL_FAMILY: dynunet
