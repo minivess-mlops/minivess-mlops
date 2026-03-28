@@ -1,63 +1,500 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  11th Pass Debug Factorial Experiment Plan (UPDATED)
+  Updated: 2026-03-27 after infrastructure session that fixed ALL blocking issues.
+  Original: 2026-03-28 (stale version replaced entirely).
+
+  This plan supersedes the previous 11th pass plan. It incorporates ALL
+  infrastructure fixes completed in this session and provides complete
+  cold-start instructions for execution from a FRESH session.
+
+  Skills: /experiment-harness (orchestration), /factorial-monitor (monitoring)
+  Template: .claude/skills/experiment-harness/templates/experiment-run.xml
+-->
 <plan>
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1: METADATA                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
   <metadata>
-    <title>11th Pass Debug Factorial — Failed Conditions Only</title>
-    <branch>fix/11th-pass-pre-run-fixes</branch>
-    <date>2026-03-28</date>
-    <status>blocked-on-pre-run-fixes</status>
-    <priority>P0 — validates infrastructure fixes from pre-run-fixes.xml</priority>
-    <prerequisite>run-debug-factorial-experiment-11th-pass-pre-run-fixes.xml T8 MUST pass first</prerequisite>
-    <approach>
-      Run ONLY the conditions that failed in passes 9-10. Do NOT re-run DynUNet or
-      MambaVesselNet (20/20 succeeded). Focus on SAM3 + zero-shot + artifact upload.
-    </approach>
+    <title>11th Pass Debug Factorial — Post-Infrastructure-Fix, All Regions europe-west4</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-27</date>
+    <status>ready-to-launch</status>
+    <priority>P0 — validates that ALL infrastructure fixes from this session actually work in production</priority>
+    <skill>factorial-monitor</skill>
+    <estimated-cost>~$6-10 GCP L4 (spot for DynUNet/zero-shot, on-demand for SAM3)</estimated-cost>
+    <report-output>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-11th-pass.md</report-output>
+    <prior-pass>
+      <xml>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-10th-pass.xml</xml>
+      <report>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass.md</report>
+    </prior-pass>
   </metadata>
 
-  <context>
-    <previous-pass-results>
-      <!-- From 9th pass report + 10th pass -->
-      <model name="dynunet" status="SUCCEEDED" passes="8th+9th" count="12/12">
-        All conditions passed. No re-run needed.
-        NOTE: Checkpoints were LOST due to 413 (saved only via file_mounts workaround).
-        The 11th pass MUST verify DynUNet checkpoints land in GCS via MLflow.
-      </model>
-      <model name="mambavesselnet" status="SUCCEEDED" passes="8th" count="8/8">
-        All conditions passed. No re-run needed.
-        Same checkpoint loss caveat as DynUNet.
-      </model>
-      <model name="sam3_topolora" status="FAILED" passes="9th" count="0/8">
-        All 20 attempts FAILED. Root causes:
-        (a) OOM in check_gradient_flow() — fixed by skip_gradient_flow when gradient_checkpointing=true
-        (b) Spot preemption exhaustion (3 recoveries, then FAILED)
-        (c) 80% preemption rate on L4 spot in europe-west4
-      </model>
-      <model name="sam3_hybrid" status="NOT_SUBMITTED" passes="10th" count="0/8">
-        10th pass: job #154 ran 12+ hours. Training completed in 5 min but
-        post-training subflow + spot preemption + 413 = 12h.
-      </model>
-      <model name="sam3_vanilla_zeroshot" status="NOT_SUBMITTED" passes="10th" count="0/1">
-        Never completed. Setup failures + 413.
-      </model>
-      <model name="vesselfm_zeroshot" status="FAILED_SETUP" passes="10th" count="0/1">
-        3 attempts, all FAILED_SETUP. Likely HF download or DVC pull issues.
-      </model>
-    </previous-pass-results>
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2: WHAT CHANGED SINCE THE ORIGINAL PLAN                    -->
+  <!--                                                                     -->
+  <!-- This section documents EVERY infrastructure change made during      -->
+  <!-- the 2026-03-27 session. A fresh Claude session MUST read this       -->
+  <!-- to understand the current state of the world.                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <what-changed-since-original-plan>
+    <change id="C1" category="region-migration" impact="critical">
+      <description>
+        ALL GCP infrastructure migrated from europe-north1 (Finland) to europe-west4 (Netherlands).
+        Zero resources remain in the old region. Verified via FinOps snapshot.
+      </description>
+      <details>
+        GAR docker registry: europe-west4-docker.pkg.dev/minivess-mlops/minivess
+        GCS buckets: all 3 in europe-west4 (dvc-data, mlflow-artifacts, checkpoints)
+        Cloud SQL: mlflow-db-479b793 in europe-west4
+        Cloud Run MLflow: minivess-mlflow in europe-west4
+        GPU VMs: SkyPilot launches in europe-west4 (co-located = zero egress)
+      </details>
+      <cost-impact>EUR 89/month saved (was cross-region GAR egress)</cost-impact>
+    </change>
 
-    <what-changed-since-10th-pass>
-      <change>10th pass double-check: 67 new tests (NaN guards, OOM diagnostics, etc.)</change>
-      <change>11th pass pre-run fixes: MLflow GCS deployment, Docker rebuild, file_mounts removal</change>
-      <change>Cancelled all stale jobs (IDs 108-157)</change>
-    </what-changed-since-10th-pass>
-  </context>
+    <change id="C2" category="mlflow-413-fix" impact="critical">
+      <description>
+        MLflow 413 "Request Entity Too Large" FIXED. Cloud Run MLflow deployed with
+        gs:// artifact root pointing to gs://minivess-mlops-mlflow-artifacts/.
+        RUNTIME VERIFIED — artifacts upload directly to GCS, bypassing the Cloud Run
+        proxy entirely. No more 32 MB request size limit.
+      </description>
+      <details>
+        Image: europe-west4-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0
+        Artifact root: gs://minivess-mlops-mlflow-artifacts
+        Cloud SQL backend: mlflow-db-479b793 (PostgreSQL 15)
+        URL: https://minivess-mlflow-a7w6hliydq-ez.a.run.app
+      </details>
+      <verification>
+        Phase 1 J1 (DynUNet) will verify 68 MB checkpoint uploads succeed.
+        Phase 1 J2 (SAM3 Hybrid) will verify ~900 MB checkpoint uploads succeed.
+      </verification>
+    </change>
 
-  <!-- ================================================================== -->
-  <!-- PHASE 1: INFRASTRUCTURE VALIDATION (3 focused test jobs)            -->
-  <!-- ================================================================== -->
+    <change id="C3" category="file-mounts-removal" impact="critical">
+      <description>
+        file_mounts REMOVED from ALL SkyPilot YAMLs. MLflow GCS artifact store is
+        now the ONLY persistence mechanism for checkpoints and artifacts.
+        This eliminates the competing persistence anti-pattern that caused months
+        of confusion (see metalearning: 2026-03-27-mlflow-413-10-passes-never-fixed).
+      </description>
+      <details>
+        Removed: file_mounts to gs://minivess-mlops-checkpoints
+        Contract: mlflow_only_artifact_contract (knowledge-graph invariant)
+        If MLflow breaks: FIX MLflow, do NOT add file_mounts back.
+      </details>
+    </change>
+
+    <change id="C4" category="controller-optimization" impact="medium">
+      <description>
+        SkyPilot jobs controller noted at n4-standard-4 in europe-west1-b.
+        The controller orchestrates but does not transfer data. Its location
+        does not affect egress costs. Downsize to e2-medium is a future
+        optimization (not yet applied as of this plan).
+      </description>
+      <cost-impact>
+        Current: ~EUR 93-100/month (n4-standard-4).
+        Potential: ~EUR 15-20/month (e2-medium) if SkyPilot supports it.
+      </cost-impact>
+    </change>
+
+    <change id="C5" category="region-config" impact="medium">
+      <description>
+        region_config changed from europe_us to europe_strict in debug.yaml.
+        Single-region europe-west4 only — zero cross-region egress, zero
+        US fallback. Appropriate for debug runs where cost predictability
+        matters more than availability.
+      </description>
+      <details>
+        Config file: configs/cloud/regions/europe_strict.yaml
+        Regions: europe-west4 only (Netherlands, 3 zones)
+        No US fallback — if europe-west4 has no L4 capacity, jobs PEND.
+      </details>
+    </change>
+
+    <change id="C6" category="test-suite" impact="high">
+      <description>
+        107 new tests added during this session across multiple categories:
+        double-check tests, FinOps validation, experiment harness, config scanner.
+      </description>
+      <test-results>
+        <tier name="staging" passed="6721" failed="0" skipped="0"/>
+        <tier name="prod" passed="7005" failed="0" skipped="0"/>
+      </test-results>
+    </change>
+
+    <change id="C7" category="docker-image" impact="high">
+      <description>
+        Docker base image rebuilt and pushed to europe-west4 GAR.
+        Image includes all fixes from this session.
+      </description>
+      <details>
+        Image: europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+        Size: 5.97 GiB
+        Built: 2026-03-28T01:41:09Z
+      </details>
+    </change>
+
+    <change id="C8" category="stale-jobs" impact="low">
+      <description>
+        All stale SkyPilot jobs (IDs 108-157) cancelled. Clean job queue.
+      </description>
+    </change>
+  </what-changed-since-original-plan>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 3: SESSION CONTEXT (prior pass failures and fixes)         -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <session-context>
+    <previous-pass id="10" outcome="partial-failure">
+      <root-causes>
+        <cause id="RC1">MLflow 413 — checkpoint upload exceeds Cloud Run 32 MB proxy limit.
+          Training succeeds but ALL artifacts (checkpoints, metrics) are lost.</cause>
+        <cause id="RC2">SAM3 OOM in check_gradient_flow() — gradient materialization
+          with gradient_checkpointing=true causes CUDA OOM on L4 (24 GB).</cause>
+        <cause id="RC3">L4 spot preemption rate ~80% in europe-west4 for SAM3 jobs
+          (25+ min duration). 3 recoveries then FAILED.</cause>
+        <cause id="RC4">Cross-region GAR egress (europe-north1 to europe-west4) adding
+          latency and EUR 89/month cost.</cause>
+        <cause id="RC5">file_mounts competing with MLflow for artifact persistence —
+          created confusion about which mechanism was actually working.</cause>
+        <cause id="RC6">VesselFM zero-shot: 3 FAILED_SETUP attempts — HF download or
+          DVC pull issues.</cause>
+        <cause id="RC7">Job #154 ran 12+ hours — training completed in 5 min but
+          post-training subflow + spot preemption + 413 = 12h wasted.</cause>
+      </root-causes>
+
+      <fixes-applied>
+        <fix ref="RC1">MLflow Cloud Run redeployed with gs:// artifact root — artifacts
+          upload directly to GCS, no proxy limit. Runtime verified.</fix>
+        <fix ref="RC2">skip_gradient_flow guard when gradient_checkpointing=true.
+          Already present from 10th pass pre-run fixes.</fix>
+        <fix ref="RC3">SAM3 jobs use ON-DEMAND (not spot) to avoid preemption.
+          80% preemption on 25+ min jobs is economically irrational.</fix>
+        <fix ref="RC4">ALL infrastructure migrated to europe-west4. Same-region =
+          zero egress. Verified via FinOps snapshot.</fix>
+        <fix ref="RC5">file_mounts REMOVED from all SkyPilot YAMLs. MLflow is the
+          ONLY persistence mechanism.</fix>
+        <fix ref="RC6">VesselFM setup: retry logic with timeout + exit code 33/34
+          for EAGER_NEXT_REGION recovery.</fix>
+        <fix ref="RC7">Monitoring protocol with max_duration alarms prevents 12h runaways.</fix>
+      </fixes-applied>
+    </previous-pass>
+
+    <qa-improvements-since-prior-pass>
+      <improvement>107 new tests: double-check, FinOps, harness, config scanner</improvement>
+      <improvement>Staging: 6721 passed, 0 failed, 0 skipped</improvement>
+      <improvement>Prod: 7005 passed, 0 failed, 0 skipped</improvement>
+      <improvement>YAML contract validation via validate_yaml_contract.py</improvement>
+      <improvement>GCS bucket consistency tests (cross-file name matching)</improvement>
+      <improvement>MLflow artifact root verification tests</improvement>
+    </qa-improvements-since-prior-pass>
+  </session-context>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 4: PREVIOUS PASS RESULTS (cumulative across passes 8-10)   -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <previous-pass-results>
+    <model name="dynunet" status="TRAINING_SUCCEEDED" passes="8th+9th" count="12/12">
+      All training conditions passed. Checkpoints LOST due to 413 (saved only
+      via file_mounts workaround which is now removed). MUST re-verify that
+      artifact upload works via the new MLflow GCS path.
+    </model>
+    <model name="mambavesselnet" status="TRAINING_SUCCEEDED" passes="8th" count="8/8">
+      All training conditions passed. Same checkpoint loss caveat as DynUNet.
+      MUST re-verify artifact upload.
+    </model>
+    <model name="sam3_topolora" status="FAILED" passes="9th" count="0/8">
+      All 20 attempts FAILED. Root causes: OOM in check_gradient_flow() +
+      80% spot preemption rate. Fixes applied: gradient flow skip +
+      on-demand pricing.
+    </model>
+    <model name="sam3_hybrid" status="NOT_COMPLETED" passes="10th" count="0/8">
+      Job #154 ran 12+ hours. Training likely completed in 5 min but
+      post-training + spot + 413 = 12h wasted. All conditions must re-run.
+    </model>
+    <model name="sam3_vanilla_zeroshot" status="NOT_SUBMITTED" passes="10th" count="0/1">
+      Never completed. Setup failures + 413.
+    </model>
+    <model name="vesselfm_zeroshot" status="FAILED_SETUP" passes="10th" count="0/1">
+      3 attempts, all FAILED_SETUP. HF download or DVC pull issues.
+      Retry logic added with exit codes 33/34 for recovery.
+    </model>
+  </previous-pass-results>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 5: COLD-START INSTRUCTIONS                                 -->
+  <!--                                                                     -->
+  <!-- Complete context for executing from a FRESH Claude session.         -->
+  <!-- A new session MUST follow these steps exactly.                      -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <cold-start-instructions>
+    <step id="CS1" name="Branch and Environment">
+      <description>Ensure you are on the correct branch with all fixes.</description>
+      <commands>
+        <cmd>cd /home/petteri/Dropbox/github-personal/vascadia</cmd>
+        <cmd>git checkout fix/10th-pass-production-readiness</cmd>
+        <cmd>git pull origin fix/10th-pass-production-readiness</cmd>
+        <cmd>uv sync --all-extras</cmd>
+      </commands>
+    </step>
+
+    <step id="CS2" name="Environment Variables">
+      <description>
+        Verify .env has the correct values for GCP Cloud Run MLflow.
+        The MLFLOW_TRACKING_URI MUST point to the Cloud Run URL, NOT localhost.
+      </description>
+      <required-env-vars>
+        <var name="MLFLOW_TRACKING_URI">https://minivess-mlflow-a7w6hliydq-ez.a.run.app</var>
+        <var name="HF_TOKEN">Your HuggingFace token (required for SAM3 + VesselFM weight download)</var>
+        <var name="GCP_PROJECT">minivess-mlops</var>
+        <var name="GCP_REGION">europe-west4</var>
+      </required-env-vars>
+      <commands>
+        <cmd>cat .env | grep MLFLOW_TRACKING_URI</cmd>
+        <cmd>cat .env | grep HF_TOKEN</cmd>
+      </commands>
+      <warning>
+        If MLFLOW_TRACKING_URI=http://localhost:5000, ALL cloud job metrics/artifacts
+        will be LOST. The training VM cannot reach your local Docker MLflow.
+      </warning>
+    </step>
+
+    <step id="CS3" name="Verify GCP Authentication">
+      <description>SkyPilot and DVC need GCP Application Default Credentials.</description>
+      <commands>
+        <cmd>gcloud auth application-default print-access-token | head -c 20</cmd>
+        <cmd>uv run sky check gcp</cmd>
+      </commands>
+    </step>
+
+    <step id="CS4" name="Verify Docker Image on GAR">
+      <description>
+        The base image MUST exist in europe-west4 GAR and be fresh
+        (built after the latest commit with fixes).
+      </description>
+      <commands>
+        <cmd>gcloud artifacts docker images list europe-west4-docker.pkg.dev/minivess-mlops/minivess --format="table(package,tags,createTime)" --sort-by="~createTime" --limit=5</cmd>
+      </commands>
+      <criterion>base:latest must have createTime after 2026-03-28T01:00:00Z</criterion>
+    </step>
+
+    <step id="CS5" name="Verify DVC Data on GCS">
+      <description>
+        MiniVess training data MUST be on GCS for cloud VMs to pull.
+        If buckets are empty, push data first.
+      </description>
+      <commands>
+        <cmd>gsutil du -s gs://minivess-mlops-dvc-data/</cmd>
+      </commands>
+      <warning>
+        If the bucket is empty (0 bytes), data has not been pushed yet.
+        Push with: dvc push -r gcs
+        The data MUST be there before launching — cloud VMs pull from GCS.
+      </warning>
+    </step>
+
+    <step id="CS6" name="Verify MLflow Connectivity">
+      <description>
+        The Cloud Run MLflow server MUST be reachable and using GCS artifact store.
+      </description>
+      <commands>
+        <cmd>curl -s -o /dev/null -w "%{http_code}" https://minivess-mlflow-a7w6hliydq-ez.a.run.app/health</cmd>
+        <cmd>uv run python -c "
+import mlflow
+mlflow.set_tracking_uri('https://minivess-mlflow-a7w6hliydq-ez.a.run.app')
+client = mlflow.tracking.MlflowClient()
+exps = client.search_experiments(max_results=1)
+print(f'MLflow OK: {len(exps)} experiments')
+"</cmd>
+      </commands>
+      <criterion>HTTP 200 from health endpoint, MLflow client connects</criterion>
+    </step>
+
+    <step id="CS7" name="Verify SkyPilot Controller">
+      <description>
+        The SkyPilot jobs controller must be running. If stopped, start it.
+      </description>
+      <commands>
+        <cmd>uv run sky jobs queue 2>&amp;1 | head -5</cmd>
+        <cmd>uv run sky status</cmd>
+      </commands>
+      <note>
+        The controller is in europe-west1-b (n4-standard-4). This is expected —
+        it orchestrates jobs but does not transfer data. Training VMs are in
+        europe-west4 (co-located with GAR/GCS/Cloud SQL).
+      </note>
+    </step>
+
+    <step id="CS8" name="Run Test Suite">
+      <description>
+        All tests MUST pass before launching. Zero tolerance for pre-existing failures.
+      </description>
+      <commands>
+        <cmd>make test-staging</cmd>
+      </commands>
+      <criterion>6721+ passed, 0 failed, 0 skipped</criterion>
+    </step>
+
+    <step id="CS9" name="Run Preflight and Dry Run">
+      <description>
+        Preflight validates GCP infrastructure. Dry run validates factorial conditions.
+      </description>
+      <commands>
+        <cmd>uv run python scripts/preflight_gcp.py</cmd>
+        <cmd>bash scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml</cmd>
+      </commands>
+      <criterion>Preflight: all checks pass. Dry run: correct condition count.</criterion>
+    </step>
+
+    <step id="CS10" name="Create Report File BEFORE Launch">
+      <description>
+        The report file MUST exist before launching (Rule H1: REPORT-BEFORE-LAUNCH).
+        Create it with headers and empty tables.
+      </description>
+      <commands>
+        <cmd>touch docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-11th-pass.md</cmd>
+      </commands>
+    </step>
+  </cold-start-instructions>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 6: MONITORING PROTOCOL (CRITICAL — prevents 12h disaster)  -->
+  <!--                                                                     -->
+  <!-- The 10th pass had a job run for 12+ hours because nobody was        -->
+  <!-- monitoring duration. This protocol ensures every job is tracked     -->
+  <!-- with hard time limits and automatic escalation.                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <monitoring-protocol>
+    <overview>
+      Use /experiment-harness to orchestrate and /factorial-monitor to monitor.
+      The harness creates the XML + report, validates gates, then drives
+      /factorial-monitor for polling + diagnosis + selective relaunch.
+    </overview>
+
+    <expected-durations>
+      <job-type model="dynunet" expected-minutes="10" warn-minutes="30" cancel-minutes="50">
+        DynUNet is the fastest model. 2 epochs on half data should complete
+        in under 10 minutes. If it exceeds 30 minutes, something is wrong
+        (setup stuck, DVC pull failing, MLflow connectivity issue).
+      </job-type>
+      <job-type model="mambavesselnet" expected-minutes="12" warn-minutes="36" cancel-minutes="60">
+        MambaVesselNet is similar to DynUNet in training speed.
+      </job-type>
+      <job-type model="sam3_topolora" expected-minutes="25" warn-minutes="75" cancel-minutes="125">
+        SAM3 TopoLoRA uses gradient checkpointing + BS=1 + grad_accum=4.
+        Slower than DynUNet but should complete within 25 minutes.
+      </job-type>
+      <job-type model="sam3_hybrid" expected-minutes="25" warn-minutes="75" cancel-minutes="125">
+        SAM3 Hybrid: same profile as TopoLoRA. ~900 MB checkpoint upload
+        adds 1-2 minutes vs DynUNet's 68 MB.
+      </job-type>
+      <job-type model="sam3_vanilla" purpose="zero-shot" expected-minutes="15" warn-minutes="45" cancel-minutes="75">
+        Zero-shot: no training, only evaluation. Should be fast.
+        Includes model weight download (~9 GB) in setup.
+      </job-type>
+      <job-type model="vesselfm" purpose="zero-shot" expected-minutes="15" warn-minutes="45" cancel-minutes="75">
+        Zero-shot: no training, only evaluation on DeepVess.
+        Includes VesselFM weight download in setup.
+      </job-type>
+    </expected-durations>
+
+    <duration-alarm-protocol>
+      <level severity="INFO" trigger="job reaches expected_minutes">
+        Log: "Job X at expected duration — normal."
+      </level>
+      <level severity="WARN" trigger="job reaches 3x expected (warn-minutes)">
+        Action: Tail job logs via `sky jobs logs JOB_ID`.
+        Look for: stuck DVC pull, hanging MLflow upload, spot recovery loop,
+        no output for 10+ minutes.
+      </level>
+      <level severity="CANCEL" trigger="job reaches 5x expected (cancel-minutes)">
+        Action: `sky jobs cancel JOB_ID`. The job is stuck — do not let it burn credits.
+        Investigate root cause before relaunching.
+      </level>
+    </duration-alarm-protocol>
+
+    <polling-protocol>
+      <interval>60 seconds</interval>
+      <command>uv run sky jobs queue</command>
+      <per-poll-actions>
+        <action>Update report status matrix with current job states</action>
+        <action>Check for newly terminal jobs (SUCCEEDED, FAILED, CANCELLED)</action>
+        <action>For each newly terminal failure: run ralph_monitor.analyze_logs()</action>
+        <action>Check duration against warn/cancel thresholds</action>
+      </per-poll-actions>
+    </polling-protocol>
+
+    <log-tailing>
+      <trigger>No output from a job for 10 minutes</trigger>
+      <command>sky jobs logs JOB_ID --follow</command>
+      <common-stuck-patterns>
+        <pattern>Stuck at "Pulling training data from GCS via DVC..." — DVC pull hanging</pattern>
+        <pattern>Stuck at "Pre-caching SAM3 weights..." — HF rate limited</pattern>
+        <pattern>Stuck at "Checking MLflow server connectivity..." — Cloud Run cold start</pattern>
+        <pattern>Repeated "Spot preemption recovery..." — capacity exhaustion</pattern>
+        <pattern>No output at all — setup script crashed before logging</pattern>
+      </common-stuck-patterns>
+    </log-tailing>
+
+    <cost-tracking>
+      <per-job>
+        Track start_time, end_time, GPU type, spot vs on-demand.
+        L4 spot: $0.2204/hr. L4 on-demand: $0.70/hr.
+      </per-job>
+      <running-total>
+        Update after each terminal job:
+        cumulative_cost += (duration_hours * hourly_rate)
+      </running-total>
+      <budget-alarm threshold-usd="15">
+        If total cost exceeds $15, STOP and reassess. The debug factorial
+        should cost $6-10 total. $15+ means something is wrong.
+      </budget-alarm>
+    </cost-tracking>
+
+    <kill-switch>
+      3+ identical failures within 5 minutes AND remaining running jobs
+      have not passed the failure point → cancel same-config jobs and
+      begin batch diagnosis. Different-config jobs continue.
+    </kill-switch>
+
+    <skill-references>
+      <skill name="/experiment-harness" role="orchestration">
+        Creates XML plan, validates gates, drives factorial-monitor,
+        writes report, captures compound learning. 5 phases:
+        GENERATE, VALIDATE, EXECUTE, COMPOUND, REFLECT.
+      </skill>
+      <skill name="/factorial-monitor" role="monitoring">
+        Multi-job monitoring, aggregated diagnosis, selective relaunch.
+        6 phases: LAUNCH, MONITOR, DIAGNOSE, FIX, RELAUNCH, REPORT.
+        Rules F1-F5 prevent known anti-patterns.
+      </skill>
+      <skill name="/ralph-loop" role="per-job-diagnosis">
+        Per-job log analysis when a specific job fails. Used by
+        factorial-monitor for individual failure diagnosis.
+      </skill>
+    </skill-references>
+  </monitoring-protocol>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 7: PHASE 1 — INFRASTRUCTURE VALIDATION (3 focused jobs)    -->
+  <!--                                                                     -->
+  <!-- Before running any factorial conditions, validate the infra fixes   -->
+  <!-- with 3 carefully chosen test jobs. Each tests a different path.     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
   <phase id="1" name="Infrastructure Validation — 3 Focused Jobs">
     <description>
-      Before running any factorial conditions, validate the infrastructure fixes
-      with 3 carefully chosen test jobs. Each tests a different code path.
+      Before running any factorial conditions, validate that the infrastructure
+      fixes actually work in production with 3 carefully chosen test jobs.
+      Each tests a different code path and artifact size.
+
       Use ON-DEMAND for SAM3 (no spot preemption during validation).
+      Use SPOT for DynUNet (fast job, preemption recoverable).
+
+      CRITICAL: ALL 3 jobs must succeed before proceeding to Phase 2.
+      If ANY fails, diagnose and fix BEFORE launching the factorial.
+      Do NOT "just retry" — understand the failure.
     </description>
 
     <job id="J1" name="dynunet-dice_ce-calibfalse-f0" purpose="Baseline + GCS artifact verify">
@@ -67,12 +504,16 @@
       <fold>0</fold>
       <use_spot>true</use_spot>
       <expected_duration_minutes>10</expected_duration_minutes>
-      <max_duration_minutes>30</max_duration_minutes>
+      <warn_duration_minutes>30</warn_duration_minutes>
+      <cancel_duration_minutes>50</cancel_duration_minutes>
+      <estimated_cost>~$0.04 (10 min x $0.22/hr spot)</estimated_cost>
       <verification>
-        <criterion>Training completes in &lt;10 min</criterion>
-        <criterion>Checkpoint appears in gs://minivess-mlops-mlflow-artifacts/ (NOT 413)</criterion>
-        <criterion>MLflow UI shows run with metrics and artifacts</criterion>
-        <criterion>No "HttpArtifactRepository" in logs</criterion>
+        <criterion id="V1.1">Training completes 2 epochs in under 10 min</criterion>
+        <criterion id="V1.2">Checkpoint appears in gs://minivess-mlops-mlflow-artifacts/ (NOT 413)</criterion>
+        <criterion id="V1.3">MLflow UI shows run with all training metrics and artifacts</criterion>
+        <criterion id="V1.4">No "HttpArtifactRepository" or "413" in job logs</criterion>
+        <criterion id="V1.5">DVC data pull from gs://minivess-mlops-dvc-data succeeds</criterion>
+        <criterion id="V1.6">Docker image pull from europe-west4 GAR completes without egress charges</criterion>
       </verification>
     </job>
 
@@ -82,15 +523,19 @@
       <aux_calib>false</aux_calib>
       <fold>0</fold>
       <use_spot>false</use_spot>
-      <note>ON-DEMAND — no spot preemption during validation. ~$0.35/hr × 0.5h = ~$0.18</note>
+      <note>ON-DEMAND — no spot preemption during validation. ~$0.70/hr x 0.5h = ~$0.35</note>
       <expected_duration_minutes>25</expected_duration_minutes>
-      <max_duration_minutes>60</max_duration_minutes>
+      <warn_duration_minutes>75</warn_duration_minutes>
+      <cancel_duration_minutes>125</cancel_duration_minutes>
+      <estimated_cost>~$0.35 (30 min x $0.70/hr on-demand)</estimated_cost>
       <verification>
-        <criterion>SAM3 weights load successfully (1468 params)</criterion>
-        <criterion>NaN guard fires on cbdice_cldice init (expected, not a bug)</criterion>
-        <criterion>Training completes 2 epochs without OOM</criterion>
-        <criterion>~900 MB checkpoint uploads to GCS without 413</criterion>
-        <criterion>VRAM peak &lt;16 GB (L4 has 24 GB)</criterion>
+        <criterion id="V2.1">SAM3 weights load successfully (ViT-32L, 648M params)</criterion>
+        <criterion id="V2.2">NaN guard fires on cbdice_cldice init (expected, not a bug)</criterion>
+        <criterion id="V2.3">Training completes 2 epochs without OOM</criterion>
+        <criterion id="V2.4">~900 MB checkpoint uploads to GCS without 413</criterion>
+        <criterion id="V2.5">VRAM peak below 16 GB (L4 has 24 GB)</criterion>
+        <criterion id="V2.6">No gradient_flow check (skipped due to gradient_checkpointing=true)</criterion>
+        <criterion id="V2.7">Post-training sub-flow completes (if applicable)</criterion>
       </verification>
     </job>
 
@@ -101,109 +546,375 @@
       <fold>0</fold>
       <use_spot>true</use_spot>
       <expected_duration_minutes>15</expected_duration_minutes>
-      <max_duration_minutes>45</max_duration_minutes>
+      <warn_duration_minutes>45</warn_duration_minutes>
+      <cancel_duration_minutes>75</cancel_duration_minutes>
+      <estimated_cost>~$0.06 (15 min x $0.22/hr spot)</estimated_cost>
       <verification>
-        <criterion>Zero-shot evaluation completes (no training)</criterion>
-        <criterion>eval/ metrics logged to MLflow</criterion>
-        <criterion>No 413 on metric/artifact logging</criterion>
+        <criterion id="V3.1">Zero-shot evaluation completes (no training, evaluation only)</criterion>
+        <criterion id="V3.2">eval/ metrics logged to MLflow without 413</criterion>
+        <criterion id="V3.3">SAM3 weight download succeeds (HuggingFace, ~9 GB)</criterion>
+        <criterion id="V3.4">DVC pull for MiniVess eval data succeeds</criterion>
       </verification>
     </job>
 
     <gate>
-      ALL 3 jobs must succeed before proceeding to Phase 2.
-      If ANY job fails, diagnose and fix BEFORE launching the factorial.
-      Do NOT "just retry" — understand the failure.
+      ALL 3 jobs MUST succeed before proceeding to Phase 2.
+      Decision matrix:
+        - J1 fails → MLflow GCS path is broken. Fix Cloud Run config.
+        - J2 fails → SAM3 OOM or large checkpoint upload issue. Check VRAM + GCS.
+        - J3 fails → Zero-shot code path or HF download issue. Check setup script.
+      If ANY fails, diagnose root cause, fix, rebuild Docker if needed, re-run.
+      Do NOT proceed to Phase 2 with any doubt about infrastructure.
     </gate>
   </phase>
 
-  <!-- ================================================================== -->
-  <!-- PHASE 2: REMAINING FACTORIAL CONDITIONS (failed in passes 9-10)     -->
-  <!-- ================================================================== -->
-  <phase id="2" name="Failed Factorial Conditions">
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 8: PHASE 2 — FAILED FACTORIAL CONDITIONS (18 jobs)         -->
+  <!--                                                                     -->
+  <!-- Run the conditions that failed in passes 9-10. DynUNet and          -->
+  <!-- MambaVesselNet are EXCLUDED from training re-run (20/20 succeeded). -->
+  <!-- Only SAM3 variants + zero-shot baselines.                           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="Failed Factorial Conditions — SAM3 + Zero-Shot">
     <description>
-      Run the conditions that failed in previous passes. DynUNet and MambaVesselNet
-      are EXCLUDED (20/20 succeeded). Only SAM3 variants + zero-shot baselines.
+      Run the 18 conditions that failed in passes 9-10. DynUNet (12/12) and
+      MambaVesselNet (8/8) training succeeded — they are NOT re-run here.
+      (Phase 3 handles artifact re-verification for those models.)
 
-      Use ON-DEMAND for SAM3 (spot had 80% preemption rate, economically irrational).
-      Use SPOT for zero-shot baselines (short jobs, preemption recoverable).
+      Strategy:
+        - SAM3 (16 conditions): ON-DEMAND to avoid 80% spot preemption rate
+        - Zero-shot (2 conditions): SPOT (short jobs, preemption recoverable)
     </description>
 
     <conditions>
       <!-- SAM3 Hybrid: 0/8 from 10th pass — all 8 conditions -->
-      <condition model="sam3_hybrid" loss="cbdice_cldice" calib="true" spot="false"/>
-      <condition model="sam3_hybrid" loss="cbdice_cldice" calib="false" spot="false"/>
-      <condition model="sam3_hybrid" loss="dice_ce" calib="true" spot="false"/>
-      <condition model="sam3_hybrid" loss="dice_ce" calib="false" spot="false"/>
-      <condition model="sam3_hybrid" loss="dice_ce_cldice" calib="true" spot="false"/>
-      <condition model="sam3_hybrid" loss="dice_ce_cldice" calib="false" spot="false"/>
-      <condition model="sam3_hybrid" loss="bce_dice_05cldice" calib="true" spot="false"/>
-      <condition model="sam3_hybrid" loss="bce_dice_05cldice" calib="false" spot="false"/>
+      <condition id="P2.1" model="sam3_hybrid" loss="cbdice_cldice" calib="true" spot="false"/>
+      <condition id="P2.2" model="sam3_hybrid" loss="cbdice_cldice" calib="false" spot="false"/>
+      <condition id="P2.3" model="sam3_hybrid" loss="dice_ce" calib="true" spot="false"/>
+      <condition id="P2.4" model="sam3_hybrid" loss="dice_ce" calib="false" spot="false"/>
+      <condition id="P2.5" model="sam3_hybrid" loss="dice_ce_cldice" calib="true" spot="false"/>
+      <condition id="P2.6" model="sam3_hybrid" loss="dice_ce_cldice" calib="false" spot="false"/>
+      <condition id="P2.7" model="sam3_hybrid" loss="bce_dice_05cldice" calib="true" spot="false"/>
+      <condition id="P2.8" model="sam3_hybrid" loss="bce_dice_05cldice" calib="false" spot="false"/>
 
       <!-- SAM3 TopoLoRA: 0/8 from 9th pass — all 8 conditions -->
-      <condition model="sam3_topolora" loss="cbdice_cldice" calib="true" spot="false"/>
-      <condition model="sam3_topolora" loss="cbdice_cldice" calib="false" spot="false"/>
-      <condition model="sam3_topolora" loss="dice_ce" calib="true" spot="false"/>
-      <condition model="sam3_topolora" loss="dice_ce" calib="false" spot="false"/>
-      <condition model="sam3_topolora" loss="dice_ce_cldice" calib="true" spot="false"/>
-      <condition model="sam3_topolora" loss="dice_ce_cldice" calib="false" spot="false"/>
-      <condition model="sam3_topolora" loss="bce_dice_05cldice" calib="true" spot="false"/>
-      <condition model="sam3_topolora" loss="bce_dice_05cldice" calib="false" spot="false"/>
+      <condition id="P2.9" model="sam3_topolora" loss="cbdice_cldice" calib="true" spot="false"/>
+      <condition id="P2.10" model="sam3_topolora" loss="cbdice_cldice" calib="false" spot="false"/>
+      <condition id="P2.11" model="sam3_topolora" loss="dice_ce" calib="true" spot="false"/>
+      <condition id="P2.12" model="sam3_topolora" loss="dice_ce" calib="false" spot="false"/>
+      <condition id="P2.13" model="sam3_topolora" loss="dice_ce_cldice" calib="true" spot="false"/>
+      <condition id="P2.14" model="sam3_topolora" loss="dice_ce_cldice" calib="false" spot="false"/>
+      <condition id="P2.15" model="sam3_topolora" loss="bce_dice_05cldice" calib="true" spot="false"/>
+      <condition id="P2.16" model="sam3_topolora" loss="bce_dice_05cldice" calib="false" spot="false"/>
 
       <!-- Zero-shot baselines: 0/2 from 10th pass -->
-      <condition model="sam3_vanilla" zero_shot="true" eval_dataset="minivess" spot="true"/>
-      <condition model="vesselfm" zero_shot="true" eval_dataset="deepvess" spot="true"/>
+      <condition id="P2.17" model="sam3_vanilla" zero_shot="true" eval_dataset="minivess" spot="true"/>
+      <condition id="P2.18" model="vesselfm" zero_shot="true" eval_dataset="deepvess" spot="true"/>
     </conditions>
 
     <total-conditions>18</total-conditions>
 
     <cost-estimate>
       <!-- SAM3 on-demand L4: $0.70/hr -->
-      <!-- 16 SAM3 conditions × 25 min = 6.7 hours × $0.70 = $4.67 -->
-      <!-- 2 zero-shot spot: 15 min × $0.21 × 2 = $0.11 -->
-      <!-- Total: ~$4.78 -->
-      <sam3-on-demand>16 jobs × 25 min × $0.70/hr = ~$4.67</sam3-on-demand>
-      <zeroshot-spot>2 jobs × 15 min × $0.21/hr = ~$0.11</zeroshot-spot>
-      <total>~$4.78</total>
+      <!-- 16 SAM3 conditions x 25 min = 6.7 hours x $0.70 = ~$4.67 -->
+      <!-- 2 zero-shot spot: 15 min x $0.22/hr x 2 = ~$0.11 -->
+      <!-- Phase 1 validation: ~$0.45 -->
+      <!-- Total Phase 1+2: ~$5.23 -->
+      <sam3-on-demand>16 jobs x 25 min x $0.70/hr = ~$4.67</sam3-on-demand>
+      <zeroshot-spot>2 jobs x 15 min x $0.22/hr = ~$0.11</zeroshot-spot>
+      <phase1-validation>3 jobs = ~$0.45</phase1-validation>
+      <subtotal-phase1-plus-2>~$5.23</subtotal-phase1-plus-2>
       <note>Compared to 10th pass: $23.30 wasted with zero useful output</note>
     </cost-estimate>
 
     <monitoring>
       <poll-interval>60s</poll-interval>
-      <duration-alarm>
-        SAM3 jobs: WARN at 45 min, CANCEL at 90 min
-        Zero-shot jobs: WARN at 30 min, CANCEL at 60 min
-      </duration-alarm>
-      <kill-switch>3+ identical failures within 5 min → cancel all same-config jobs</kill-switch>
+      <duration-alarms>
+        <alarm model="sam3_hybrid" warn-minutes="75" cancel-minutes="125"/>
+        <alarm model="sam3_topolora" warn-minutes="75" cancel-minutes="125"/>
+        <alarm model="sam3_vanilla" warn-minutes="45" cancel-minutes="75"/>
+        <alarm model="vesselfm" warn-minutes="45" cancel-minutes="75"/>
+      </duration-alarms>
+      <kill-switch>
+        3+ identical failures within 5 min → cancel all same-config jobs.
+        Different-config jobs continue running.
+      </kill-switch>
     </monitoring>
+
+    <launch-notes>
+      SAM3 on-demand: override use_spot in the sky jobs launch command.
+      The SkyPilot YAML default is spot=true, but run_factorial.sh can
+      override per-condition via environment variables or --env flag.
+      Ensure the launch script correctly sets use_spot=false for SAM3.
+    </launch-notes>
   </phase>
 
-  <!-- ================================================================== -->
-  <!-- PHASE 3: RE-VERIFY DYNUNET + MAMBAVESSELNET ARTIFACTS              -->
-  <!-- ================================================================== -->
-  <phase id="3" name="Re-verify Previously Succeeded Conditions">
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 9: PHASE 3 — RE-VERIFY ARTIFACT UPLOAD (DynUNet + Mamba)   -->
+  <!--                                                                     -->
+  <!-- DynUNet and MambaVesselNet succeeded in training but checkpoints    -->
+  <!-- were LOST due to 413. After the GCS fix + file_mounts removal,     -->
+  <!-- verify that artifact upload works for these models too.             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="Re-verify Artifact Upload for DynUNet + MambaVesselNet">
     <description>
-      DynUNet and MambaVesselNet succeeded in training but LOST checkpoints due to 413.
-      After the GCS fix, we need to verify that ARTIFACT UPLOAD works for these models.
-      We do NOT need to re-train — just re-run 1 condition each to verify the upload path.
+      DynUNet and MambaVesselNet succeeded in training (20/20 conditions) but
+      ALL checkpoints were LOST because:
+        1. MLflow 413 prevented upload via tracking server
+        2. file_mounts workaround saved to GCS but is now REMOVED
+        3. MLflow is now the ONLY persistence path
+
+      After the GCS artifact fix, we MUST verify that the MLflow upload path
+      works for these models too. Run 1 condition each — we do NOT need
+      full re-training, just enough to verify the checkpoint upload.
+
+      NOTE: If Phase 1 J1 (DynUNet) already verified artifact upload
+      successfully, Phase 3 DynUNet can be SKIPPED. Only run MambaVesselNet.
     </description>
 
     <conditions>
-      <condition model="dynunet" loss="cbdice_cldice" calib="false" spot="true" purpose="Verify 68MB checkpoint uploads to GCS"/>
-      <condition model="mambavesselnet" loss="cbdice_cldice" calib="false" spot="true" purpose="Verify MambaVesselNet checkpoint uploads"/>
+      <condition id="P3.1" model="dynunet" loss="cbdice_cldice" calib="false" fold="0" spot="true"
+                 purpose="Verify 68 MB DynUNet checkpoint uploads to GCS via MLflow">
+        <skip-if>Phase 1 J1 already verified DynUNet artifact upload</skip-if>
+      </condition>
+      <condition id="P3.2" model="mambavesselnet" loss="cbdice_cldice" calib="false" fold="0" spot="true"
+                 purpose="Verify MambaVesselNet checkpoint uploads to GCS via MLflow"/>
     </conditions>
 
-    <note>
-      If Phase 1 J1 (DynUNet) already verified artifact upload, Phase 3 can be skipped
-      for DynUNet. Only run MambaVesselNet verification.
-    </note>
+    <cost-estimate>
+      <!-- 2 jobs x 10 min x $0.22/hr spot = ~$0.07 -->
+      <!-- Or 1 job if DynUNet already verified = ~$0.04 -->
+      <total>~$0.04-0.07</total>
+    </cost-estimate>
+
+    <verification>
+      <criterion>Checkpoint appears in gs://minivess-mlops-mlflow-artifacts/</criterion>
+      <criterion>MLflow UI shows artifact with correct size</criterion>
+      <criterion>No 413 in job logs</criterion>
+      <criterion>Checkpoint can be downloaded: gsutil ls -la gs://minivess-mlops-mlflow-artifacts/...</criterion>
+    </verification>
   </phase>
 
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 10: FACTORIAL DESIGN (matches debug.yaml)                  -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <factorial-design>
+    <config-yaml>configs/factorial/debug.yaml</config-yaml>
+
+    <layer id="A" name="Training">
+      <factor name="model_family" levels="dynunet, mambavesselnet, sam3_topolora, sam3_hybrid"/>
+      <factor name="loss_name" levels="cbdice_cldice, dice_ce, dice_ce_cldice, bce_dice_05cldice"/>
+      <factor name="aux_calibration" levels="true, false"/>
+      <!-- 4 models x 4 losses x 2 calib = 32 training cells -->
+    </layer>
+
+    <layer id="B" name="Post-training">
+      <factor name="method" levels="none, swag"/>
+      <factor name="recalibration" levels="none, temperature_scaling"/>
+      <!-- 2 methods x 2 recalib = 4 post-training cells per training cell -->
+    </layer>
+
+    <layer id="C" name="Analysis">
+      <factor name="ensemble_strategy" levels="none, per_loss_single_best, all_loss_single_best, per_loss_all_best, all_loss_all_best"/>
+      <!-- 5 ensemble strategies per trained+post-trained model -->
+    </layer>
+
+    <zero-shot-baselines>
+      <baseline model="sam3_vanilla" strategy="frozen_encoder_eval" folds="1" dataset="minivess"/>
+      <baseline model="vesselfm" strategy="zero_shot_only" folds="1" dataset="deepvess"/>
+    </zero-shot-baselines>
+
+    <summary>
+      Full factorial: 4 x 4 x 2 x 2 x 2 x 5 = 640 conditions + 2 zero-shot = 642.
+      Debug reduction: 1 fold (not 3), 2 epochs (not 50), half data.
+      GPU jobs for this pass: 32 training + 2 zero-shot = 34 GPU jobs total.
+      This pass runs ONLY the 18 failed conditions + 2 artifact-verification.
+      Total jobs this pass: 3 (Phase 1) + 18 (Phase 2) + 1-2 (Phase 3) = 22-23 jobs.
+    </summary>
+  </factorial-design>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 11: WATCHLIST (carry-forward + new concerns)               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <watchlist>
+    <item id="W1" severity="HIGH" source="10th-pass-RC1">
+      GCS artifact upload for large SAM3 checkpoints (~900 MB). The 413 is
+      fixed but we have never successfully uploaded a 900 MB checkpoint to
+      GCS via MLflow. Phase 1 J2 is the FIRST real test.
+    </item>
+    <item id="W2" severity="HIGH" source="10th-pass-RC3">
+      L4 spot availability in europe-west4. With europe_strict config, there
+      is NO US fallback. If europe-west4 L4 capacity is exhausted, jobs PEND
+      indefinitely. Monitor PENDING duration — if > 30 min, consider switching
+      zero-shot jobs to on-demand.
+    </item>
+    <item id="W3" severity="MEDIUM" source="10th-pass-RC6">
+      VesselFM zero-shot setup: 3 consecutive FAILED_SETUP in 10th pass.
+      Retry logic added but root cause (HF download or DVC pull?) never
+      conclusively identified. Watch P2.18 closely.
+    </item>
+    <item id="W4" severity="MEDIUM" source="new">
+      DVC data on GCS buckets. The FinOps report shows ALL buckets are empty
+      (0 bytes). If data has not been pushed with `dvc push -r gcs`, ALL jobs
+      will fail at setup with exit code 33. Verify CS5 BEFORE launching.
+    </item>
+    <item id="W5" severity="MEDIUM" source="new">
+      SkyPilot API server version mismatch: server=1.0.0.dev20260314,
+      client=1.0.0.dev20260326 (12 days behind). May cause subtle issues.
+      Consider `sky api stop &amp;&amp; sky api start` before launching.
+    </item>
+    <item id="W6" severity="LOW" source="new">
+      Cloud SQL authorized_networks=0.0.0.0/0. Not a functional issue but a
+      security risk. Should be tightened after experiment validation.
+    </item>
+    <item id="W7" severity="LOW" source="new">
+      Untagged MLflow image in GAR (267 MiB). Cleanup candidate to save
+      ~$0.03/month. Low priority.
+    </item>
+  </watchlist>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 12: SUCCESS CRITERIA                                       -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
   <success-criteria>
-    <criterion>ALL 18 failed conditions complete successfully</criterion>
-    <criterion>ALL checkpoints visible in gs://minivess-mlops-mlflow-artifacts/</criterion>
-    <criterion>ZERO "413" or "Request Entity Too Large" in any job log</criterion>
-    <criterion>ZERO jobs exceeding max_duration_minutes</criterion>
-    <criterion>Total cost &lt; $10 (budget for debug run)</criterion>
-    <criterion>MLflow UI shows all runs with metrics and artifacts</criterion>
+    <criterion id="SC1">ALL 18 failed conditions (Phase 2) complete SUCCEEDED</criterion>
+    <criterion id="SC2">ALL checkpoints visible in gs://minivess-mlops-mlflow-artifacts/</criterion>
+    <criterion id="SC3">ZERO "413" or "Request Entity Too Large" in any job log</criterion>
+    <criterion id="SC4">ZERO jobs exceeding cancel_duration_minutes</criterion>
+    <criterion id="SC5">Total cost below $15 (budget for debug run including all phases)</criterion>
+    <criterion id="SC6">MLflow UI shows all runs with metrics AND artifacts</criterion>
+    <criterion id="SC7">Phase 3 artifact verification succeeds for MambaVesselNet</criterion>
+    <criterion id="SC8">Zero cross-region egress charges in GCP billing (next-day check)</criterion>
+
+    <what-constitutes-failure>
+      <failure severity="BLOCKING">Any job with 413 error → MLflow GCS fix did not work</failure>
+      <failure severity="BLOCKING">SAM3 OOM → gradient checkpointing or VRAM guard broken</failure>
+      <failure severity="BLOCKING">DVC pull failure on all jobs → data not on GCS</failure>
+      <failure severity="INVESTIGATE">Single job timeout → spot preemption or setup hang</failure>
+      <failure severity="INVESTIGATE">VesselFM FAILED_SETUP → HF download issue (known flaky)</failure>
+      <failure severity="ACCEPTABLE">Spot preemption on zero-shot jobs → retry via job_recovery</failure>
+    </what-constitutes-failure>
   </success-criteria>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 13: DUAL MANDATE                                           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <dual-mandate>
+    <mandate id="M1" name="Platform Validation">
+      <success-criteria>
+        <criterion>All 18 failed conditions reach SUCCEEDED</criterion>
+        <criterion>MLflow GCS artifact path works for all model sizes (68 MB to 900 MB)</criterion>
+        <criterion>Same-region europe-west4 eliminates all egress costs</criterion>
+        <criterion>Total debug factorial cost below $15</criterion>
+      </success-criteria>
+    </mandate>
+    <mandate id="M2" name="Infrastructure Improvement">
+      <focus-areas>
+        <area>Validate that file_mounts removal does not cause any data loss</area>
+        <area>Confirm SkyPilot version mismatch has no functional impact</area>
+        <area>Identify any new failure patterns not seen in passes 9-10</area>
+        <area>Measure actual duration per model to calibrate future estimates</area>
+        <area>Verify GCS lifecycle policies work correctly for non-current objects</area>
+      </focus-areas>
+    </mandate>
+  </dual-mandate>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 14: CLOUD TEST UPGRADE PLAN                                -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <cloud-test-upgrade>
+    <current-state>107 new tests this session. Staging: 6721, Prod: 7005.</current-state>
+    <target-state>Add tests per cloud observation from this pass.</target-state>
+    <new-tests-to-add>
+      <test-group name="post-pass-11-observations">
+        <test>GCS artifact size verification: checkpoint in MLflow matches expected model size</test>
+        <test>Same-region latency: GAR image pull time below 5 minutes</test>
+        <test>Duration calibration: actual vs expected per model type</test>
+        <test>Any new failure pattern discovered during this pass</test>
+      </test-group>
+    </new-tests-to-add>
+  </cloud-test-upgrade>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 15: COST SUMMARY                                           -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <cost-summary>
+    <phase name="Phase 1: Infra Validation">
+      <job name="J1 DynUNet spot" cost="~$0.04"/>
+      <job name="J2 SAM3 Hybrid on-demand" cost="~$0.35"/>
+      <job name="J3 SAM3 Vanilla zero-shot spot" cost="~$0.06"/>
+      <subtotal>~$0.45</subtotal>
+    </phase>
+    <phase name="Phase 2: Failed Conditions">
+      <group name="16x SAM3 on-demand" cost="~$4.67"/>
+      <group name="2x zero-shot spot" cost="~$0.11"/>
+      <subtotal>~$4.78</subtotal>
+    </phase>
+    <phase name="Phase 3: Artifact Re-verify">
+      <group name="1-2x spot" cost="~$0.04-0.07"/>
+      <subtotal>~$0.07</subtotal>
+    </phase>
+    <total-estimated>~$5.30</total-estimated>
+    <budget-cap>$15.00</budget-cap>
+    <comparison>10th pass wasted $23.30 with zero useful output</comparison>
+
+    <always-on-infra-cost-during-experiment>
+      <!-- These costs accrue regardless of experiment status -->
+      Cloud SQL (db-g1-small): ~$0.78/day
+      Cloud Run (MLflow, min 1): ~$0.20/day
+      SkyPilot Controller (n4-standard-4): ~$3.22/day
+      Total: ~$4.20/day (~EUR 3.87/day)
+    </always-on-infra-cost-during-experiment>
+  </cost-summary>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 16: INFRASTRUCTURE REFERENCE (quick lookup)                -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <infrastructure-reference>
+    <resource name="MLflow Cloud Run">
+      <url>https://minivess-mlflow-a7w6hliydq-ez.a.run.app</url>
+      <region>europe-west4</region>
+      <image>europe-west4-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0</image>
+      <artifact-root>gs://minivess-mlops-mlflow-artifacts</artifact-root>
+    </resource>
+    <resource name="Cloud SQL">
+      <instance>mlflow-db-479b793</instance>
+      <region>europe-west4</region>
+      <tier>db-g1-small (0.6 GB RAM, 10 GB SSD)</tier>
+    </resource>
+    <resource name="GAR Docker Registry">
+      <url>europe-west4-docker.pkg.dev/minivess-mlops/minivess</url>
+      <base-image>base:latest (5.97 GiB, built 2026-03-28T01:41:09Z)</base-image>
+    </resource>
+    <resource name="GCS Buckets">
+      <bucket name="minivess-mlops-dvc-data" purpose="DVC training data" lifecycle="none"/>
+      <bucket name="minivess-mlops-mlflow-artifacts" purpose="MLflow artifacts" lifecycle="7-day non-current delete"/>
+      <bucket name="minivess-mlops-checkpoints" purpose="Model checkpoints" lifecycle="30-day non-current delete"/>
+    </resource>
+    <resource name="SkyPilot Controller">
+      <zone>europe-west1-b</zone>
+      <machine-type>n4-standard-4</machine-type>
+      <note>Orchestrates only — training VMs are in europe-west4</note>
+    </resource>
+    <resource name="Pulumi Outputs">
+      <output name="docker_registry">europe-west4-docker.pkg.dev/minivess-mlops/minivess</output>
+      <output name="mlflow_url">https://minivess-mlflow-a7w6hliydq-ez.a.run.app</output>
+      <output name="region">europe-west4</output>
+      <output name="dvc_data_bucket">minivess-mlops-dvc-data</output>
+      <output name="mlflow_artifacts_bucket">minivess-mlops-mlflow-artifacts</output>
+      <output name="checkpoints_bucket">minivess-mlops-checkpoints</output>
+    </resource>
+    <resource name="Key Files">
+      <file path="configs/factorial/debug.yaml" purpose="Factorial experiment config"/>
+      <file path="deployment/skypilot/train_factorial.yaml" purpose="SkyPilot job template"/>
+      <file path="configs/cloud/regions/europe_strict.yaml" purpose="Single-region europe-west4"/>
+      <file path="scripts/run_factorial.sh" purpose="Deterministic launch script"/>
+      <file path="scripts/preflight_gcp.py" purpose="Pre-launch GCP validation"/>
+      <file path=".env" purpose="Environment variables (MLFLOW_TRACKING_URI, HF_TOKEN)"/>
+    </resource>
+    <resource name="FinOps Report">
+      <file path="docs/planning/v0-2_archive/original_docs/gcp-finops-snapshot-2026-03-28-report.md"/>
+      <note>Complete GCP cost baseline. Verify no new unexpected charges after experiment.</note>
+    </resource>
+  </infrastructure-reference>
 </plan>
