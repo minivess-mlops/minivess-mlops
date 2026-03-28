@@ -140,10 +140,7 @@ class TestGetGpuInfo:
         assert result["sys/gpu_count"] == "0"
         assert result["sys/gpu_model"] == "N/A"
 
-    @pytest.mark.skipif(
-        not _gpu_available(),
-        reason="GPU not available",
-    )
+    @pytest.mark.gpu
     def test_gpu_present_returns_model_name(self) -> None:
         from minivess.observability.system_info import get_gpu_info
 
