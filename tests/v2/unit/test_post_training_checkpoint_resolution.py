@@ -178,9 +178,12 @@ class TestPostTrainingUsesCheckpointConstant:
         banned = {"best.ckpt", "best_val_loss.pth", "best.pth"}
         violations = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if node.value in banned:
-                    violations.append((node.lineno, node.value))
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value in banned
+            ):
+                violations.append((node.lineno, node.value))
 
         assert not violations, (
             f"post_training_flow.py has hardcoded checkpoint names "

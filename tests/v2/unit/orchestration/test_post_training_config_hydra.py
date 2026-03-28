@@ -12,7 +12,6 @@ from pathlib import Path
 
 import yaml
 
-
 CONFIGS_DIR = Path("configs/post_training")
 
 

@@ -19,6 +19,7 @@ import os
 import time
 import warnings
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -163,13 +164,13 @@ def is_heartbeat_stale(
     bool
         ``True`` when the heartbeat is stale (older than the threshold).
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     timestamp = datetime.fromisoformat(heartbeat["timestamp"])
     # Ensure the parsed timestamp is timezone-aware (UTC)
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+        timestamp = timestamp.replace(tzinfo=UTC)
+    cutoff = datetime.now(UTC) - timedelta(minutes=threshold_minutes)
     return timestamp < cutoff
 
 

@@ -108,7 +108,7 @@ class TestNonSAM3ConfigsClean:
             return
         # If present, must be valid
         overrides = cfg.get("model_overrides", {})
-        for model, settings in overrides.items():
+        for _model, settings in overrides.items():
             assert "batch_size" in settings
             assert "gradient_accumulation_steps" in settings
 
@@ -135,9 +135,7 @@ class TestGradientCheckpointing:
         )
 
     @pytest.mark.parametrize("config_name", SAM3_CONFIGS)
-    def test_sam3_vanilla_no_gradient_checkpointing(
-        self, config_name: str
-    ) -> None:
+    def test_sam3_vanilla_no_gradient_checkpointing(self, config_name: str) -> None:
         """SAM3 Vanilla (frozen encoder) should NOT have gradient checkpointing."""
         cfg = _load_config(config_name)
         overrides = cfg.get("model_overrides", {})

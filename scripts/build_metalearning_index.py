@@ -17,11 +17,9 @@ Part of: Context Management Upgrade (Issue #906)
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import duckdb
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 METALEARNING_DIR = REPO_ROOT / ".claude" / "metalearning"

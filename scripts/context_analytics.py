@@ -24,7 +24,6 @@ from pathlib import Path
 import duckdb
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 METALEARNING_DIR = REPO_ROOT / ".claude" / "metalearning"
 MEMORY_DIR = Path.home() / ".claude" / "projects" / "-home-petteri-Dropbox-github-personal-minivess-mlops" / "memory"

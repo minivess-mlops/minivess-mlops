@@ -160,7 +160,9 @@ class TestResumeCollisionFix:
         """Script must use grep -x (exact line), not plain -F (substring)."""
         src = RUN_FACTORIAL.read_text(encoding="utf-8")
         lines = src.splitlines()
-        resume_lines = [l for l in lines if "grep" in l and "CONDITION_NAME" in l]
+        resume_lines = [
+            line for line in lines if "grep" in line and "CONDITION_NAME" in line
+        ]
         assert len(resume_lines) > 0, "No grep lines referencing CONDITION_NAME found"
         for line in resume_lines:
             # -x flag can be combined: -xF, -qxF, -Fxq, etc. or standalone --line-regexp
@@ -207,18 +209,24 @@ class TestLockfileGuard:
         lines = RUN_FACTORIAL.read_text(encoding="utf-8").splitlines()
         # Find the LOCKFILE variable assignment (defines the lock path)
         lock_def_idx = next(
-            (i for i, l in enumerate(lines)
-             if "LOCKFILE=" in l and ".lock" in l),
+            (
+                i
+                for i, line in enumerate(lines)
+                if "LOCKFILE=" in line and ".lock" in line
+            ),
             len(lines),
         )
         # Find first actual launch command (${SKY_BIN} jobs launch or sky jobs launch)
         # excluding comments and echo/dry-run lines
         launch_idx = next(
-            (i for i, l in enumerate(lines)
-             if "jobs launch" in l
-             and not l.strip().startswith("#")
-             and not l.strip().startswith("echo")
-             and not l.strip().startswith("print")),
+            (
+                i
+                for i, line in enumerate(lines)
+                if "jobs launch" in line
+                and not line.strip().startswith("#")
+                and not line.strip().startswith("echo")
+                and not line.strip().startswith("print")
+            ),
             0,
         )
         assert lock_def_idx < launch_idx, (
@@ -234,7 +242,7 @@ class TestLockfileGuard:
         # Lock file removal must be in a cleanup function or trap
         lines = src.splitlines()
         has_lock_cleanup = any(
-            ".lock" in l and ("rm" in l or "trap" in l) for l in lines
+            ".lock" in line and ("rm" in line or "trap" in line) for line in lines
         )
         assert has_lock_cleanup or ("cleanup" in src and ".lock" in src), (
             "Lockfile must be removed in cleanup/trap on exit"
@@ -297,11 +305,11 @@ class TestParallelBackpressure:
         lines = src.splitlines()
         # Find PARALLEL_SUBMISSIONS assignment
         assign_lines = [
-            l
-            for l in lines
-            if "PARALLEL_SUBMISSIONS" in l
-            and "=" in l
-            and not l.strip().startswith("#")
+            line
+            for line in lines
+            if "PARALLEL_SUBMISSIONS" in line
+            and "=" in line
+            and not line.strip().startswith("#")
         ]
         assert len(assign_lines) > 0, "PARALLEL_SUBMISSIONS not found"
         # The assignment must involve python3 or yaml (reading from config),
@@ -322,10 +330,10 @@ class TestParallelBackpressure:
         src = RUN_FACTORIAL.read_text(encoding="utf-8")
         lines = src.splitlines()
         rate_lines = [
-            l
-            for l in lines
-            if "RATE_LIMIT_SECONDS" in l
-            and "=" in l
-            and not l.strip().startswith("#")
+            line
+            for line in lines
+            if "RATE_LIMIT_SECONDS" in line
+            and "=" in line
+            and not line.strip().startswith("#")
         ]
         assert len(rate_lines) > 0

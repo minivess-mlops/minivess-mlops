@@ -15,7 +15,6 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -122,9 +121,7 @@ class TestLink2RunFactorialShEnvVar:
         dynunet_lines = [
             ln
             for ln in output.splitlines()
-            if "dynunet" in ln
-            and "GRADIENT_CHECKPOINTING" in ln
-            and "sam3" not in ln
+            if "dynunet" in ln and "GRADIENT_CHECKPOINTING" in ln and "sam3" not in ln
         ]
         assert len(dynunet_lines) > 0, (
             "No DynUNet lines with GRADIENT_CHECKPOINTING in dry-run output"
@@ -204,19 +201,17 @@ class TestLink4ArgparseBoolConversion:
         # Find the gradient_checkpointing=... keyword arg in training_flow() call
         found_safe_conversion = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.Compare):
-                # Look for pattern: X.lower() == "true"
-                if (
-                    isinstance(node.left, ast.Call)
-                    and isinstance(node.left.func, ast.Attribute)
-                    and node.left.func.attr == "lower"
-                ):
-                    for comparator in node.comparators:
-                        if (
-                            isinstance(comparator, ast.Constant)
-                            and comparator.value == "true"
-                        ):
-                            found_safe_conversion = True
+            if isinstance(node, ast.Compare) and (
+                isinstance(node.left, ast.Call)
+                and isinstance(node.left.func, ast.Attribute)
+                and node.left.func.attr == "lower"
+            ):
+                for comparator in node.comparators:
+                    if (
+                        isinstance(comparator, ast.Constant)
+                        and comparator.value == "true"
+                    ):
+                        found_safe_conversion = True
         assert found_safe_conversion, (
             "train_flow.py does not use `.lower() == 'true'` pattern. "
             "Using bool() on a string is WRONG: bool('false') == True. "
@@ -265,9 +260,9 @@ class TestLink6Sam3BackboneConsumption:
 
     def test_sam3_backbone_accepts_gradient_checkpointing(self) -> None:
         """Sam3Backbone.__init__ must accept gradient_checkpointing parameter."""
-        source = Path(
-            "src/minivess/adapters/sam3_backbone.py"
-        ).read_text(encoding="utf-8")
+        source = Path("src/minivess/adapters/sam3_backbone.py").read_text(
+            encoding="utf-8"
+        )
         tree = ast.parse(source)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "__init__":
@@ -283,9 +278,9 @@ class TestLink6Sam3BackboneConsumption:
 
     def test_sam3_backbone_calls_gc_enable(self) -> None:
         """Sam3Backbone must call gradient_checkpointing_enable() when flag is True."""
-        source = Path(
-            "src/minivess/adapters/sam3_backbone.py"
-        ).read_text(encoding="utf-8")
+        source = Path("src/minivess/adapters/sam3_backbone.py").read_text(
+            encoding="utf-8"
+        )
         assert "gradient_checkpointing_enable" in source, (
             "Sam3Backbone never calls gradient_checkpointing_enable(). "
             "Even if the flag is True, GC won't activate — OOM guaranteed."

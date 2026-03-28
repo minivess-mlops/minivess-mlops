@@ -42,18 +42,21 @@ def _extract_hf_constant(filepath: Path, constant_name: str) -> str | None:
     source = filepath.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in ast.walk(tree):
-        if isinstance(node, ast.AnnAssign) and isinstance(
-            node.target, ast.Name
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == constant_name
+            and isinstance(node.value, ast.Constant)
         ):
-            if node.target.id == constant_name and isinstance(
-                node.value, ast.Constant
-            ):
-                return node.value.value
+            return node.value.value
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == constant_name:
-                    if isinstance(node.value, ast.Constant):
-                        return node.value.value
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == constant_name
+                    and isinstance(node.value, ast.Constant)
+                ):
+                    return node.value.value
     return None
 
 
@@ -103,9 +106,7 @@ class TestSam3HfRepoConsistency:
         ],
         ids=lambda p: p.name,
     )
-    def test_skypilot_yaml_uses_correct_sam3_repo(
-        self, yaml_path: Path
-    ) -> None:
+    def test_skypilot_yaml_uses_correct_sam3_repo(self, yaml_path: Path) -> None:
         """Every SkyPilot YAML with HF calls must use 'facebook/sam3'."""
         repos = _extract_hf_repos_from_yaml_setup(yaml_path)
         sam3_repos = [r for r in repos if "sam3" in r.lower()]
@@ -135,8 +136,7 @@ class TestSam3HfRepoConsistency:
                     mismatches.append(f"{yaml_path.name}: '{repo}'")
 
         assert not mismatches, (
-            f"SAM3 HF repo mismatch vs source '{source_id}': "
-            + ", ".join(mismatches)
+            f"SAM3 HF repo mismatch vs source '{source_id}': " + ", ".join(mismatches)
         )
 
 
@@ -150,9 +150,7 @@ class TestVesselFmHfRepoConsistency:
 
     def test_vesselfm_source_constant_exists(self) -> None:
         """VESSELFM_HF_REPO must be defined in vesselfm.py."""
-        val = _extract_hf_constant(
-            ADAPTERS_DIR / "vesselfm.py", "VESSELFM_HF_REPO"
-        )
+        val = _extract_hf_constant(ADAPTERS_DIR / "vesselfm.py", "VESSELFM_HF_REPO")
         assert val is not None, "VESSELFM_HF_REPO not found in vesselfm.py"
         assert val == "bwittmann/vesselFM", (
             f"VESSELFM_HF_REPO = '{val}', expected 'bwittmann/vesselFM'"
@@ -164,16 +162,11 @@ class TestVesselFmHfRepoConsistency:
             p
             for p in SKYPILOT_YAMLS_WITH_HF_DOWNLOAD
             if p.exists()
-            and any(
-                "vessel" in r.lower()
-                for r in _extract_hf_repos_from_yaml_setup(p)
-            )
+            and any("vessel" in r.lower() for r in _extract_hf_repos_from_yaml_setup(p))
         ],
         ids=lambda p: p.name,
     )
-    def test_skypilot_yaml_uses_correct_vesselfm_repo(
-        self, yaml_path: Path
-    ) -> None:
+    def test_skypilot_yaml_uses_correct_vesselfm_repo(self, yaml_path: Path) -> None:
         """Every SkyPilot YAML with VesselFM calls must use 'bwittmann/vesselFM'."""
         repos = _extract_hf_repos_from_yaml_setup(yaml_path)
         vfm_repos = [r for r in repos if "vessel" in r.lower()]
@@ -200,9 +193,7 @@ class TestModelProfileHfRepoConsistency:
             ("sam3_hybrid", "facebook/sam3"),
         ],
     )
-    def test_model_profile_hf_repo(
-        self, profile_name: str, expected_repo: str
-    ) -> None:
+    def test_model_profile_hf_repo(self, profile_name: str, expected_repo: str) -> None:
         """Model profile YAML must declare the correct hf_repo."""
         profile_path = Path(f"configs/model_profiles/{profile_name}.yaml")
         if not profile_path.exists():

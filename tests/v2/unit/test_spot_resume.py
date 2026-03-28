@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
-import pytest
 import torch
 import yaml
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestCheckResumeState:
@@ -98,7 +100,11 @@ class TestResumeMLflowRetry:
         ckpt_dir = tmp_path / "checkpoints"
         ckpt_dir.mkdir()
 
-        state = {"epoch": 25, "mlflow_run_id": "fake-run-id", "checkpoint_dir": str(ckpt_dir)}
+        state = {
+            "epoch": 25,
+            "mlflow_run_id": "fake-run-id",
+            "checkpoint_dir": str(ckpt_dir),
+        }
         (ckpt_dir / "epoch_latest.yaml").write_text(yaml.dump(state), encoding="utf-8")
         torch.save({"model_state_dict": {}}, ckpt_dir / "epoch_latest.pth")
 
@@ -108,7 +114,9 @@ class TestResumeMLflowRetry:
         ):
             result = check_resume_state_task(ckpt_dir)
 
-        assert result is not None, "Should resume from checkpoint when MLflow unreachable"
+        assert result is not None, (
+            "Should resume from checkpoint when MLflow unreachable"
+        )
         assert result["epoch"] == 25
         assert any("unreachable" in r.message.lower() for r in caplog.records)
 
@@ -126,7 +134,9 @@ class TestResumeMLflowRetry:
         with patch("mlflow.get_run", side_effect=ConnectionError("MLflow down")):
             result = check_resume_state_task(ckpt_dir)
 
-        assert result is None, "Should start fresh when MLflow unreachable and no checkpoint"
+        assert result is None, (
+            "Should start fresh when MLflow unreachable and no checkpoint"
+        )
 
     def test_resume_mlflow_transient_failure_then_success(self, tmp_path: Path) -> None:
         """If MLflow fails once then succeeds, resume normally."""

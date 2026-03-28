@@ -14,12 +14,8 @@ See: docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-rep
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
-import time
 from pathlib import Path
-
-import pytest
 
 RUN_FACTORIAL = Path("scripts/run_factorial.sh")
 LOCKFILE = Path("outputs/.factorial.lock")
@@ -61,7 +57,7 @@ class TestLockfileBehavior:
         """--dry-run should NOT create a lockfile."""
         if LOCKFILE.exists():
             LOCKFILE.unlink()
-        result = subprocess.run(
+        subprocess.run(
             ["bash", str(RUN_FACTORIAL), "--dry-run", "configs/factorial/debug.yaml"],
             capture_output=True,
             text=True,

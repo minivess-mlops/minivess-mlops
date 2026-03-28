@@ -82,9 +82,7 @@ def test_scan_target_uses_grype_not_trivy() -> None:
             scan_lines.append(line)
             continue
         if in_scan_target:
-            if line.startswith("\t") or line.startswith(" "):
-                scan_lines.append(line)
-            elif line.strip() == "":
+            if line.startswith("\t") or line.startswith(" ") or line.strip() == "":
                 scan_lines.append(line)
             else:
                 break

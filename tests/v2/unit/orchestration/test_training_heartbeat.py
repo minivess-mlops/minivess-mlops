@@ -11,6 +11,7 @@ Task 3.6 from debug run plan.
 from __future__ import annotations
 
 import ast
+from datetime import UTC
 from pathlib import Path
 
 
@@ -30,20 +31,20 @@ class TestHeartbeatStructural:
 
     def test_heartbeat_stale_detects_old(self) -> None:
         """A heartbeat older than threshold_minutes should be stale."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from minivess.orchestration.flows.train_flow import is_heartbeat_stale
 
         old = (
-            datetime.now(timezone.utc) - timedelta(minutes=31)
+            datetime.now(UTC) - timedelta(minutes=31)
         ).isoformat()
         assert is_heartbeat_stale({"timestamp": old}) is True
 
     def test_heartbeat_fresh_not_stale(self) -> None:
         """A heartbeat just created should not be stale."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from minivess.orchestration.flows.train_flow import is_heartbeat_stale
 
-        fresh = datetime.now(timezone.utc).isoformat()
+        fresh = datetime.now(UTC).isoformat()
         assert is_heartbeat_stale({"timestamp": fresh}) is False

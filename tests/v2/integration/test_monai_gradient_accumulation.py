@@ -34,10 +34,10 @@ class _TinyConvModel(nn.Module):
     def forward(self, x: torch.Tensor) -> _StubOutput:
         return _StubOutput(logits=self.conv(x))
 
-    def to(self, device: torch.device | str) -> "_TinyConvModel":  # type: ignore[override]
+    def to(self, device: torch.device | str) -> _TinyConvModel:  # type: ignore[override]
         return super().to(device)  # type: ignore[return-value]
 
-    def train(self, mode: bool = True) -> "_TinyConvModel":  # type: ignore[override]
+    def train(self, mode: bool = True) -> _TinyConvModel:  # type: ignore[override]
         return super().train(mode)  # type: ignore[return-value]
 
 

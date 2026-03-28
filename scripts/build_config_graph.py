@@ -30,7 +30,6 @@ from typing import Any
 import duckdb
 import yaml
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS_DIR = REPO_ROOT / "configs"
 SRC_DIR = REPO_ROOT / "src"
@@ -94,14 +93,19 @@ def _find_python_consumers(config_group: str, config_name: str) -> list[dict[str
 
         # Find string literals matching the config name
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                if node.value == config_name:
-                    consumers.append({
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value == config_name
+            ):
+                consumers.append(
+                    {
                         "file": rel_path,
                         "line": node.lineno,
                         "kind": "string_literal",
                         "context": f'"{config_name}" on line {node.lineno}',
-                    })
+                    }
+                )
 
     return consumers
 
@@ -129,12 +133,14 @@ def _find_config_group_consumers() -> dict[str, list[dict[str, str]]]:
                         if group in arg_name:
                             if group not in group_consumers:
                                 group_consumers[group] = []
-                            group_consumers[group].append({
-                                "file": rel_path,
-                                "line": node.lineno,
-                                "kind": "function_param",
-                                "context": f"{node.name}({arg_name}) on line {node.lineno}",
-                            })
+                            group_consumers[group].append(
+                                {
+                                    "file": rel_path,
+                                    "line": node.lineno,
+                                    "kind": "function_param",
+                                    "context": f"{node.name}({arg_name}) on line {node.lineno}",
+                                }
+                            )
 
     return group_consumers
 
@@ -224,14 +230,18 @@ def build_graph() -> int:
 
     conn.close()
 
-    print(f"Config graph: {len(yaml_files)} YAML files, {total_edges} edges → {DB_PATH}")
+    print(
+        f"Config graph: {len(yaml_files)} YAML files, {total_edges} edges → {DB_PATH}"
+    )
     return total_edges
 
 
 def query_config(config_path: str) -> None:
     """Query which Python files consume a specific config."""
     if not DB_PATH.exists():
-        print("Config graph not built. Run: uv run python scripts/build_config_graph.py")
+        print(
+            "Config graph not built. Run: uv run python scripts/build_config_graph.py"
+        )
         return
 
     conn = duckdb.connect(str(DB_PATH), read_only=True)
@@ -260,7 +270,9 @@ def query_config(config_path: str) -> None:
 def print_summary() -> None:
     """Print summary statistics."""
     if not DB_PATH.exists():
-        print("Config graph not built. Run: uv run python scripts/build_config_graph.py")
+        print(
+            "Config graph not built. Run: uv run python scripts/build_config_graph.py"
+        )
         return
 
     conn = duckdb.connect(str(DB_PATH), read_only=True)

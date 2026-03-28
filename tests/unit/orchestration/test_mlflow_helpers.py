@@ -113,13 +113,15 @@ class TestEmitLineageSafe:
         """emit_lineage_safe() must catch import errors."""
         from minivess.orchestration.mlflow_helpers import emit_lineage_safe
 
-        with patch(
-            "minivess.orchestration.mlflow_helpers.emit_lineage_safe.__module__",
-        ):
+        with (
+            patch(
+                "minivess.orchestration.mlflow_helpers.emit_lineage_safe.__module__",
+            ),
             # Patch the import to fail
-            with patch.dict("sys.modules", {"minivess.observability.lineage": None}):
-                # Must not raise
-                emit_lineage_safe(job_name="test-flow")
+            patch.dict("sys.modules", {"minivess.observability.lineage": None}),
+        ):
+            # Must not raise
+            emit_lineage_safe(job_name="test-flow")
 
     def test_never_raises_on_exception(self) -> None:
         """emit_lineage_safe() catches all exceptions."""
@@ -158,7 +160,13 @@ class TestStartMlflowRunSafe:
             ),
             patch("mlflow.set_tracking_uri"),
             patch("mlflow.set_experiment"),
-            patch("mlflow.start_run", return_value=MagicMock(__enter__=MagicMock(return_value=mock_run), __exit__=MagicMock(return_value=False))),
+            patch(
+                "mlflow.start_run",
+                return_value=MagicMock(
+                    __enter__=MagicMock(return_value=mock_run),
+                    __exit__=MagicMock(return_value=False),
+                ),
+            ),
             patch("mlflow.log_metrics"),
         ):
             result = start_mlflow_run_safe(

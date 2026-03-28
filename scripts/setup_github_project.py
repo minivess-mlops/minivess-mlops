@@ -55,12 +55,24 @@ SIZE_TO_ESTIMATE = {"XS": 1, "S": 2, "M": 3, "L": 5, "XL": 8}
 
 # === Milestone mapping (label/title patterns → milestone name) ===
 MILESTONE_RULES = [
-    ("v0.2-infrastructure", r"Docker|SkyPilot|Pulumi|CI|cloud|GCP|RunPod|quota|infrastructure|docker|ci-cd|prefect"),
+    (
+        "v0.2-infrastructure",
+        r"Docker|SkyPilot|Pulumi|CI|cloud|GCP|RunPod|quota|infrastructure|docker|ci-cd|prefect",
+    ),
     ("v0.2-training", r"train|loss|checkpoint|epoch|fold|resume|training"),
     ("v0.2-data", r"\bdata\b|DVC|loader|augment|dataset|NIfTI|split|annotation"),
-    ("v0.2-evaluation", r"analysis|ensemble|evaluat|comparison|champion|metrics.reloaded"),
-    ("v0.2-biostatistics", r"biostat|ANOVA|ranking|pairwise|variance|figure|table|LaTeX"),
-    ("v0.2-observability", r"MLflow|lineage|drift|profil|metric.key|tracking|observability|mlflow|monitoring"),
+    (
+        "v0.2-evaluation",
+        r"analysis|ensemble|evaluat|comparison|champion|metrics.reloaded",
+    ),
+    (
+        "v0.2-biostatistics",
+        r"biostat|ANOVA|ranking|pairwise|variance|figure|table|LaTeX",
+    ),
+    (
+        "v0.2-observability",
+        r"MLflow|lineage|drift|profil|metric.key|tracking|observability|mlflow|monitoring",
+    ),
     ("v0.2-post-training", r"post.training|calibrat|conformal|SWAG|checkpoint.averag"),
     ("v0.2-deployment", r"deploy|ONNX|BentoML|serving|inference|model.registry"),
     ("v0.2-dashboard", r"dashboard|Gradio|health.check|QA.flow"),
@@ -72,11 +84,13 @@ MILESTONE_RULES = [
 def gh(args: list[str], input_data: str | None = None) -> str:
     """Run gh CLI command and return stdout."""
     result = subprocess.run(
-        ["gh"] + args,
-        capture_output=True, text=True, input=input_data, timeout=30
+        ["gh"] + args, capture_output=True, text=True, input=input_data, timeout=30
     )
     if result.returncode != 0 and "already exists" not in result.stderr:
-        print(f"  WARN: gh {' '.join(args[:3])}... → {result.stderr[:200]}", file=sys.stderr)
+        print(
+            f"  WARN: gh {' '.join(args[:3])}... → {result.stderr[:200]}",
+            file=sys.stderr,
+        )
     return result.stdout.strip()
 
 
@@ -85,7 +99,9 @@ def graphql(query: str, retries: int = 3) -> dict:
     for attempt in range(retries):
         result = subprocess.run(
             ["gh", "api", "graphql", "-f", f"query={query}"],
-            capture_output=True, text=True, timeout=30
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             return json.loads(result.stdout)
@@ -172,16 +188,32 @@ def phase1_create_milestones() -> dict[str, int]:
     }
     result = {}
     for title, desc in milestones.items():
-        out = gh(["api", "repos/petteriTeikari/vascadia/milestones",
-                  "-f", f"title={title}", "-f", f"description={desc}", "-f", "state=open"])
+        out = gh(
+            [
+                "api",
+                "repos/petteriTeikari/vascadia/milestones",
+                "-f",
+                f"title={title}",
+                "-f",
+                f"description={desc}",
+                "-f",
+                "state=open",
+            ]
+        )
         if out:
             data = json.loads(out)
             result[title] = data.get("number", 0)
             print(f"  Created: {title} (#{data.get('number', '?')})")
         else:
             # Already exists — find it
-            existing = gh(["api", "repos/petteriTeikari/vascadia/milestones",
-                          "--jq", f'[.[] | select(.title=="{title}")][0].number'])
+            existing = gh(
+                [
+                    "api",
+                    "repos/petteriTeikari/vascadia/milestones",
+                    "--jq",
+                    f'[.[] | select(.title=="{title}")][0].number',
+                ]
+            )
             if existing:
                 result[title] = int(existing)
                 print(f"  Exists: {title} (#{existing})")
@@ -197,15 +229,38 @@ def fetch_all_issues() -> list[dict]:
     issues = []
     page = 1
     while True:
-        out = gh(["issue", "list", "--repo", "petteriTeikari/vascadia",
-                  "--state", "all", "--limit", "100", "--json",
-                  "number,title,state,labels,createdAt,closedAt,id",
-                  "--jq", f".[{(page-1)*100}:{page*100}]"])
+        out = gh(
+            [
+                "issue",
+                "list",
+                "--repo",
+                "petteriTeikari/vascadia",
+                "--state",
+                "all",
+                "--limit",
+                "100",
+                "--json",
+                "number,title,state,labels,createdAt,closedAt,id",
+                "--jq",
+                f".[{(page - 1) * 100}:{page * 100}]",
+            ]
+        )
         # Use paginated approach
         break  # gh issue list doesn't paginate well, use single call
-    out = gh(["issue", "list", "--repo", "petteriTeikari/vascadia",
-              "--state", "all", "--limit", "1000", "--json",
-              "number,title,state,labels,createdAt,closedAt,id"])
+    out = gh(
+        [
+            "issue",
+            "list",
+            "--repo",
+            "petteriTeikari/vascadia",
+            "--state",
+            "all",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title,state,labels,createdAt,closedAt,id",
+        ]
+    )
     if out:
         issues = json.loads(out)
     print(f"  Found {len(issues)} issues")
@@ -219,7 +274,7 @@ def fetch_project_items() -> dict[str, str]:
     cursor = None
     while True:
         after = f', after: "{cursor}"' if cursor else ""
-        result = graphql(f'''query {{
+        result = graphql(f"""query {{
             user(login: "petteriTeikari") {{
                 projectV2(number: 6) {{
                     items(first: 100{after}) {{
@@ -234,8 +289,10 @@ def fetch_project_items() -> dict[str, str]:
                     }}
                 }}
             }}
-        }}''')
-        items = result.get("data", {}).get("user", {}).get("projectV2", {}).get("items", {})
+        }}""")
+        items = (
+            result.get("data", {}).get("user", {}).get("projectV2", {}).get("items", {})
+        )
         for node in items.get("nodes", []):
             content = node.get("content")
             if content and content.get("id"):
@@ -249,7 +306,9 @@ def fetch_project_items() -> dict[str, str]:
 
 def determine_priority(labels: list[str]) -> str | None:
     """Map label names to priority option ID."""
-    label_names = {l if isinstance(l, str) else l.get("name", "") for l in labels}
+    label_names = {
+        item if isinstance(item, str) else item.get("name", "") for item in labels
+    }
     if "P0-critical" in label_names or "P0" in label_names:
         return PRIORITY_P0
     if "P1-high" in label_names or "P1" in label_names:
@@ -261,7 +320,9 @@ def determine_priority(labels: list[str]) -> str | None:
 
 def determine_size(labels: list[str], title: str) -> tuple[str, int]:
     """Determine size and estimate from labels/title."""
-    label_names = {l if isinstance(l, str) else l.get("name", "") for l in labels}
+    label_names = {
+        item if isinstance(item, str) else item.get("name", "") for item in labels
+    }
     if "bug" in label_names:
         return SIZE_S, 2
     if "refactor" in label_names or "tech-debt" in label_names:
@@ -277,7 +338,9 @@ def determine_size(labels: list[str], title: str) -> tuple[str, int]:
 
 def determine_milestone(labels: list[str], title: str) -> str | None:
     """Match issue to a milestone based on labels and title."""
-    label_names = " ".join(l if isinstance(l, str) else l.get("name", "") for l in labels)
+    label_names = " ".join(
+        item if isinstance(item, str) else item.get("name", "") for item in labels
+    )
     search_text = f"{title} {label_names}"
     for ms_name, pattern in MILESTONE_RULES:
         if re.search(pattern, search_text, re.IGNORECASE):
@@ -301,8 +364,14 @@ def run_all_phases(milestones: dict[str, int]) -> None:
 
     # Get milestone numbers
     ms_numbers = {}
-    out = gh(["api", "repos/petteriTeikari/vascadia/milestones", "--jq",
-              "[.[] | {title: .title, number: .number}]"])
+    out = gh(
+        [
+            "api",
+            "repos/petteriTeikari/vascadia/milestones",
+            "--jq",
+            "[.[] | {title: .title, number: .number}]",
+        ]
+    )
     if out:
         for ms in json.loads(out):
             ms_numbers[ms["title"]] = ms["number"]
@@ -320,11 +389,15 @@ def run_all_phases(milestones: dict[str, int]) -> None:
         labels = issue.get("labels", [])
         created_at = issue.get("createdAt", "")
         closed_at = issue.get("closedAt")
-        label_names = [l["name"] if isinstance(l, dict) else l for l in labels]
+        label_names = [
+            item["name"] if isinstance(item, dict) else item for item in labels
+        ]
 
         # Progress
         if (i + 1) % 50 == 0:
-            print(f"  Progress: {i+1}/{len(issues)} (added={added}, updated={updated})")
+            print(
+                f"  Progress: {i + 1}/{len(issues)} (added={added}, updated={updated})"
+            )
 
         # Phase 2: Add to project if not already there
         item_id = existing_items.get(node_id)
@@ -362,8 +435,17 @@ def run_all_phases(milestones: dict[str, int]) -> None:
         # Phase 6: Assign milestone
         ms_name = determine_milestone(label_names, title)
         if ms_name and ms_name in ms_numbers:
-            gh(["issue", "edit", str(num), "--repo", "petteriTeikari/vascadia",
-                "--milestone", ms_name])
+            gh(
+                [
+                    "issue",
+                    "edit",
+                    str(num),
+                    "--repo",
+                    "petteriTeikari/vascadia",
+                    "--milestone",
+                    ms_name,
+                ]
+            )
 
         # Phase 7a: Set Start date
         if created_at:
@@ -385,7 +467,7 @@ def run_all_phases(milestones: dict[str, int]) -> None:
         if updated % 10 == 0:
             time.sleep(0.5)
 
-    print(f"\n=== DONE ===")
+    print("\n=== DONE ===")
     print(f"  Added to project: {added}")
     print(f"  Updated: {updated}")
     print(f"  Errors: {errors}")

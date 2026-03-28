@@ -99,18 +99,14 @@ def paper_names(paper_cfg: dict[str, Any]) -> list[str]:
 class TestAllConditionNamesUnique:
     """No two conditions may share the same name (SkyPilot job collision)."""
 
-    def test_debug_all_condition_names_unique(
-        self, debug_names: list[str]
-    ) -> None:
+    def test_debug_all_condition_names_unique(self, debug_names: list[str]) -> None:
         assert len(debug_names) == len(set(debug_names)), (
             f"Duplicate condition names in debug.yaml: "
             f"{len(debug_names)} total, {len(set(debug_names))} unique. "
             f"Duplicates: {_find_duplicates(debug_names)}"
         )
 
-    def test_paper_all_condition_names_unique(
-        self, paper_names: list[str]
-    ) -> None:
+    def test_paper_all_condition_names_unique(self, paper_names: list[str]) -> None:
         assert len(paper_names) == len(set(paper_names)), (
             f"Duplicate condition names in paper_full.yaml: "
             f"{len(paper_names)} total, {len(set(paper_names))} unique. "
@@ -186,9 +182,7 @@ class TestNoCrossModelPrefixCollision:
 class TestNamesWithinK8sLabelLimit:
     """SkyPilot job names become K8s labels — max 63 characters."""
 
-    def test_debug_names_within_k8s_label_limit(
-        self, debug_names: list[str]
-    ) -> None:
+    def test_debug_names_within_k8s_label_limit(self, debug_names: list[str]) -> None:
         violations = [n for n in debug_names if len(n) > K8S_LABEL_MAX]
         assert not violations, (
             f"{len(violations)} condition names in debug.yaml exceed "
@@ -196,9 +190,7 @@ class TestNamesWithinK8sLabelLimit:
             f"{[(n, len(n)) for n in violations[:5]]}"
         )
 
-    def test_paper_names_within_k8s_label_limit(
-        self, paper_names: list[str]
-    ) -> None:
+    def test_paper_names_within_k8s_label_limit(self, paper_names: list[str]) -> None:
         violations = [n for n in paper_names if len(n) > K8S_LABEL_MAX]
         assert not violations, (
             f"{len(violations)} condition names in paper_full.yaml exceed "
@@ -213,17 +205,13 @@ class TestNamesWithinK8sLabelLimit:
 class TestNamesHaveNoSpaces:
     """Spaces in condition names would break shell quoting in run_factorial.sh."""
 
-    def test_debug_names_have_no_spaces(
-        self, debug_names: list[str]
-    ) -> None:
+    def test_debug_names_have_no_spaces(self, debug_names: list[str]) -> None:
         violations = [n for n in debug_names if " " in n]
         assert not violations, (
             f"Condition names with spaces in debug.yaml: {violations[:5]}"
         )
 
-    def test_paper_names_have_no_spaces(
-        self, paper_names: list[str]
-    ) -> None:
+    def test_paper_names_have_no_spaces(self, paper_names: list[str]) -> None:
         violations = [n for n in paper_names if " " in n]
         assert not violations, (
             f"Condition names with spaces in paper_full.yaml: {violations[:5]}"
@@ -236,17 +224,13 @@ class TestNamesHaveNoSpaces:
 class TestNamesHaveNoSlashes:
     """Slashes in condition names would break file paths and SkyPilot job names."""
 
-    def test_debug_names_have_no_slashes(
-        self, debug_names: list[str]
-    ) -> None:
+    def test_debug_names_have_no_slashes(self, debug_names: list[str]) -> None:
         violations = [n for n in debug_names if "/" in n or "\\" in n]
         assert not violations, (
             f"Condition names with slashes in debug.yaml: {violations[:5]}"
         )
 
-    def test_paper_names_have_no_slashes(
-        self, paper_names: list[str]
-    ) -> None:
+    def test_paper_names_have_no_slashes(self, paper_names: list[str]) -> None:
         violations = [n for n in paper_names if "/" in n or "\\" in n]
         assert not violations, (
             f"Condition names with slashes in paper_full.yaml: {violations[:5]}"
@@ -286,8 +270,7 @@ def _find_prefix_collisions(model_names: list[str]) -> list[tuple[str, str]]:
     """
     collisions: list[tuple[str, str]] = []
     for a, b in itertools.combinations(model_names, 2):
-        if a != b:
-            if b.startswith(a) or a.startswith(b):
-                shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
-                collisions.append((shorter, longer))
+        if a != b and (b.startswith(a) or a.startswith(b)):
+            shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+            collisions.append((shorter, longer))
     return collisions

@@ -8,9 +8,12 @@ plain-recall).
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-import pytest
 import torch
+
+if TYPE_CHECKING:
+    import pytest
 
 
 class TestSkeletonRecallEdgeCases:
@@ -39,7 +42,9 @@ class TestSkeletonRecallEdgeCases:
             f"to full foreground mask. Got logs: {[r.message for r in caplog.records]}"
         )
 
-    def test_normal_structure_no_warning(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_normal_structure_no_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Thick cylinder should not trigger the warning."""
         from minivess.pipeline.vendored_losses.skeleton_recall import SkeletonRecallLoss
 
@@ -59,7 +64,8 @@ class TestSkeletonRecallEdgeCases:
 
         assert torch.isfinite(loss)
         skeleton_warnings = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if "skeleton" in r.message.lower() and "falling back" in r.message.lower()
         ]
         assert len(skeleton_warnings) == 0, (

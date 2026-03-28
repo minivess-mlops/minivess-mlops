@@ -13,7 +13,6 @@ See: .claude/metalearning/2026-03-26-sam3-gc-two-root-causes-docker-push-and-env
 from __future__ import annotations
 
 import ast
-import os
 from pathlib import Path
 
 import pytest
@@ -85,17 +84,14 @@ def _find_os_environ_gets_in_train_flow() -> dict[str, str]:
                 and func.attr == "get"
                 and isinstance(func.value, ast.Attribute)
                 and func.value.attr == "environ"
+                and len(node.args) >= 1
+                and isinstance(node.args[0], ast.Constant)
             ):
-                if len(node.args) >= 1 and isinstance(
-                    node.args[0], ast.Constant
-                ):
-                    var_name = node.args[0].value
-                    default_val = None
-                    if len(node.args) >= 2 and isinstance(
-                        node.args[1], ast.Constant
-                    ):
-                        default_val = str(node.args[1].value)
-                    results[var_name] = default_val
+                var_name = node.args[0].value
+                default_val = None
+                if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                    default_val = str(node.args[1].value)
+                results[var_name] = default_val
     return results
 
 
@@ -253,7 +249,7 @@ class TestStringBoolConversions:
         source = TRAIN_FLOW.read_text(encoding="utf-8")
         # The safe pattern: args.var_name.lower() == "true"
         # The UNSAFE pattern: bool(args.var_name) — this makes "false" truthy!
-        assert f'bool(args.{var_name.lower()}' not in source.replace("_", ""), (
+        assert f"bool(args.{var_name.lower()}" not in source.replace("_", ""), (
             f"train_flow.py uses bool() on {var_name} — this is WRONG. "
             f"bool('false') == True because non-empty strings are truthy. "
             f"Must use .lower() == 'true' instead."

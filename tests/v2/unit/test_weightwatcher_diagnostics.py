@@ -137,9 +137,9 @@ class TestWeightWatcher3dGraceful:
 
     def test_weightwatcher_3d_only_model_returns_empty(self) -> None:
         """Conv3d-only model returns empty/NaN metrics, no exception."""
-        from minivess.diagnostics.weight_diagnostics import run_weightwatcher
-
         import math
+
+        from minivess.diagnostics.weight_diagnostics import run_weightwatcher
 
         model = _make_conv3d_only_model()
         result = run_weightwatcher(model)

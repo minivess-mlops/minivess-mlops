@@ -19,7 +19,6 @@ import pytest
 import torch
 import torch.nn as nn
 
-
 from minivess.config.models import CheckpointConfig
 
 
@@ -42,10 +41,10 @@ class _TinyModel(nn.Module):
     def parameters(self, recurse: bool = True) -> Any:
         return super().parameters(recurse=recurse)
 
-    def to(self, device: Any) -> "_TinyModel":
+    def to(self, device: Any) -> _TinyModel:
         return super().to(device)  # type: ignore[return-value]
 
-    def train(self, mode: bool = True) -> "_TinyModel":
+    def train(self, mode: bool = True) -> _TinyModel:
         return super().train(mode)  # type: ignore[return-value]
 
 
@@ -73,7 +72,7 @@ class TestGradientAccumulationConfig:
     def test_training_config_grad_accum_positive(self) -> None:
         from minivess.config.models import TrainingConfig
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError, match="gradient_accumulation_steps"):
             TrainingConfig(gradient_accumulation_steps=0)
 
 
