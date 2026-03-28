@@ -83,7 +83,7 @@ test-staging:
 # Excludes integration tests (Docker stack not guaranteed).
 test-prod:
 	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
-	  -m "not integration" \
+	  -m "not integration and not gpu" \
 	  --ignore=tests/v2/quasi_e2e/ \
 	  --ignore=tests/v2/cloud/ \
 	  --timeout=300
