@@ -122,7 +122,7 @@ class VesselCompoundLoss(nn.Module):
                 "clDice produced %s — falling back to 0.0 (no centerline to match)",
                 cldice_loss.item(),
             )
-            cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            cldice_loss = torch.tensor(0.0, device=logits.device, dtype=torch.float32, requires_grad=True)
 
         result: torch.Tensor = (
             self.lambda_dice_ce * dice_ce_loss + self.lambda_cldice * cldice_loss
@@ -167,7 +167,7 @@ class _WrappedSoftclDiceLoss(nn.Module):
                 "clDice produced %s — falling back to 0.0 (no centerline to match)",
                 result.item(),
             )
-            result = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            result = torch.tensor(0.0, device=logits.device, dtype=torch.float32, requires_grad=True)
         return result
 
 
@@ -255,11 +255,9 @@ class BettiLoss(nn.Module):
     def __init__(
         self,
         *,
-        threshold: float = 0.5,
         lambda_betti: float = 1.0,
     ) -> None:
         super().__init__()
-        self.threshold = threshold
         self.lambda_betti = lambda_betti
 
     def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
@@ -343,7 +341,7 @@ class TopologyCompoundLoss(nn.Module):
                 "clDice produced %s — falling back to 0.0 (no centerline to match)",
                 cldice_loss.item(),
             )
-            cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            cldice_loss = torch.tensor(0.0, device=logits.device, dtype=torch.float32, requires_grad=True)
 
         betti_loss = self.betti(logits, labels)
         result: torch.Tensor = (
@@ -485,7 +483,7 @@ class BceDiceClDiceLoss(nn.Module):
                 "clDice produced %s — falling back to 0.0 (no centerline to match)",
                 cldice_loss.item(),
             )
-            cldice_loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            cldice_loss = torch.tensor(0.0, device=logits.device, dtype=torch.float32, requires_grad=True)
 
         result: torch.Tensor = (
             self.lambda_bce * bce_loss
@@ -539,11 +537,23 @@ class GraphTopologyLoss(nn.Module):
         """Compute compound graph topology loss."""
         loss = torch.tensor(0.0, device=logits.device, dtype=torch.float32)
         if self.w_cbdice_cldice > 0:
-            loss = loss + self.w_cbdice_cldice * self.cbdice_cldice(logits, labels)
+            component = self.cbdice_cldice(logits, labels)
+            if not torch.isfinite(component):
+                logger.warning("GraphTopologyLoss: cbdice_cldice produced %s", component.item())
+                component = torch.tensor(0.0, device=logits.device, dtype=torch.float32)
+            loss = loss + self.w_cbdice_cldice * component
         if self.w_skeleton_recall > 0:
-            loss = loss + self.w_skeleton_recall * self.skeleton_recall(logits, labels)
+            component = self.skeleton_recall(logits, labels)
+            if not torch.isfinite(component):
+                logger.warning("GraphTopologyLoss: skeleton_recall produced %s", component.item())
+                component = torch.tensor(0.0, device=logits.device, dtype=torch.float32)
+            loss = loss + self.w_skeleton_recall * component
         if self.w_cape > 0:
-            loss = loss + self.w_cape * self.cape(logits, labels)
+            component = self.cape(logits, labels)
+            if not torch.isfinite(component):
+                logger.warning("GraphTopologyLoss: cape produced %s", component.item())
+                component = torch.tensor(0.0, device=logits.device, dtype=torch.float32)
+            loss = loss + self.w_cape * component
         return loss
 
 
@@ -590,11 +600,11 @@ class AuxCalibCompoundLoss(nn.Module):
 
         if seg_nan:
             logger.warning("seg_loss produced %s — using calib_val only", seg_val.item())
-            seg_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            seg_val = torch.tensor(0.0, device=logits.device, dtype=torch.float32, requires_grad=True)
 
         if calib_nan:
             logger.warning("aux_calib produced %s — using seg_val only", calib_val.item())
-            calib_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+            calib_val = torch.tensor(0.0, device=logits.device, dtype=torch.float32, requires_grad=True)
 
         result: torch.Tensor = seg_val + self.aux_calib_weight * calib_val
         return result

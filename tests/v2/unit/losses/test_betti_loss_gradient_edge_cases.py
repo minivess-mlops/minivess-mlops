@@ -9,7 +9,7 @@ from __future__ import annotations
 import torch
 
 
-class TestBettiLossEdgeCases:
+class TestBettiLossGradientEdgeCases:
     """BettiLoss must handle extreme inputs safely."""
 
     def test_minimum_spatial_dims(self) -> None:

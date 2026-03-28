@@ -416,7 +416,7 @@ def post_training_flow(
         k in plugin_results for k in ("checkpoint_averaging", "subsampled_ensemble")
     )
     calibration_ran = "calibration" in plugin_results
-    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp"))
+    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp_control"))
     return PostTrainingFlowResult(
         status="completed",
         mlflow_run_id=mlflow_run_id,
@@ -677,7 +677,7 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
     # Load first checkpoint as base
     try:
         avg_state = torch.load(checkpoint_paths[0], weights_only=True)
-    except (RuntimeError, EOFError, Exception) as exc:
+    except Exception as exc:  # RuntimeError, EOFError, UnpicklingError, etc.
         msg = (
             f"Failed to load checkpoint {checkpoint_paths[0]}: {exc}. "
             "The file may be corrupt (truncated write during preemption)."
@@ -692,7 +692,7 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
     for ckpt_path in checkpoint_paths[1:]:
         try:
             loaded = torch.load(ckpt_path, weights_only=True)
-        except (RuntimeError, EOFError, Exception) as exc:
+        except Exception as exc:  # RuntimeError, EOFError, UnpicklingError, etc.
             msg = (
                 f"Failed to load checkpoint {ckpt_path}: {exc}. "
                 "The file may be corrupt."
@@ -711,10 +711,16 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
         if union != intersection:
             missing = union - intersection
             logger.warning(
-                "Checkpoint key mismatch: %d keys not in all folds: %s",
+                "Checkpoint key mismatch: %d keys not in all folds: %s. "
+                "Only intersection keys will be averaged.",
                 len(missing),
                 list(missing)[:5],
             )
+            # Only keep intersection keys — keys not in all checkpoints
+            # would be divided by n but only accumulated from a subset,
+            # producing incorrect weights.
+            for dropped_key in (set(state_dict.keys()) - intersection):
+                del state_dict[dropped_key]
 
     # Average
     n = len(checkpoint_paths)
