@@ -1,0 +1,47 @@
+# Biostatistics config for mini-experiment pipeline validation
+# Reads results from smoke_mini_evaluation experiment
+# Uses factorial YAML to auto-derive 6 factor names
+#
+# 3-fold CV with per-volume metrics: N=23 per fold for paired tests
+# Includes test split for DeepVess external validation (7 volumes)
+
+experiment_names:
+  - smoke_mini_evaluation
+
+mlruns_dir: mlruns
+output_dir: outputs/biostatistics_smoke_mini
+
+# Auto-derive factor names from the composable factorial YAML
+factorial_yaml: configs/factorial/smoke_mini.yaml
+
+# Core metrics for mini-experiment (segmentation only, no calibration)
+metrics:
+  - dsc
+  - cldice
+  - masd
+
+primary_metric: cldice
+
+# Co-primary metrics for hierarchical gatekeeping
+co_primary_metrics:
+  - cldice
+  - masd
+
+# Data splits: trainval (MiniVess CV) + test (DeepVess external)
+splits:
+  - trainval
+  - test
+
+# Statistical testing parameters (from config, not hardcoded)
+alpha: 0.05
+n_bootstrap: 500
+seed: 42
+
+rope_values:
+  dsc: 0.01
+  cldice: 0.01
+  masd: 0.5
+
+# Full 3-fold CV for mini experiment
+min_folds_per_condition: 3
+min_conditions: 2

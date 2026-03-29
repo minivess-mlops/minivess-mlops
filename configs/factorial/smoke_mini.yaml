@@ -1,0 +1,66 @@
+# Mini-experiment: 2 losses × 2 post-training × 1 ensemble = 4 conditions.
+#
+# Designed for local pipeline testing on RTX 2070 Super (8 GB VRAM).
+# 3-fold CV with 20 epochs — enough for meaningful metrics, fast enough locally.
+# Per-volume metrics logged for all 23 val volumes + 7 DeepVess test volumes.
+#
+# Total: 4 conditions × 3 folds = 12 training jobs (~2-4 hours local GPU)
+#
+# Usage:
+#   ./scripts/run_factorial.sh configs/factorial/smoke_mini.yaml
+
+experiment_name: smoke_mini
+description: "Mini-experiment: 4 conditions, 3 folds, 20 epochs — local pipeline validation"
+debug: true
+
+# ── Layer A: Training factors ─────────────────────────────────────────
+factors:
+  training:
+    model_family:
+      - dynunet
+    loss_name:
+      - dice_ce
+      - cbdice_cldice
+    aux_calibration:
+      - false
+
+  # ── Layer B: Post-training factors ─────────────────────────────────
+  post_training:
+    method:
+      - none
+      - checkpoint_averaging
+    recalibration:
+      - none
+
+  # ── Layer C: Analysis factors ──────────────────────────────────────
+  analysis:
+    ensemble_strategy:
+      - per_loss_single_best
+
+# ── Zero-shot baselines ─────────────────────────────────────────────
+zero_shot_baselines: []
+
+# ── Fixed settings ──────────────────────────────────────────────────
+fixed:
+  max_epochs: 20
+  num_folds: 3
+  batch_size: 2
+  compute: auto
+
+# ── MLflow experiments ──────────────────────────────────────────────
+mlflow:
+  training_experiment: smoke_mini_training
+  evaluation_experiment: smoke_mini_evaluation
+  biostatistics_experiment: smoke_mini_biostatistics
+
+# ── Biostatistics ───────────────────────────────────────────────────
+biostatistics:
+  anova_strategy: layered
+  alpha: 0.05
+  co_primary_metrics:
+    - cldice
+    - masd
+
+# ── Infrastructure ──────────────────────────────────────────────────
+infrastructure:
+  cloud_config: local
