@@ -130,7 +130,15 @@ class BiostatisticsConfig(BaseModel):
     n_bootstrap: int = Field(
         default=10_000,
         ge=100,
-        description="Number of BCa bootstrap resamples.",
+        description="Number of bootstrap resamples.",
+    )
+    bca_min_n: int = Field(
+        default=20,
+        ge=5,
+        description=(
+            "Minimum sample size for BCa bootstrap. Below this, percentile "
+            "bootstrap is used. Per DiCiccio & Efron (1996, Statistical Science)."
+        ),
     )
     rope_values: dict[str, float] = Field(
         default_factory=lambda: dict(_DEFAULT_ROPE_VALUES),

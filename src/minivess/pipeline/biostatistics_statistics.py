@@ -439,6 +439,185 @@ def _stratified_stouffer_z(
     return combined
 
 
+def bootstrap_ci(
+    data: np.ndarray,
+    n_bootstrap: int = 10_000,
+    *,
+    seed: int = 42,
+    confidence: float = 0.95,
+    bca_min_n: int = 20,
+) -> tuple[float, float, str]:
+    """Compute bootstrap confidence interval with adaptive method selection.
+
+    Uses BCa when N >= bca_min_n, percentile otherwise.
+    Per DiCiccio & Efron (1996, Statistical Science).
+
+    Returns (lower, upper, method) where method is "bca" or "percentile".
+    """
+    rng = np.random.default_rng(seed)
+    n = len(data)
+
+    # Generate bootstrap samples
+    boot_indices = rng.choice(n, size=(n_bootstrap, n), replace=True)
+    boot_means = np.mean(data[boot_indices], axis=1)
+
+    alpha_lo = (1 - confidence) / 2
+    alpha_hi = 1 - alpha_lo
+
+    if n >= bca_min_n:
+        # BCa method
+        theta_hat = np.mean(data)
+
+        # Bias correction: z0
+        z0 = stats.norm.ppf(np.mean(boot_means < theta_hat))
+
+        # Acceleration: jackknife
+        jack_means = np.array([
+            np.mean(np.delete(data, i)) for i in range(n)
+        ])
+        jack_mean = np.mean(jack_means)
+        num = np.sum((jack_mean - jack_means) ** 3)
+        denom = 6.0 * np.sum((jack_mean - jack_means) ** 2) ** 1.5
+        a = num / denom if denom != 0.0 else 0.0
+
+        # Adjusted quantiles
+        z_lo = stats.norm.ppf(alpha_lo)
+        z_hi = stats.norm.ppf(alpha_hi)
+
+        def _adj(z_alpha: float) -> float:
+            return float(stats.norm.cdf(z0 + (z0 + z_alpha) / (1 - a * (z0 + z_alpha))))
+
+        adj_lo = _adj(z_lo)
+        adj_hi = _adj(z_hi)
+
+        lower = float(np.quantile(boot_means, adj_lo))
+        upper = float(np.quantile(boot_means, adj_hi))
+        return lower, upper, "bca"
+    else:
+        # Percentile method (no jackknife needed)
+        lower = float(np.quantile(boot_means, alpha_lo))
+        upper = float(np.quantile(boot_means, alpha_hi))
+        return lower, upper, "percentile"
+
+
+def apply_hierarchical_gatekeeping(
+    co_primary_p: dict[str, float],
+    secondary_p: dict[str, float],
+    alpha: float,
+) -> dict[str, dict[str, bool]]:
+    """Apply hierarchical gatekeeping for co-primary + secondary endpoints.
+
+    Step 1: Test co-primaries at alpha/2 each (Bonferroni).
+    Step 2: If at least one co-primary rejects, test secondaries with BH-FDR at alpha.
+    If no co-primary rejects, secondaries are NOT tested.
+
+    Per Dmitrienko et al. (2010, Statistics in Medicine).
+
+    Returns dict: metric -> {significant: bool, tested: bool, p_adjusted: float}.
+    """
+    alpha_coprimary = alpha / len(co_primary_p) if co_primary_p else alpha
+
+    result: dict[str, dict[str, Any]] = {}
+
+    # Step 1: Co-primary Bonferroni
+    any_coprimary_rejected = False
+    for metric, p in co_primary_p.items():
+        significant = p < alpha_coprimary
+        if significant:
+            any_coprimary_rejected = True
+        result[metric] = {
+            "significant": significant,
+            "tested": True,
+            "p_adjusted": min(p * len(co_primary_p), 1.0),
+        }
+
+    # Step 2: Conditional secondary BH-FDR
+    if any_coprimary_rejected and secondary_p:
+        sec_metrics = sorted(secondary_p.keys())
+        sec_pvals = [secondary_p[m] for m in sec_metrics]
+        adjusted = _bh_fdr_correction(sec_pvals, alpha)
+        for i, metric in enumerate(sec_metrics):
+            p_adj, sig = adjusted[i]
+            result[metric] = {
+                "significant": sig,
+                "tested": True,
+                "p_adjusted": p_adj,
+            }
+    else:
+        for metric in secondary_p:
+            result[metric] = {
+                "significant": False,
+                "tested": False,
+                "p_adjusted": float("nan"),
+            }
+
+    return result
+
+
+def encode_condition_key(factors: dict[str, str]) -> str:
+    """Encode a dict of factor_name->value into a condition key string.
+
+    Factor-value pairs are sorted by key, then joined with double underscore.
+    Format: key1=value1__key2=value2__...
+
+    Raises ValueError if any value contains "__" (the separator).
+    """
+    for k, v in factors.items():
+        if "__" in str(v):
+            msg = f"Factor value '{v}' for key '{k}' must not contain '__' (separator)"
+            raise ValueError(msg)
+        if "__" in str(k):
+            msg = f"Factor key '{k}' must not contain '__' (separator)"
+            raise ValueError(msg)
+
+    return "__".join(f"{k}={v}" for k, v in sorted(factors.items()))
+
+
+def decode_condition_key(key: str) -> dict[str, str]:
+    """Decode a condition key string back into factor_name->value dict."""
+    parts = key.split("__")
+    result: dict[str, str] = {}
+    for part in parts:
+        k, _, v = part.partition("=")
+        result[k] = v
+    return result
+
+
+def sensitivity_concordance(
+    scores_a: np.ndarray,
+    scores_b: np.ndarray,
+    alpha: float,
+) -> dict[str, Any]:
+    """Compare parametric (paired t-test) vs nonparametric (Wilcoxon) conclusions.
+
+    Returns dict with concordance information:
+    - concordant: bool (both agree on significance at alpha)
+    - parametric_significant: bool
+    - nonparametric_significant: bool
+    - parametric_p: float
+    - nonparametric_p: float
+    """
+    # Parametric: paired t-test
+    t_stat, t_p = stats.ttest_rel(scores_a, scores_b)
+    parametric_sig = float(t_p) < alpha
+
+    # Nonparametric: Wilcoxon signed-rank
+    try:
+        w_result = stats.wilcoxon(scores_a, scores_b, alternative="two-sided")
+        w_p = float(w_result.pvalue)
+    except ValueError:
+        w_p = 1.0
+    nonparametric_sig = w_p < alpha
+
+    return {
+        "concordant": parametric_sig == nonparametric_sig,
+        "parametric_significant": parametric_sig,
+        "nonparametric_significant": nonparametric_sig,
+        "parametric_p": float(t_p),
+        "nonparametric_p": w_p,
+    }
+
+
 def _bh_fdr_correction(
     p_values: list[float],
     alpha: float,
