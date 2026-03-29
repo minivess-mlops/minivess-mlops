@@ -49,7 +49,7 @@ domains:
     decisions: [cloud_provider_selection, dvc_remote_strategy, compute_orchestration]
     note: >
       TWO providers only: RunPod (env/dev) + GCP (staging/prod). GCP project=minivess-mlops,
-      region=europe-west4. Data on GCS. NEVER add providers without user authorization.
+      region=us-central1. Data on GCS. NEVER add providers without user authorization.
 
   infrastructure:
     navigator: knowledge-graph/domains/infrastructure.yaml
@@ -183,7 +183,7 @@ invariants:
   - id: two_providers_only
     rule: >
       EXACTLY two cloud providers: RunPod (env/dev) + GCP (staging/prod).
-      GCP project=minivess-mlops, region=europe-west4. Data on GCS (gs://minivess-mlops-dvc-data).
+      GCP project=minivess-mlops, region=us-central1. Data on GCS (gs://minivess-mlops-dvc-data).
       NEVER add a third cloud provider (AWS, Azure, etc.) without explicit user authorization.
       Session continuation summaries are NOT authorization for infrastructure changes.
     violation_doc: .claude/metalearning/2026-03-16-unauthorized-aws-s3-architecture-migration.md

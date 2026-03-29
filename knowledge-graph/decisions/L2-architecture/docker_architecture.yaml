@@ -80,7 +80,7 @@ volume_mount_rules:
 
 registries:
   runpod_dev: "docker.io/petteriteikari/minivess-base"
-  gcp_staging: "europe-west4-docker.pkg.dev/minivess-mlops/minivess/base"
+  gcp_staging: "us-central1-docker.pkg.dev/minivess-mlops/minivess/base"
   config_driven: true
   env_var: DOCKER_REGISTRY
 

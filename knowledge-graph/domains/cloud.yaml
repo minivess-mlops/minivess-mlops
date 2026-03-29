@@ -57,7 +57,7 @@ decisions:
     status: proposed
     winner: gcs_cache_with_hf_fallback
     rationale: >
-      Pretrained model weights (SAM3 ~9 GB, VesselFM ~2 GB) cached on GCS in europe-west4.
+      Pretrained model weights (SAM3 ~9 GB, VesselFM ~2 GB) cached on GCS in us-central1.
       GCP SkyPilot jobs pull from same-region GCS (free, ~1-2 min) instead of HuggingFace
       (10-15 min, rate-limited, causes exit code 34 timeouts and spot preemption failures).
       HuggingFace remains the fallback if GCS pull fails. RunPod and local environments
@@ -127,7 +127,7 @@ providers:
     role: "Production-grade. Full managed cloud stack. All infrastructure via Pulumi IaC."
     status: active
     project: minivess-mlops
-    region: europe-west4  # Netherlands — L4 GPU availability, co-located with GAR/GCS
+    region: us-central1  # Iowa — highest GPU availability, co-located with GAR/GCS (migrated 2026-03-28)
     compute: "SkyPilot (cloud: gcp), L4 spot preferred"
     storage: "GCS (Google Cloud Storage)"
     mlflow: "Cloud Run MLflow server (optional, enable_cloud_run config)"
@@ -160,7 +160,7 @@ providers:
     # Docker registry (Artifact Registry)
     docker_registry:
       type: gar  # Google Artifact Registry
-      url: europe-west4-docker.pkg.dev/minivess-mlops/minivess
+      url: us-central1-docker.pkg.dev/minivess-mlops/minivess
       config: configs/registry/gar.yaml
 
     # Cloud SQL
