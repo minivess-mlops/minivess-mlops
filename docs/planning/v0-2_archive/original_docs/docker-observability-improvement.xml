@@ -734,4 +734,188 @@
     <file>tests/v2/unit/observability/test_structured_logging.py</file>
   </modified-files>
 
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- RESEARCH-INFORMED ADDITIONS (from literature survey 2026-03-29) -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!--
+    The following phases were added after a comprehensive literature survey:
+    "AI Research Report - Docker Observability.md" (30 references, 7 sections).
+    These extend the original 8-phase plan with production-grade tooling.
+    See: knowledge-base/_ai/MLOps/AI Research Report - Docker Observability.md
+  -->
+
+  <phase id="9" title="Grafana LGTM Stack Integration">
+    <description>
+      Add grafana/otel-lgtm as a single Docker Compose service providing
+      unified observability: OpenTelemetry Collector + Prometheus (metrics) +
+      Tempo (traces) + Loki (logs) + Grafana (dashboards) in ONE container.
+
+      Research finding: "For development and testing environments, this is the
+      lowest-friction path to full-stack observability" — accepts OTel defaults
+      at http://localhost:4318 (OTLP/HTTP).
+
+      This is the observability BACKEND — Phases 1-8 produce telemetry,
+      Phase 9 receives and visualises it.
+
+      Reference: Grafana (2025). "Docker OpenTelemetry LGTM."
+      https://grafana.com/docs/opentelemetry/docker-lgtm/
+    </description>
+
+    <tasks>
+      <task id="9.1" title="Add grafana/otel-lgtm service to docker-compose.yml">
+        <tdd-spec>
+          RED: Test that docker-compose.yml (infra stack) contains a service
+          named "observability" or "grafana-lgtm" using image grafana/otel-lgtm.
+          Test that it exposes ports 3001 (Grafana, avoid 3000 conflict),
+          4317 (OTLP gRPC), 4318 (OTLP HTTP). Test volumes for data persistence.
+          NOTE: This is a YAML addition — per Rule #31, document the stanza
+          for user approval before adding.
+        </tdd-spec>
+        <deliverable>docs/planning/grafana-lgtm-compose-stanza.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_lgtm_service.py</test-file>
+      </task>
+
+      <task id="9.2" title="Add OTEL_EXPORTER_OTLP_ENDPOINT to .env.example and x-common-env">
+        <tdd-spec>
+          RED: Test that .env.example contains OTEL_EXPORTER_OTLP_ENDPOINT
+          with default http://grafana-lgtm:4318. Test that docker-compose.flows.yml
+          x-common-env passes ${OTEL_EXPORTER_OTLP_ENDPOINT} to all flow containers.
+          This enables any OTel-instrumented code to send telemetry to the LGTM backend.
+        </tdd-spec>
+        <deliverable>.env.example (appended), docker-compose.flows.yml (modified)</deliverable>
+        <test-file>tests/v2/unit/test_env_single_source.py (extended)</test-file>
+      </task>
+
+      <task id="9.3" title="Create custom Grafana dashboard for ML training">
+        <tdd-spec>
+          RED: Test that a JSON dashboard file exists at
+          deployment/grafana/dashboards/ml-training-overview.json.
+          Test that it contains panels for: GPU utilization, training loss curve,
+          epoch progress, heartbeat status, Prefect flow timeline.
+          Validate the JSON is syntactically valid.
+        </tdd-spec>
+        <deliverable>deployment/grafana/dashboards/ml-training-overview.json</deliverable>
+        <test-file>tests/v2/unit/deployment/test_grafana_dashboard.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - grafana/otel-lgtm service documented and ready for user approval
+      - OTEL_EXPORTER_OTLP_ENDPOINT in .env.example with sensible default
+      - Custom Grafana dashboard JSON validated and ready for provisioning
+      - All flow containers can send OTel data to the LGTM backend
+    </success-criteria>
+  </phase>
+
+  <phase id="10" title="prefect-opentelemetry Integration">
+    <description>
+      Replace custom Prefect task hooks (Phase 5) with the first-party
+      prefect-opentelemetry package, which provides automatic OTel span
+      creation for every Prefect flow and task.
+
+      Research finding: "prefect-opentelemetry exports all Prefect flow/task
+      telemetry in OTLP format to a Collector" — eliminating the need for
+      manual on_completion/on_failure hooks on every @task.
+
+      Reference: PyPI (2025). "prefect-opentelemetry."
+      https://pypi.org/project/prefect-opentelemetry/
+    </description>
+
+    <tasks>
+      <task id="10.1" title="Add prefect-opentelemetry to pyproject.toml">
+        <tdd-spec>
+          RED: Test that prefect-opentelemetry is in pyproject.toml [project.optional-dependencies]
+          under the "observability" extra. Test that uv sync --extra observability installs it.
+        </tdd-spec>
+        <deliverable>pyproject.toml (modified)</deliverable>
+        <test-file>tests/v2/unit/test_dependencies.py (extended)</test-file>
+      </task>
+
+      <task id="10.2" title="Configure OTel tracing in Prefect server environment">
+        <tdd-spec>
+          RED: Test that the Prefect server docker-compose service has
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT set to the LGTM Collector.
+          Test that Prefect traces appear in Tempo (via mock or integration test).
+        </tdd-spec>
+        <deliverable>docs/planning/prefect-otel-config.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_prefect_otel.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - prefect-opentelemetry installed as optional dependency
+      - Prefect server configured to export traces to LGTM Collector
+      - Every Prefect flow/task automatically creates OTel spans
+      - Phase 5 custom hooks become optional (defense-in-depth, not primary)
+    </success-criteria>
+  </phase>
+
+  <phase id="11" title="NVIDIA DCGM Exporter Sidecar">
+    <description>
+      Add NVIDIA DCGM Exporter as a Docker Compose sidecar service for
+      hardware-level GPU monitoring. Exposes Prometheus metrics at :9400
+      that the LGTM Prometheus instance scrapes automatically.
+
+      Research finding: "DCGM Exporter exposes GPU metrics for Prometheus
+      leveraging NVIDIA DCGM" — utilisation, memory, temperature, ECC errors,
+      PCIe throughput. Pre-built Grafana dashboard available (ID 12239).
+
+      This complements the application-level pynvml monitoring in Phase 2
+      with infrastructure-level visibility.
+
+      Reference: NVIDIA (2025). "DCGM Exporter." GitHub.
+      https://github.com/NVIDIA/dcgm-exporter
+    </description>
+
+    <tasks>
+      <task id="11.1" title="Document DCGM Exporter compose stanza">
+        <tdd-spec>
+          RED: Test that a documentation file describes the DCGM Exporter
+          Docker Compose service configuration with:
+          - image: nvcr.io/nvidia/k8s/dcgm-exporter:latest
+          - devices: nvidia.com/gpu=all
+          - ports: 9400:9400
+          - Prometheus scrape config for LGTM
+          Per Rule #31, document for user approval, don't modify YAML directly.
+        </tdd-spec>
+        <deliverable>docs/planning/dcgm-exporter-compose-stanza.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_dcgm_docs.py</test-file>
+      </task>
+
+      <task id="11.2" title="Import NVIDIA DCGM Grafana dashboard">
+        <tdd-spec>
+          RED: Test that deployment/grafana/dashboards/nvidia-dcgm.json exists
+          and is a valid Grafana dashboard JSON. The dashboard should be imported
+          from Grafana dashboard ID 12239.
+        </tdd-spec>
+        <deliverable>deployment/grafana/dashboards/nvidia-dcgm.json</deliverable>
+        <test-file>tests/v2/unit/deployment/test_dcgm_dashboard.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - DCGM Exporter compose stanza documented for user approval
+      - NVIDIA DCGM Grafana dashboard JSON ready for provisioning
+      - Prometheus scrape config targets DCGM Exporter at :9400
+      - Combined view: application-level pynvml (Phase 2) + infra-level DCGM (Phase 11)
+    </success-criteria>
+  </phase>
+
+  <!-- Updated effort estimate including research-informed phases -->
+  <effort-estimate-v2>
+    <note>Updated after literature survey on 2026-03-29</note>
+    <phase id="1" tasks="3" estimated-tests="12" estimated-time="45 min" priority="CRITICAL" />
+    <phase id="2" tasks="3" estimated-tests="10" estimated-time="60 min" priority="HIGH" />
+    <phase id="3" tasks="3" estimated-tests="8"  estimated-time="45 min" priority="HIGH" />
+    <phase id="4" tasks="3" estimated-tests="8"  estimated-time="40 min" priority="HIGH" />
+    <phase id="5" tasks="3" estimated-tests="6"  estimated-time="40 min" priority="MEDIUM" />
+    <phase id="6" tasks="2" estimated-tests="4"  estimated-time="20 min" priority="MEDIUM" />
+    <phase id="7" tasks="2" estimated-tests="6"  estimated-time="30 min" priority="MEDIUM" />
+    <phase id="8" tasks="3" estimated-tests="8"  estimated-time="40 min" priority="MEDIUM" />
+    <phase id="9" tasks="3" estimated-tests="6"  estimated-time="45 min" priority="HIGH" />
+    <phase id="10" tasks="2" estimated-tests="4" estimated-time="30 min" priority="MEDIUM" />
+    <phase id="11" tasks="2" estimated-tests="4" estimated-time="20 min" priority="MEDIUM" />
+    <total tasks="29" estimated-tests="76" estimated-time="6.9 hours" />
+  </effort-estimate-v2>
+
 </plan>
