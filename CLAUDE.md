@@ -427,6 +427,22 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
     Guard: Issue #971, Issue #972
 
+34. **"Import ≠ Done" — Code Must Be CALLED, DEPLOYED, and OBSERVABLE (Non-Negotiable)** —
+    Writing a module and importing it is NOT implementing it. A task is DONE when:
+    (1) Code is CALLED in the production code path (not just imported)
+    (2) Docker image is REBUILT with the change
+    (3) Feature produces OBSERVABLE OUTPUT (logs, heartbeat.json, metrics, dashboard)
+    (4) A `docker compose run` invocation DEMONSTRATES the feature working
+    (5) AST "import exists" tests are NECESSARY but NOT SUFFICIENT
+    **Banned pattern**: Write module → import it → test import exists → mark DONE → move on.
+    This creates dead code that passes all tests but provides zero functionality.
+    **Required pattern**: Write module → call it from flow → rebuild Docker → run flow →
+    verify output is visible in Docker logs / Grafana / Prefect UI → THEN mark DONE.
+    **NEVER start training or experiment runs until the observability infrastructure is
+    VERIFIED FUNCTIONAL** — not "code exists" but "I can see training metrics updating
+    in Grafana, heartbeat.json is being written, Docker healthcheck shows healthy."
+    See: `.claude/metalearning/2026-03-30-observability-code-written-but-never-wired-deployed.md`
+
 ## What AI Must NEVER Do
 
 - Recommend switching to a fresh session between planning and execution. Context amnesia
