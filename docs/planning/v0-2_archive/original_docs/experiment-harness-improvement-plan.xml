@@ -1,0 +1,1621 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Experiment Harness Improvement Plan — Persistent Monitoring Infrastructure
+  Branch: fix/10th-pass-production-readiness
+  Report: docs/planning/v0-2_archive/original_docs/experiment-harness-improvement.md
+  TDD Skill: .claude/skills/self-learning-iterative-coder/SKILL.md
+  Date: 2026-03-28
+
+  PURPOSE: Implement persistent, session-independent monitoring for SkyPilot
+  factorial experiments. The experiment harness has FUNDAMENTALLY FAILED across
+  11 passes because monitoring lives in ephemeral Claude Code sessions.
+  This plan converts monitoring from aspirational skill instructions into
+  running infrastructure.
+
+  EXECUTE WITH: /self-learning-iterative-coder (RED→GREEN→VERIFY)
+-->
+<execution-plan>
+  <metadata>
+    <title>Experiment Harness Improvement: Persistent Monitoring Infrastructure</title>
+    <date>2026-03-28</date>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <approach>TDD — RED tests first, then GREEN implementation</approach>
+    <skill>self-learning-iterative-coder</skill>
+    <total-effort-hours>20-29</total-effort-hours>
+    <primary-hypothesis>H1 (Cron-Based Monitor) — score 4.10/5.00</primary-hypothesis>
+    <source-report>docs/planning/v0-2_archive/original_docs/experiment-harness-improvement.md</source-report>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- CONTEXT: Why this plan exists                                      -->
+  <!-- ================================================================== -->
+  <context>
+    <failure-history>
+      <failure pass="4" date="2026-03-22" cost="$6.30" hours-lost="2.3">
+        8 identical FAILED_SETUP jobs undetected for 2h 20m. No batch-level
+        kill switch existed. A "3+ identical failures in 5 min → cancel all"
+        rule would have saved $3.90.
+      </failure>
+      <failure pass="10" date="2026-03-27" cost="$23.30" hours-lost="12">
+        Job #154 ran 12+ hours for a 5-minute training task. ralph_monitor.py
+        tracks status transitions but NEVER compares elapsed time vs expected
+        duration. A simple "duration > 3x expected → cancel" rule would have
+        caught it at minute 15, saving $23+.
+        Metalearning: .claude/metalearning/2026-03-27-no-job-duration-monitoring-12h-debug-run.md
+      </failure>
+      <failure pass="11" date="2026-03-28" cost="$3.22" hours-lost="10">
+        3 Phase 1 jobs PENDING for 10+ hours. Claude Code session polled for
+        50 minutes then effectively ended. Zero escalation, zero fallback,
+        zero external monitoring. User discovered it next morning.
+        Metalearning: .claude/metalearning/2026-03-28-10hr-pending-no-monitoring-intervention.md
+      </failure>
+    </failure-history>
+
+    <root-causes>
+      <rc id="RC1" name="Ephemeral Monitor">
+        Monitoring is a Claude Code skill (markdown instructions), not a daemon.
+        When the session ends, ALL monitoring stops. This is architectural.
+      </rc>
+      <rc id="RC2" name="No Duration Enforcement">
+        ralph_monitor.py tracks status transitions but never compares elapsed
+        duration against expected duration. No warn/cancel thresholds.
+      </rc>
+      <rc id="RC3" name="No Batch-Level Awareness">
+        ralph_monitor.py watches ONE job. Factorial experiments launch 20-34 jobs.
+        No script aggregates batch-level health or detects cascading failures.
+      </rc>
+      <rc id="RC4" name="No Autonomous Escalation">
+        No desktop notifications, no email, no Slack. The only "alerting" is
+        printing to the Claude Code conversation, which requires an active session.
+      </rc>
+      <rc id="RC5" name="No Cost Safety Net">
+        No runtime cost guard. A stuck job accumulates cost indefinitely.
+        The harness estimates cost before launch but has no runtime enforcement.
+      </rc>
+    </root-causes>
+
+    <constraints>
+      <constraint>Monitor MUST be a standalone script — NOT a Claude skill, NOT session-dependent</constraint>
+      <constraint>Must work without Claude Code running (the whole point of this plan)</constraint>
+      <constraint>Must work on Linux — notify-send for desktop notifications</constraint>
+      <constraint>Must parse `sky jobs queue` output reliably — Python str.split(), NOT regex (Rule 16)</constraint>
+      <constraint>Must handle SkyPilot API server being down gracefully</constraint>
+      <constraint>All tests in tests/v2/unit/ following project conventions</constraint>
+      <constraint>Monitor MUST be running BEFORE any job launch — new pre-launch gate</constraint>
+      <constraint>No GitHub Actions CI — all validation runs locally (Rule 21)</constraint>
+      <constraint>uv ONLY for dependencies (Rule 1)</constraint>
+      <constraint>TDD MANDATORY — write failing tests FIRST (Rule 2)</constraint>
+    </constraints>
+
+    <user-authorization>
+      User requested this plan on 2026-03-28 after reviewing the improvement report.
+      All 4 phases are user-authorized for planning. Implementation requires
+      /self-learning-iterative-coder execution.
+    </user-authorization>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- COUNCIL REVIEW: 5 Expert Perspectives                              -->
+  <!-- ================================================================== -->
+  <council-review>
+    <expert id="1" role="SRE / Observability Engineer">
+      <perspective>
+        The monitoring architecture should follow the three pillars: metrics (duration,
+        cost time-series), logs (SkyPilot job logs), traces (cross-flow provenance).
+        The immediate need is metrics — specifically, job duration vs. expected duration.
+        This is a single time-series comparison, not a complex observability stack.
+
+        Alerting architecture: The monitor writes to JSONL (structured log), checks
+        thresholds (metrics), and sends desktop notifications (escalation). This is a
+        minimal but complete monitoring stack.
+
+        Escalation policy:
+        - INFO: Status change logged to JSONL (no notification)
+        - WARN: Duration > 3x expected → desktop notification + terminal bell
+        - CRITICAL: Duration > max_duration → auto-cancel + desktop notification
+        - EMERGENCY: Budget exceeded → cancel ALL jobs + desktop notification
+
+        The kill-switch (3+ identical failures) is a critical circuit breaker. Without it,
+        cascading failures waste hours. Implement as a sliding window: track last N
+        failures per error category, trigger if count >= 3 within 5 minutes.
+
+        IMPORTANT: The monitor script must be idempotent. If cron fires twice, the second
+        invocation should detect the first is running (via PID file) and exit cleanly.
+      </perspective>
+      <score>4.5</score>
+    </expert>
+
+    <expert id="2" role="Python Developer">
+      <perspective>
+        Implementation of monitor_factorial.py should follow clean separation:
+
+        1. Data layer: JobManifest dataclass (JSON serialization), JobRecord dataclass
+        2. Polling layer: SkyPilotPoller class wrapping subprocess calls to sky CLI
+        3. Detection layer: AnomalyDetector class with configurable thresholds
+        4. Alerting layer: AlertDispatcher class (notify-send + terminal + JSONL)
+        5. Orchestration: main loop tying them together
+
+        Testing strategy: Mock the SkyPilotPoller (it calls subprocess). Everything else
+        is pure Python logic that can be tested without SkyPilot installed. Use
+        pytest fixtures with realistic sky jobs queue output captured from actual runs.
+
+        Key design decisions:
+        - Use dataclasses for all data structures (not dicts)
+        - Use pathlib.Path for all file operations (Rule 6)
+        - Use datetime.now(timezone.utc) for all timestamps (Rule 7)
+        - from __future__ import annotations at the top (Rule 8)
+        - encoding='utf-8' for all file operations (Rule 5)
+        - No regex for parsing sky jobs queue (Rule 16) — use str.split()
+        - No hardcoded thresholds — all from manifest/config (Rule 29)
+
+        The manifest generator (create_job_manifest.py) should read the factorial config
+        YAML and the sky jobs queue output to produce the manifest JSON. This means it
+        can be run AFTER launch (when job IDs are known) or BEFORE (with placeholders
+        that get filled in by run_factorial.sh).
+
+        Test count estimate: 25-35 unit tests across 3 test files.
+      </perspective>
+      <score>4.3</score>
+    </expert>
+
+    <expert id="3" role="SkyPilot Expert">
+      <perspective>
+        SkyPilot v1.0 `sky jobs queue` output format (from actual observation):
+
+        ```
+        Managed jobs
+        ID  TASK  NAME                                   REQUESTED  SUBMITTED         TOT.DURATION  JOB.DURATION  #RECOVERIES  STATUS     POOL
+        161 -     sam3_vanilla-zeroshot-minivess-f0       1x L4:1    2026-03-28 06:01  1h 22m        -             3            PENDING    sky-managed...
+        160 -     sam3_hybrid-cbdice_cldice-calibfalse-f0 1x L4:1    2026-03-28 06:00  1h 23m        -             1            PENDING    sky-managed...
+        159 -     dynunet-dice_ce-calibfalse-f0           1x L4:1    2026-03-28 05:59  1h 24m        -             2            PENDING    sky-managed...
+        ```
+
+        Column layout (space-delimited, columns vary in width):
+        - Column 0: ID (integer)
+        - Column 1: TASK ("-" for managed jobs)
+        - Column 2: NAME (the condition name from run_factorial.sh)
+        - Column 3: REQUESTED (e.g., "1x L4:1" — may have spaces!)
+        - Column 4+: SUBMITTED (datetime — "2026-03-28 06:01" — two tokens)
+        - Then: TOT.DURATION, JOB.DURATION, #RECOVERIES, STATUS, POOL
+
+        CRITICAL: The REQUESTED column can contain spaces ("1x L4:1"). The SUBMITTED
+        column is always two tokens (date + time). Parsing with simple split() requires
+        finding the STATUS column by searching for known status values, which the existing
+        parse_job_status() in ralph_monitor.py already does correctly.
+
+        For the monitor, we need to also parse:
+        - TOT.DURATION: Total wall-clock time since submission (includes queuing)
+        - JOB.DURATION: Actual running time (excludes queuing, "-" when PENDING)
+        - #RECOVERIES: Number of spot preemption recoveries
+        - NAME: To match against manifest entries
+
+        SkyPilot Python API alternative: `sky.jobs.queue()` returns a list of dicts.
+        However, this requires importing sky, which may not be installed on all machines.
+        The subprocess approach (parsing CLI output) is more portable.
+
+        IMPORTANT: The monitor should handle the case where `sky` CLI is not available
+        or the SkyPilot API server is down. Graceful degradation: log the error, wait
+        for next poll cycle, do not crash.
+
+        Cost data: SkyPilot does NOT report per-job cost. The monitor must compute it:
+        duration_hours * hourly_rate (from GPU type + spot/on-demand). Hourly rates
+        should come from the manifest, not hardcoded.
+      </perspective>
+      <score>4.4</score>
+    </expert>
+
+    <expert id="4" role="Prefect Architect">
+      <perspective>
+        Prefect 3.x can absolutely be used for monitoring flows. The architecture:
+
+        1. Create a `monitor_flow` that wraps the monitor_factorial.py logic
+        2. Deploy it as a local Prefect deployment (no cloud agent needed)
+        3. Use Prefect's @task decorator for each polling cycle
+        4. Use Prefect's automations for alerting on flow state changes
+        5. The flow run appears in Prefect UI — researcher can check status
+
+        However, for Phase 1, Prefect integration adds unnecessary complexity.
+        The standalone script should work first. Prefect wrapping comes in Phase 3.
+
+        Phase 3 integration points:
+        - The monitor_flow imports and calls the same detection logic from monitor_factorial.py
+        - Prefect tasks provide automatic retries, state persistence, and UI visibility
+        - Prefect automations can trigger Slack/email when the monitor_flow itself fails
+        - This is the "who watches the watchmen" layer
+
+        Prefect deployment: `prefect deployment run 'monitor-flow/factorial'`
+        The researcher starts this alongside run_factorial.sh. If the Prefect agent crashes,
+        Prefect Cloud (if configured) can alert. If self-hosted, the cron fallback (Phase 1)
+        catches it.
+
+        IMPORTANT: The monitor flow MUST NOT be a long-running Prefect flow. Instead,
+        use a Prefect deployment with a schedule (every 30s) that runs the check once
+        and exits. This avoids Prefect's heartbeat timeout issues with long-running flows.
+      </perspective>
+      <score>3.8</score>
+    </expert>
+
+    <expert id="5" role="DevEx Engineer">
+      <perspective>
+        The researcher's workflow after this plan:
+
+        1. Launch: `./scripts/run_factorial.sh configs/factorial/debug.yaml`
+           → Script auto-generates manifest at outputs/factorial_manifest.json
+           → Script prints: "Monitor: make monitor-factorial"
+
+        2. Monitor: `make monitor-factorial` (in a tmux pane or separate terminal)
+           → Prints live status table every 30s
+           → Desktop notification on any anomaly
+           → Auto-cancels stuck jobs
+           → Writes structured log to outputs/job_monitor.jsonl
+           → Exit code 0 = all succeeded, 1 = failures, 2 = budget exceeded
+
+        3. Walk away. Come back. Check terminal or read JSONL for what happened.
+
+        Notification methods (Linux):
+        - notify-send: Desktop notification (best for when researcher is at the machine)
+        - Terminal bell (\a): Works in all terminals, even over SSH
+        - Console output: Always available, structured table format
+
+        Minimal config: The monitor reads EVERYTHING from the manifest JSON. No separate
+        config file. The manifest contains job IDs, expected durations, hourly rates,
+        budget cap, warn/cancel thresholds. One file = one experiment = one monitor.
+
+        The Makefile target should be dead simple:
+        ```makefile
+        monitor-factorial:
+            uv run python scripts/monitor_factorial.py \
+              --manifest outputs/factorial_manifest.json \
+              --poll-interval 30
+        ```
+
+        CRITICAL DevEx rule: The monitor must NEVER require Claude Code to be running.
+        If the researcher can't use it without Claude, it's not monitoring — it's
+        another skill, and skills are the problem.
+      </perspective>
+      <score>4.6</score>
+    </expert>
+
+    <consensus>
+      All 5 experts agree on the phased approach with Phase 1 (cron-based standalone
+      monitor) as the immediate priority. The monitor must:
+
+      1. Be a STANDALONE Python script — zero Claude Code dependency
+      2. Read all configuration from a JSON manifest
+      3. Parse sky jobs queue output using str.split() (no regex)
+      4. Detect 5 anomaly types: PENDING timeout, RUNNING timeout, cascading FAILED,
+         FAILED_SETUP, budget exceeded
+      5. Send desktop notifications via notify-send + terminal bell
+      6. Write structured JSONL log for post-hoc analysis
+      7. Auto-cancel stuck jobs via sky jobs cancel
+      8. Be idempotent (PID file guard for cron safety)
+      9. Handle SkyPilot CLI unavailability gracefully
+
+      Average expert score: 4.32/5.00
+      Confidence: HIGH — all failure modes are well-documented and prevention rules
+      are simple threshold checks.
+    </consensus>
+  </council-review>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: Cron-Based Monitor (P0, 8-12 hours)                      -->
+  <!-- The core deliverable. Everything else is defense-in-depth.         -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Cron-Based Factorial Monitor" priority="P0" effort="8-12 hours">
+    <description>
+      Autonomous monitoring script that survives session loss and detects ALL
+      observed failure modes within 60 seconds. This is the PRIMARY deliverable.
+
+      Architecture:
+        run_factorial.sh launches jobs → writes manifest JSON
+        monitor_factorial.py reads manifest → polls sky jobs queue → detects anomalies
+        → sends notifications → writes JSONL log → auto-cancels stuck jobs
+
+      Detection rules (from metalearning):
+        - PENDING > 30 min → WARN (capacity alarm)
+        - RUNNING > warn_duration (3x expected) → WARN
+        - RUNNING > cancel_duration (max_duration) → auto-CANCEL
+        - 3+ identical FAILED in 5 min → KILL SWITCH
+        - >50% of batch FAILED → KILL SWITCH
+        - FAILED_SETUP → immediate HIGH alert
+        - Total cost > budget warning threshold → WARN
+        - Total cost > budget cap → CANCEL ALL
+
+      The manifest JSON is the single source of truth for the monitor.
+      Expected durations, budget caps, hourly rates — everything in the manifest.
+    </description>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.1: Core data model + manifest schema (RED tests first) -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.1" type="RED">
+      <title>Write manifest + data model tests</title>
+      <file>tests/v2/unit/monitoring/test_job_manifest.py</file>
+      <description>
+        Define the manifest JSON schema and data model via failing tests.
+        The manifest is generated by create_job_manifest.py (T1.5) and consumed
+        by monitor_factorial.py (T1.3). Tests validate parsing, serialization,
+        and schema enforcement.
+      </description>
+      <tests>
+        <test name="test_job_record_from_dict">
+          JobRecord dataclass can be constructed from a dict with all required fields:
+          job_id, condition_name, model, loss, fold, spot, expected_duration_minutes,
+          warn_duration_minutes, cancel_duration_minutes, hourly_rate, status, launched_at.
+        </test>
+        <test name="test_job_record_to_dict_roundtrip">
+          JobRecord serializes to dict and deserializes back identically.
+        </test>
+        <test name="test_manifest_from_json_file">
+          JobManifest loads from a JSON file with header (experiment_name, budget_warning,
+          budget_cap, launched_at) and jobs list.
+        </test>
+        <test name="test_manifest_to_json_file_roundtrip">
+          JobManifest writes to JSON and reads back identically.
+        </test>
+        <test name="test_manifest_missing_required_field_raises">
+          JobManifest raises ValueError when a required field is missing
+          (e.g., no budget_cap). Never silently defaults.
+        </test>
+        <test name="test_manifest_job_count">
+          JobManifest.job_count returns correct count.
+        </test>
+        <test name="test_manifest_active_jobs">
+          JobManifest.active_jobs returns only non-terminal jobs.
+        </test>
+        <test name="test_manifest_terminal_jobs">
+          JobManifest.terminal_jobs returns only terminal jobs.
+        </test>
+        <test name="test_manifest_total_cost">
+          JobManifest.total_cost computes sum of elapsed_hours * hourly_rate
+          for all jobs with known duration.
+        </test>
+        <test name="test_manifest_success_rate">
+          JobManifest.success_rate = SUCCEEDED / total terminal jobs.
+        </test>
+        <test name="test_job_record_elapsed_minutes">
+          JobRecord.elapsed_minutes computes minutes since launched_at.
+          Returns 0 if launched_at is None.
+        </test>
+        <test name="test_job_record_cost_usd">
+          JobRecord.cost_usd = elapsed_hours * hourly_rate. Correct for
+          partial hours (e.g., 15 min at $0.80/h = $0.20).
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_job_manifest.py -v --tb=short</verify>
+    </task>
+
+    <task id="T1.1g" type="GREEN">
+      <title>Implement manifest data model</title>
+      <file>src/minivess/compute/job_manifest.py</file>
+      <description>
+        Implement JobRecord and JobManifest dataclasses.
+
+        JobRecord fields:
+          job_id: int | None (None before launch, filled by run_factorial.sh)
+          condition_name: str (e.g., "dynunet-dice_ce-calibfalse-f0")
+          model: str
+          loss: str
+          fold: int
+          spot: bool
+          expected_duration_minutes: float
+          warn_duration_minutes: float (typically 3x expected)
+          cancel_duration_minutes: float (hard max)
+          hourly_rate: float (USD per hour for this GPU + spot/on-demand)
+          status: str (PENDING, STARTING, RUNNING, SUCCEEDED, FAILED, etc.)
+          launched_at: str | None (ISO 8601 UTC timestamp)
+          started_at: str | None (when status first became RUNNING)
+          ended_at: str | None (when status became terminal)
+          failure_category: str | None (from ralph_monitor diagnosis)
+          recovery_count: int (number of spot preemption recoveries)
+
+        JobManifest fields:
+          experiment_name: str
+          config_file: str (path to factorial YAML)
+          budget_warning_usd: float
+          budget_cap_usd: float
+          pending_timeout_minutes: float (default 30)
+          kill_switch_threshold: int (default 3 — identical failures before kill)
+          kill_switch_window_minutes: float (default 5)
+          batch_failure_pct: float (default 0.5 — >50% failed triggers kill)
+          launched_at: str (ISO 8601 UTC)
+          jobs: list[JobRecord]
+
+        Methods on JobManifest:
+          from_json(path) -> JobManifest
+          to_json(path) -> None (atomic write: write to .tmp then rename)
+          job_count -> int
+          active_jobs -> list[JobRecord]
+          terminal_jobs -> list[JobRecord]
+          total_cost -> float
+          success_rate -> float
+          all_terminal -> bool
+
+        Methods on JobRecord:
+          from_dict(d) -> JobRecord
+          to_dict() -> dict
+          elapsed_minutes -> float (from launched_at to now or ended_at)
+          cost_usd -> float (elapsed_hours * hourly_rate)
+
+        IMPORTANT: Use dataclasses, not dicts. Use pathlib.Path for files.
+        Use datetime.now(timezone.utc). No regex.
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_job_manifest.py -v --tb=short</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.2: SkyPilot queue parser (RED tests first)             -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.2" type="RED">
+      <title>Write SkyPilot queue parser tests</title>
+      <file>tests/v2/unit/monitoring/test_sky_queue_parser.py</file>
+      <description>
+        Tests for parsing multi-job sky jobs queue output. The existing
+        parse_job_status in ralph_monitor.py handles single-job lookup.
+        We need batch parsing: extract ALL jobs with their full metadata
+        (ID, NAME, TOT.DURATION, JOB.DURATION, #RECOVERIES, STATUS).
+
+        Use ACTUAL sky jobs queue output from 11th pass as test fixtures.
+      </description>
+      <tests>
+        <test name="test_parse_queue_empty_output">
+          Empty or header-only output returns empty list.
+        </test>
+        <test name="test_parse_queue_single_running_job">
+          Single RUNNING job correctly parsed with all fields.
+        </test>
+        <test name="test_parse_queue_multiple_jobs_mixed_status">
+          Multiple jobs with PENDING, RUNNING, SUCCEEDED, FAILED parsed correctly.
+        </test>
+        <test name="test_parse_queue_pending_job_no_job_duration">
+          PENDING job has JOB.DURATION = None (displayed as "-" in output).
+        </test>
+        <test name="test_parse_queue_total_duration_parsing">
+          TOT.DURATION "1h 22m" parsed to 82 minutes. "45m" parsed to 45 minutes.
+          "2h" parsed to 120 minutes. "5m" parsed to 5 minutes.
+        </test>
+        <test name="test_parse_queue_job_duration_parsing">
+          JOB.DURATION parsed correctly. "-" becomes None.
+        </test>
+        <test name="test_parse_queue_recovery_count">
+          #RECOVERIES column parsed as integer.
+        </test>
+        <test name="test_parse_queue_name_matches_condition">
+          NAME field extracted correctly (e.g., "dynunet-dice_ce-calibfalse-f0").
+        </test>
+        <test name="test_parse_queue_failed_setup_status">
+          FAILED_SETUP is a distinct status from FAILED.
+        </test>
+        <test name="test_parse_queue_recovering_status">
+          RECOVERING status is recognized (spot preemption recovery in progress).
+        </test>
+        <test name="test_parse_queue_sky_cli_error_output">
+          When sky CLI returns error text (not job table), returns empty list
+          and does not crash.
+        </test>
+        <test name="test_parse_queue_realistic_11th_pass_output">
+          Full realistic output from 11th pass (3 PENDING jobs) parses correctly.
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_sky_queue_parser.py -v --tb=short</verify>
+    </task>
+
+    <task id="T1.2g" type="GREEN">
+      <title>Implement SkyPilot queue batch parser</title>
+      <file>src/minivess/compute/sky_queue_parser.py</file>
+      <description>
+        Implement parse_jobs_queue(output: str) -> list[QueuedJob].
+
+        QueuedJob dataclass:
+          job_id: int
+          name: str
+          requested: str (e.g., "1x L4:1")
+          submitted_at: str
+          total_duration_minutes: float | None
+          job_duration_minutes: float | None
+          recovery_count: int
+          status: str
+
+        Duration parsing: "1h 22m" → 82.0, "45m" → 45.0, "2h" → 120.0,
+        "5m" → 5.0, "-" → None. Use str.split() and conditional logic,
+        NOT regex (Rule 16).
+
+        Strategy for parsing the tabular output:
+        1. Split into lines
+        2. Skip header lines (contain "Managed jobs", "ID", dashes)
+        3. For each data line, split by whitespace
+        4. Column 0 = ID (must be an integer)
+        5. Column 1 = TASK (skip)
+        6. Column 2 = NAME
+        7. Find STATUS by searching for known status values from the right
+        8. Parse duration columns relative to STATUS position
+        9. Handle the REQUESTED column's potential spaces ("1x L4:1")
+
+        IMPORTANT: This is an extension of the existing parse_job_status
+        in ralph_monitor.py. Consider importing the known_statuses set
+        from there to avoid duplication.
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_sky_queue_parser.py -v --tb=short</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.3: Anomaly detector (RED tests first)                  -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.3" type="RED">
+      <title>Write anomaly detection tests</title>
+      <file>tests/v2/unit/monitoring/test_anomaly_detector.py</file>
+      <description>
+        The anomaly detector is the CORE of the monitor. It takes a JobManifest
+        (updated with current queue data) and returns a list of Alert objects.
+        Each alert has a severity (INFO, WARN, CRITICAL, EMERGENCY) and an action
+        (LOG, NOTIFY, CANCEL_JOB, CANCEL_ALL).
+
+        These tests validate EVERY failure mode from passes 4, 10, and 11.
+      </description>
+      <tests>
+        <test name="test_pending_timeout_triggers_warn">
+          Job PENDING for 35 min (threshold 30 min) triggers WARN alert.
+          Job PENDING for 25 min does NOT trigger.
+        </test>
+        <test name="test_running_over_warn_duration_triggers_warn">
+          Job RUNNING for 35 min with warn_duration 30 min triggers WARN.
+          Job RUNNING for 25 min does NOT trigger.
+        </test>
+        <test name="test_running_over_cancel_duration_triggers_critical_with_cancel_action">
+          Job RUNNING for 55 min with cancel_duration 50 min triggers CRITICAL
+          with action=CANCEL_JOB.
+        </test>
+        <test name="test_failed_setup_triggers_high_alert">
+          Job with FAILED_SETUP status triggers HIGH alert immediately.
+        </test>
+        <test name="test_kill_switch_three_identical_failures_in_window">
+          3 jobs FAILED with same failure_category within 5 min triggers
+          EMERGENCY kill switch. 2 jobs does NOT trigger. 3 jobs spread
+          over 10 min does NOT trigger (outside window).
+        </test>
+        <test name="test_kill_switch_batch_failure_percentage">
+          12 of 20 jobs FAILED (60%) triggers EMERGENCY kill switch when
+          threshold is 50%. 9 of 20 (45%) does NOT trigger.
+        </test>
+        <test name="test_budget_warning_triggers_warn">
+          Total cost $12 with budget_warning $10 triggers WARN.
+          Total cost $8 does NOT trigger.
+        </test>
+        <test name="test_budget_cap_triggers_emergency_cancel_all">
+          Total cost $16 with budget_cap $15 triggers EMERGENCY with
+          action=CANCEL_ALL.
+        </test>
+        <test name="test_no_alerts_when_all_healthy">
+          All jobs RUNNING within expected durations, cost within budget
+          → empty alert list.
+        </test>
+        <test name="test_multiple_anomalies_all_reported">
+          Two jobs stuck + budget warning → 3 alerts returned (not just the first).
+        </test>
+        <test name="test_alert_deduplication">
+          Same alert (same job, same type) is NOT repeated on subsequent polls.
+          Track already-fired alerts.
+        </test>
+        <test name="test_all_terminal_returns_summary_alert">
+          When all jobs are terminal, return INFO summary alert with
+          success count, failure count, total cost.
+        </test>
+        <test name="test_10th_pass_scenario_detected">
+          Simulate Job #154: RUNNING for 720 min (12h) with expected 5 min.
+          Both WARN (at 15 min) and CRITICAL/CANCEL (at max_duration) should fire.
+        </test>
+        <test name="test_11th_pass_scenario_detected">
+          Simulate 3 jobs PENDING for 600+ min. WARN should fire for each
+          after 30 min. No CANCEL (PENDING jobs can't be meaningfully cancelled
+          — but warn the user to consider region fallback).
+        </test>
+        <test name="test_4th_pass_scenario_detected">
+          Simulate 8 FAILED_SETUP with same error. Kill switch should trigger
+          after the 3rd failure (within 5 min window).
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py -v --tb=short</verify>
+    </task>
+
+    <task id="T1.3g" type="GREEN">
+      <title>Implement anomaly detector</title>
+      <file>src/minivess/compute/anomaly_detector.py</file>
+      <description>
+        Implement AnomalyDetector class and Alert dataclass.
+
+        Alert dataclass:
+          severity: str (INFO, WARN, HIGH, CRITICAL, EMERGENCY)
+          alert_type: str (PENDING_TIMEOUT, DURATION_WARN, DURATION_CANCEL,
+                          FAILED_SETUP, KILL_SWITCH_IDENTICAL, KILL_SWITCH_BATCH,
+                          BUDGET_WARN, BUDGET_CAP, ALL_TERMINAL)
+          action: str (LOG, NOTIFY, CANCEL_JOB, CANCEL_ALL, SUMMARY)
+          job_id: int | None (None for batch-level alerts)
+          message: str (human-readable description)
+          timestamp: str (ISO 8601 UTC)
+
+        AnomalyDetector:
+          __init__(manifest: JobManifest)
+          check_all() -> list[Alert]
+          _check_pending_timeouts() -> list[Alert]
+          _check_duration_anomalies() -> list[Alert]
+          _check_failed_setup() -> list[Alert]
+          _check_kill_switch() -> list[Alert]
+          _check_budget() -> list[Alert]
+          _check_all_terminal() -> list[Alert]
+          _already_fired: set[tuple] — tracks (job_id, alert_type) to deduplicate
+
+        Kill switch implementation:
+          Track failure timestamps in a deque (sliding window).
+          Group by failure_category. If count >= threshold within window → trigger.
+          Also check batch failure percentage.
+
+        Thresholds come from the manifest (not hardcoded in the detector):
+          manifest.pending_timeout_minutes
+          job.warn_duration_minutes
+          job.cancel_duration_minutes
+          manifest.budget_warning_usd
+          manifest.budget_cap_usd
+          manifest.kill_switch_threshold
+          manifest.kill_switch_window_minutes
+          manifest.batch_failure_pct
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py -v --tb=short</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.4: Alert dispatcher (RED tests first)                  -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.4" type="RED">
+      <title>Write alert dispatcher tests</title>
+      <file>tests/v2/unit/monitoring/test_alert_dispatcher.py</file>
+      <description>
+        The alert dispatcher receives Alert objects and routes them to
+        appropriate notification channels: JSONL log (always), desktop
+        notification (WARN+), terminal bell (CRITICAL+), console output (always).
+      </description>
+      <tests>
+        <test name="test_jsonl_output_format">
+          INFO alert written to JSONL with correct schema: timestamp, severity,
+          alert_type, job_id, message, action.
+        </test>
+        <test name="test_jsonl_append_only">
+          Multiple alerts append to the same JSONL file (not overwrite).
+        </test>
+        <test name="test_notify_send_called_for_warn_and_above">
+          WARN alert triggers subprocess call to notify-send with correct
+          urgency and message. (Mock subprocess.run.)
+        </test>
+        <test name="test_notify_send_not_called_for_info">
+          INFO alert does NOT trigger notify-send.
+        </test>
+        <test name="test_notify_send_graceful_when_unavailable">
+          If notify-send binary is not found, log a warning and continue
+          (do NOT crash the monitor).
+        </test>
+        <test name="test_terminal_bell_for_critical">
+          CRITICAL alert prints terminal bell character (\a) to stdout.
+        </test>
+        <test name="test_cancel_job_action_calls_sky_cancel">
+          Alert with action=CANCEL_JOB triggers subprocess call to
+          sky jobs cancel {job_id}. (Mock subprocess.run.)
+        </test>
+        <test name="test_cancel_all_action_calls_sky_cancel_for_all_active">
+          Alert with action=CANCEL_ALL triggers sky jobs cancel for
+          every active (non-terminal) job in the manifest.
+        </test>
+        <test name="test_sky_cancel_failure_does_not_crash">
+          If sky jobs cancel fails (e.g., job already terminal), log error
+          and continue.
+        </test>
+        <test name="test_console_status_table_format">
+          Status table printed to console has correct columns and formatting.
+          Includes: job_id, name, status, elapsed, expected, cost.
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_alert_dispatcher.py -v --tb=short</verify>
+    </task>
+
+    <task id="T1.4g" type="GREEN">
+      <title>Implement alert dispatcher</title>
+      <file>src/minivess/compute/alert_dispatcher.py</file>
+      <description>
+        Implement AlertDispatcher class.
+
+        AlertDispatcher:
+          __init__(jsonl_path: Path, manifest: JobManifest,
+                   sky_bin: str = "sky", enable_desktop: bool = True)
+          dispatch(alert: Alert) -> None
+          dispatch_batch(alerts: list[Alert]) -> None
+          print_status_table() -> None
+          _write_jsonl(alert: Alert) -> None
+          _send_desktop_notification(alert: Alert) -> None
+          _send_terminal_bell() -> None
+          _cancel_job(job_id: int) -> bool
+          _cancel_all_active() -> None
+          _print_console(alert: Alert) -> None
+
+        notify-send integration:
+          subprocess.run(["notify-send", "--urgency={urgency}", title, body],
+                         check=False, capture_output=True)
+          urgency mapping: WARN→normal, HIGH→normal, CRITICAL→critical, EMERGENCY→critical
+          If FileNotFoundError (notify-send not installed), log once and disable.
+
+        sky jobs cancel integration:
+          subprocess.run([sky_bin, "jobs", "cancel", str(job_id), "-y"],
+                         check=False, capture_output=True, text=True)
+          Log success/failure. Continue on failure.
+
+        Status table: Print a formatted table to stdout showing all jobs,
+        their current status, elapsed time, expected time, and cost.
+        Use simple string formatting (no external table library dependency).
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_alert_dispatcher.py -v --tb=short</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.5: Manifest generator (RED tests first)                -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.5" type="RED">
+      <title>Write manifest generator tests</title>
+      <file>tests/v2/unit/monitoring/test_manifest_generator.py</file>
+      <description>
+        The manifest generator reads the factorial config YAML and the job log
+        from run_factorial.sh to produce the manifest JSON that the monitor consumes.
+      </description>
+      <tests>
+        <test name="test_generate_manifest_from_debug_config">
+          Given configs/factorial/debug.yaml (or a test fixture copy), generates
+          a manifest with correct number of jobs (models * losses * calibs * folds).
+        </test>
+        <test name="test_expected_durations_from_model_type">
+          DynUNet → 10 min expected, 30 min warn, 50 min cancel.
+          SAM3 Hybrid → 25 min expected, 75 min warn, 75 min cancel.
+          SAM3 Vanilla → 15 min expected, 45 min warn, 75 min cancel.
+          SAM3 TopoLoRA → 25 min expected, 75 min warn, 75 min cancel.
+          VesselFM → 15 min expected, 45 min warn, 75 min cancel.
+          MambaVesselNet → 12 min expected, 36 min warn, 60 min cancel.
+        </test>
+        <test name="test_spot_flag_from_model_overrides">
+          SAM3 Hybrid and SAM3 TopoLoRA have spot=false (from model_overrides).
+          DynUNet has spot=true (default).
+        </test>
+        <test name="test_hourly_rate_spot_vs_ondemand">
+          Spot rate and on-demand rate differ. Manifest uses correct rate
+          based on spot flag.
+        </test>
+        <test name="test_budget_caps_from_config_or_defaults">
+          Budget warning and cap are configurable. Defaults: warning=$8, cap=$15
+          for debug experiments.
+        </test>
+        <test name="test_job_ids_from_job_log">
+          Parse run_factorial.sh job log to extract job IDs for each condition.
+          Format: "CONDITION_ID | model | loss | aux_calib | fold | LAUNCHED"
+        </test>
+        <test name="test_manifest_without_job_ids_has_none">
+          Before jobs are launched, job_id is None for all records.
+          Monitor handles this gracefully (matches by condition_name instead).
+        </test>
+        <test name="test_zero_shot_baselines_included">
+          Zero-shot baselines (sam3_vanilla, vesselfm) from the factorial config
+          are included in the manifest with their expected durations.
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_manifest_generator.py -v --tb=short</verify>
+    </task>
+
+    <task id="T1.5g" type="GREEN">
+      <title>Implement manifest generator</title>
+      <files>
+        <file>src/minivess/compute/manifest_generator.py</file>
+        <file>scripts/create_job_manifest.py</file>
+      </files>
+      <description>
+        Two components:
+
+        1. src/minivess/compute/manifest_generator.py — Pure library code.
+           generate_manifest(config_path: Path, job_log_path: Path | None = None,
+                             gpu_rates: dict | None = None) -> JobManifest
+
+           Expected duration lookup table (from 11th pass calibration):
+             MODEL_EXPECTED_DURATIONS = {
+               "dynunet": {"expected": 10, "warn": 30, "cancel": 50},
+               "sam3_hybrid": {"expected": 25, "warn": 75, "cancel": 75},
+               "sam3_vanilla": {"expected": 15, "warn": 45, "cancel": 75},
+               "sam3_topolora": {"expected": 25, "warn": 75, "cancel": 75},
+               "vesselfm": {"expected": 15, "warn": 45, "cancel": 75},
+               "mambavesselnet": {"expected": 12, "warn": 36, "cancel": 60},
+             }
+
+           GPU hourly rates (GCP L4, from pricing):
+             DEFAULT_GPU_RATES = {
+               "L4_spot": 0.28,     # GCP L4 spot price per hour
+               "L4_ondemand": 0.80, # GCP L4 on-demand price per hour
+             }
+
+           NOTE: These are DEFAULT values that can be overridden via the
+           factorial YAML's infrastructure section (Rule 29 compliance —
+           not hardcoded in function signatures, but module-level named constants
+           that the config can override).
+
+           Reads factorial config YAML → extracts factors → generates JobRecord
+           for each cell → wraps in JobManifest.
+
+           If job_log_path is provided, parse the run_factorial.sh job log
+           to match condition names to SkyPilot job IDs.
+
+        2. scripts/create_job_manifest.py — CLI wrapper.
+           Usage: uv run python scripts/create_job_manifest.py \
+                    --config configs/factorial/debug.yaml \
+                    --job-log outputs/20260328T090000Z_factorial_job_ids.txt \
+                    --output outputs/factorial_manifest.json
+
+           Can also be called without --job-log (pre-launch manifest with job_id=None).
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_manifest_generator.py -v --tb=short</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.6: Monitor main loop (RED tests first)                 -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.6" type="RED">
+      <title>Write monitor main loop tests</title>
+      <file>tests/v2/unit/monitoring/test_monitor_factorial.py</file>
+      <description>
+        Integration-level tests for the monitor's main loop. Mock the SkyPilot
+        CLI calls but test the full detect→alert→update→sleep cycle.
+      </description>
+      <tests>
+        <test name="test_monitor_single_poll_cycle">
+          One poll cycle: reads manifest, polls queue, updates manifest,
+          runs detector, dispatches alerts. All steps execute in order.
+        </test>
+        <test name="test_monitor_exits_when_all_terminal">
+          Monitor loop exits (returns exit code 0) when all jobs reach
+          terminal status and all SUCCEEDED.
+        </test>
+        <test name="test_monitor_exits_code_1_on_failures">
+          Monitor loop exits with code 1 when all jobs terminal but
+          some FAILED.
+        </test>
+        <test name="test_monitor_exits_code_2_on_budget_exceeded">
+          Monitor loop exits with code 2 when budget cap is exceeded.
+        </test>
+        <test name="test_monitor_handles_sky_cli_failure_gracefully">
+          If sky jobs queue fails (subprocess error), log warning and
+          retry on next cycle. Do NOT crash.
+        </test>
+        <test name="test_monitor_pid_file_prevents_double_run">
+          If PID file exists with a running process, monitor exits
+          immediately with informative message.
+        </test>
+        <test name="test_monitor_pid_file_cleaned_on_exit">
+          PID file is removed on normal exit and on signal (SIGINT, SIGTERM).
+        </test>
+        <test name="test_monitor_manifest_updated_atomically">
+          After each poll, manifest JSON is updated atomically
+          (write to .tmp, then rename). Concurrent readers never see
+          a half-written file.
+        </test>
+        <test name="test_monitor_status_table_printed_each_cycle">
+          Console status table is printed after each poll cycle.
+        </test>
+        <test name="test_monitor_matches_jobs_by_name_when_no_id">
+          When manifest jobs have job_id=None, monitor matches
+          queue entries by condition_name instead.
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_monitor_factorial.py -v --tb=short</verify>
+    </task>
+
+    <task id="T1.6g" type="GREEN">
+      <title>Implement monitor_factorial.py CLI</title>
+      <file>scripts/monitor_factorial.py</file>
+      <description>
+        The main monitor script. Standalone, no Claude Code dependency.
+
+        Usage:
+          uv run python scripts/monitor_factorial.py \
+            --manifest outputs/factorial_manifest.json \
+            --poll-interval 30
+
+        Main loop (pseudocode):
+          1. Parse args (--manifest, --poll-interval, --dry-run)
+          2. Check PID file — exit if another instance running
+          3. Write PID file
+          4. Register signal handlers (SIGINT, SIGTERM → cleanup PID file)
+          5. Load manifest from JSON
+          6. Loop:
+             a. Run sky jobs queue (subprocess)
+             b. Parse queue output → list[QueuedJob]
+             c. Update manifest with current status/duration
+             d. Run AnomalyDetector.check_all() → list[Alert]
+             e. Run AlertDispatcher.dispatch_batch(alerts)
+             f. Write updated manifest to disk (atomic)
+             g. Print status table
+             h. If all terminal → print summary, exit with appropriate code
+             i. Sleep poll_interval seconds
+          7. Clean up PID file
+
+        Exit codes:
+          0 = All jobs terminal and ALL SUCCEEDED
+          1 = All jobs terminal but some FAILED
+          2 = Budget exceeded (emergency stop)
+          130 = SIGINT (Ctrl+C)
+
+        The script imports from src/minivess/compute/ (job_manifest,
+        sky_queue_parser, anomaly_detector, alert_dispatcher). All logic
+        is in library code — the script is just the CLI + main loop.
+
+        PID file: outputs/.monitor_factorial.pid
+        JSONL log: outputs/job_monitor.jsonl
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/test_monitor_factorial.py -v --tb=short</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.7: run_factorial.sh integration                        -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.7" type="GREEN">
+      <title>Integrate manifest generation into run_factorial.sh</title>
+      <file>scripts/run_factorial.sh</file>
+      <description>
+        After all jobs are launched and the "Trainable conditions" summary
+        is printed, add:
+
+        1. Generate the manifest JSON by calling create_job_manifest.py
+           with --config and --job-log (the job log file already exists).
+        2. Print the monitor command to stdout:
+           "Monitor: make monitor-factorial"
+           "Or:      uv run python scripts/monitor_factorial.py --manifest outputs/factorial_manifest.json --poll-interval 30"
+
+        Do NOT auto-start the monitor. The researcher decides when and how
+        to run it (foreground, tmux, cron, etc.).
+
+        Also add a --manifest-only flag that generates the manifest without
+        launching jobs (for testing the monitor with mocked data).
+      </description>
+      <verify>./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.8: Makefile target                                     -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.8" type="GREEN">
+      <title>Add Makefile monitor-factorial target</title>
+      <file>Makefile</file>
+      <description>
+        Add to the Makefile:
+
+        ```makefile
+        monitor-factorial:  ## Monitor running factorial experiment (30s poll)
+        	uv run python scripts/monitor_factorial.py \
+        	  --manifest outputs/factorial_manifest.json \
+        	  --poll-interval 30
+        ```
+
+        Place it near the existing `monitor-smoke-test` target for discoverability.
+      </description>
+      <verify>make -n monitor-factorial</verify>
+    </task>
+
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <!-- Task 1.9: Pre-launch gate in experiment harness               -->
+    <!-- ────────────────────────────────────────────────────────────── -->
+    <task id="T1.9" type="GREEN">
+      <title>Add monitor pre-launch gate to experiment harness skill</title>
+      <file>.claude/skills/experiment-harness/SKILL.md</file>
+      <description>
+        Add a new rule H10 to the experiment harness:
+
+        H10: MONITOR-BEFORE-LAUNCH
+        Before ANY sky jobs launch, ensure:
+        1. scripts/monitor_factorial.py EXISTS and is executable
+        2. Print the monitor command to the user
+        3. In the experiment XML, add &lt;monitoring&gt; section with
+           the exact command to start the monitor
+
+        This is informational (the harness can't verify the monitor is running),
+        but it ensures the researcher is REMINDED every time.
+
+        Also update the Phase 2 VALIDATE gate table to include:
+        | Monitor script | `scripts/monitor_factorial.py` exists | File exists |
+      </description>
+      <verify>Read .claude/skills/experiment-harness/SKILL.md to confirm H10 exists</verify>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: GCP Budget Alerts (P1, 2-3 hours)                       -->
+  <!-- Cloud-native cost safety net — works even if dev machine is off.  -->
+  <!-- ================================================================== -->
+  <phase id="2" name="GCP Budget Alerts" priority="P1" effort="2-3 hours">
+    <description>
+      Cloud-native cost safety net using GCP Budget Alerts. Operates at the
+      GCP project billing level — works even if the researcher's machine is off,
+      the monitor script crashes, and all Claude sessions are dead.
+
+      Limitation: ~15 minute latency. This is a CEILING, not a per-job monitor.
+      It catches runaway cost even if Phase 1 fails entirely.
+    </description>
+
+    <task id="T2.1" type="RED">
+      <title>Write Pulumi budget alert tests</title>
+      <file>tests/v2/unit/deployment/test_gcp_budget_alert.py</file>
+      <description>
+        Test that the Pulumi GCP stack includes budget alert resources.
+        These are structural tests — they verify the Pulumi program creates
+        the expected resources, not that GCP actually accepts them.
+      </description>
+      <tests>
+        <test name="test_budget_alert_resource_exists_in_pulumi_program">
+          The Pulumi GCP program defines a gcp.billing.Budget resource
+          (or equivalent) with the project's billing account.
+        </test>
+        <test name="test_budget_alert_thresholds_defined">
+          Budget alert has thresholds at 50%, 90%, 100% of the defined
+          budget amount.
+        </test>
+        <test name="test_budget_alert_notification_channel_configured">
+          Budget alert sends notifications (email or Pub/Sub).
+        </test>
+        <test name="test_budget_amounts_configurable">
+          Budget amounts for debug ($15), production ($50), hard cap ($100)
+          are configurable via Pulumi config, not hardcoded.
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/deployment/test_gcp_budget_alert.py -v --tb=short</verify>
+    </task>
+
+    <task id="T2.1g" type="GREEN">
+      <title>Implement Pulumi budget alert resource</title>
+      <file>deployment/pulumi/gcp/__main__.py</file>
+      <description>
+        Add GCP Budget Alert resources to the Pulumi GCP stack.
+
+        Three budget levels (configurable via Pulumi config):
+        - debug_budget: $15 (default for debug factorial experiments)
+        - production_budget: $50 (for full factorial experiments)
+        - hard_cap_budget: $100 (absolute maximum, billing alarm)
+
+        Each budget has threshold rules at 50%, 90%, 100%.
+        Notification via email to the researcher's email address
+        (configurable via Pulumi config: researcher_email).
+
+        Uses gcp.billing.Budget resource (Pulumi GCP provider).
+
+        IMPORTANT: This requires the billing account ID, which should
+        already be configured in the Pulumi stack. Check existing
+        __main__.py for how billing is referenced.
+      </description>
+      <verify>cd deployment/pulumi/gcp &amp;&amp; pulumi preview --diff</verify>
+    </task>
+
+    <task id="T2.2" type="GREEN">
+      <title>Document budget alerts in deployment CLAUDE.md</title>
+      <file>deployment/pulumi/gcp/CLAUDE.md</file>
+      <description>
+        Add a "Budget Alerts" section to the GCP deployment documentation:
+        - What thresholds are configured
+        - How to change budget amounts (Pulumi config)
+        - Expected notification latency (~15 minutes)
+        - How this complements the local monitor (Phase 1)
+      </description>
+      <verify>Read deployment/pulumi/gcp/CLAUDE.md to confirm section exists</verify>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: Prefect Monitor Flow (P2, 6-8 hours)                     -->
+  <!-- Orchestration-aware monitoring with Prefect UI visibility.         -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Prefect Monitor Flow" priority="P2" effort="6-8 hours">
+    <description>
+      Wrap the Phase 1 monitor logic in a Prefect flow for UI visibility,
+      automation triggers, and state persistence. The Prefect monitor flow
+      is the "who watches the watchmen" layer — if the cron/tmux monitor
+      crashes, Prefect automations can detect it.
+
+      Architecture:
+        Prefect deployment "monitor-flow/factorial" runs locally (no cloud GPU).
+        Each Prefect task is one poll cycle. Prefect tracks task success/failure.
+        If the flow itself fails, Prefect automations fire a notification.
+        Researcher can check Prefect UI for experiment monitoring status.
+
+      IMPORTANT: This wraps Phase 1 code — it does NOT duplicate it.
+      The detection logic lives in src/minivess/compute/ and is imported
+      by both scripts/monitor_factorial.py and the Prefect flow.
+    </description>
+
+    <task id="T3.1" type="RED">
+      <title>Write Prefect monitor flow tests</title>
+      <file>tests/v2/unit/orchestration/test_monitor_flow.py</file>
+      <description>
+        Tests for the Prefect monitor flow. These test the flow structure
+        and task composition, not the detection logic (already tested in Phase 1).
+      </description>
+      <tests>
+        <test name="test_monitor_flow_is_prefect_flow">
+          monitor_flow is decorated with @flow and can be called.
+        </test>
+        <test name="test_poll_task_is_prefect_task">
+          poll_and_check is decorated with @task.
+        </test>
+        <test name="test_monitor_flow_reads_manifest">
+          Flow reads manifest from the configured path.
+        </test>
+        <test name="test_monitor_flow_returns_summary_on_all_terminal">
+          Flow returns a MonitorSummary when all jobs are terminal.
+        </test>
+        <test name="test_monitor_flow_raises_on_budget_exceeded">
+          Flow raises RuntimeError when budget cap is exceeded,
+          causing Prefect to mark the flow run as FAILED.
+        </test>
+        <test name="test_monitor_flow_task_retry_on_sky_failure">
+          If sky CLI fails, the poll task retries (Prefect retry config).
+        </test>
+      </tests>
+      <verify>uv run pytest tests/v2/unit/orchestration/test_monitor_flow.py -v --tb=short</verify>
+    </task>
+
+    <task id="T3.1g" type="GREEN">
+      <title>Implement Prefect monitor flow</title>
+      <file>src/minivess/orchestration/flows/monitor_flow.py</file>
+      <description>
+        Implement monitor_flow using Prefect 3.x decorators.
+
+        ```python
+        @flow(name="monitor-flow", description="Factorial experiment monitor")
+        def monitor_flow(
+            manifest_path: str,
+            poll_interval: int = 30,
+            max_cycles: int = 1000,
+        ) -> MonitorSummary:
+            manifest = JobManifest.from_json(Path(manifest_path))
+            for cycle in range(max_cycles):
+                alerts = poll_and_check(manifest)
+                if manifest.all_terminal:
+                    return MonitorSummary(...)
+                time.sleep(poll_interval)
+
+        @task(name="poll-and-check", retries=3, retry_delay_seconds=10)
+        def poll_and_check(manifest: JobManifest) -> list[Alert]:
+            # Same logic as monitor_factorial.py main loop body
+            ...
+        ```
+
+        The flow imports detection logic from src/minivess/compute/
+        (same code as Phase 1). No duplication.
+
+        Deployment: Can be started via:
+          prefect deployment run 'monitor-flow/factorial' \
+            --params '{"manifest_path": "outputs/factorial_manifest.json"}'
+      </description>
+      <verify>uv run pytest tests/v2/unit/orchestration/test_monitor_flow.py -v --tb=short</verify>
+    </task>
+
+    <task id="T3.2" type="GREEN">
+      <title>Add Prefect automation documentation</title>
+      <file>docs/planning/prefect-monitor-automation-setup.md</file>
+      <description>
+        Document how to set up Prefect automations that fire when the
+        monitor flow itself fails or crashes:
+
+        1. Create a Prefect automation trigger on monitor-flow FAILED state
+        2. Action: Send email/webhook notification
+        3. This catches the case where the monitor itself dies
+
+        Also document the Prefect deployment creation command.
+      </description>
+      <verify>Read docs/planning/prefect-monitor-automation-setup.md</verify>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: Claude Code Scheduled Triggers (P3, 4-6 hours)           -->
+  <!-- Intelligent diagnosis via scheduled Claude sessions.               -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Claude Code Scheduled Triggers" priority="P3" effort="4-6 hours">
+    <description>
+      The "luxury" layer: Claude Code sessions scheduled via /schedule to
+      periodically read the monitor's output files, perform root cause
+      analysis, and update the experiment report.
+
+      This is Phase 4 because it requires Phases 1-3 to be stable first.
+      Claude is the DIAGNOSTIC tool, not the MONITORING tool. The cron
+      monitor (Phase 1) detects; Claude diagnoses.
+
+      Architecture:
+        /schedule creates a cron entry → Claude headless session starts →
+        reads outputs/job_monitor.jsonl → reads outputs/factorial_manifest.json →
+        performs root cause analysis on any alerts → updates experiment report →
+        session ends.
+    </description>
+
+    <task id="T4.1" type="GREEN">
+      <title>Document /schedule integration for monitoring</title>
+      <file>docs/planning/claude-schedule-monitor-integration.md</file>
+      <description>
+        Document how to use Claude Code's /schedule skill to create
+        recurring monitoring sessions:
+
+        1. `/schedule` can invoke Claude every N minutes
+        2. Each invocation reads the manifest and JSONL log
+        3. Claude performs root cause analysis on any alerts
+        4. Writes findings to the experiment report
+        5. Creates GitHub issues for systemic problems
+
+        Include example /schedule invocation:
+          /schedule every 30m "Read outputs/job_monitor.jsonl and
+          outputs/factorial_manifest.json. Diagnose any WARN/CRITICAL
+          alerts. Update the experiment report at docs/planning/..."
+
+        Limitations:
+        - Each Claude session costs API credits
+        - Minimum practical interval: ~15-30 minutes
+        - Session may fail (token limit, network)
+        - NOT a replacement for Phase 1 cron monitor
+      </description>
+      <verify>Read docs/planning/claude-schedule-monitor-integration.md</verify>
+    </task>
+
+    <task id="T4.2" type="GREEN">
+      <title>Create scheduled task template</title>
+      <file>.claude/scheduled-tasks/monitor-experiment.yaml</file>
+      <description>
+        Template YAML for a scheduled monitoring trigger. This is NOT
+        executed by any automation — it's a template that the researcher
+        copies and adapts when setting up /schedule for a specific experiment.
+
+        ```yaml
+        # Scheduled monitoring trigger template
+        # Copy this and customize for your experiment.
+        # Start with: /schedule every 30m "..."
+        name: monitor-experiment
+        schedule: every 30m
+        prompt: |
+          Read the following files:
+          1. outputs/job_monitor.jsonl (latest 20 lines)
+          2. outputs/factorial_manifest.json
+
+          For any alerts with severity WARN or higher:
+          - Identify the root cause
+          - Check if the alert pattern matches known metalearning docs
+          - Recommend action (wait, cancel, fix, escalate)
+
+          Update the experiment report at:
+          docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-{N}th-pass.md
+
+          If budget exceeded: cancel all active jobs via sky jobs cancel.
+        context:
+          - .claude/metalearning/2026-03-27-no-job-duration-monitoring-12h-debug-run.md
+          - .claude/metalearning/2026-03-28-10hr-pending-no-monitoring-intervention.md
+        ```
+      </description>
+      <verify>Read .claude/scheduled-tasks/monitor-experiment.yaml</verify>
+    </task>
+
+    <task id="T4.3" type="GREEN">
+      <title>Define structured alert file format for Claude consumption</title>
+      <file>src/minivess/compute/alert_dispatcher.py</file>
+      <description>
+        Extend the AlertDispatcher (from Phase 1 Task 1.4g) to also write
+        a human-readable summary file at outputs/monitor_summary.md when
+        alerts of severity WARN or higher are detected.
+
+        This file is what the scheduled Claude session reads. Format:
+
+        ```markdown
+        # Monitor Summary (auto-generated)
+        Updated: 2026-03-28T10:30:00Z
+
+        ## Active Alerts
+        - [CRITICAL] Job 154 (sam3_hybrid-cbdice_cldice-calibtrue-f0) RUNNING
+          720 min, expected 25 min. Auto-cancelled.
+        - [WARN] Budget at $12.50 / $15.00 cap (83%)
+
+        ## Job Status
+        | Job | Name | Status | Elapsed | Expected | Cost |
+        | ... |
+
+        ## Action Needed
+        - Investigate root cause of Job 154 duration anomaly
+        - Consider region fallback if PENDING jobs persist
+        ```
+
+        This is a WRITE-ONLY file from the monitor's perspective. Claude
+        reads it; the monitor writes it. No bidirectional communication.
+      </description>
+      <verify>uv run pytest tests/v2/unit/monitoring/ -v --tb=short -k "summary or markdown"</verify>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH                                                   -->
+  <!-- ================================================================== -->
+  <dependency-graph>
+    <!--
+      Phase 1 tasks (internal dependencies):
+        T1.1 (manifest model) → T1.1g → T1.5 (manifest generator) → T1.5g
+        T1.2 (queue parser) → T1.2g → T1.6 (monitor loop) → T1.6g
+        T1.3 (anomaly detector) → T1.3g → T1.6
+        T1.4 (alert dispatcher) → T1.4g → T1.6
+        T1.6g → T1.7 (run_factorial.sh integration)
+        T1.6g → T1.8 (Makefile target)
+        T1.6g → T1.9 (harness gate)
+
+      Cross-phase dependencies:
+        Phase 1 complete → Phase 2 (GCP budget alerts are independent but logically after)
+        Phase 1 complete → Phase 3 (Prefect wraps Phase 1 code)
+        Phase 1 + Phase 3 → Phase 4 (Claude reads Phase 1 output files)
+    -->
+    <dependency from="T1.1" to="T1.1g" type="RED-to-GREEN"/>
+    <dependency from="T1.2" to="T1.2g" type="RED-to-GREEN"/>
+    <dependency from="T1.3" to="T1.3g" type="RED-to-GREEN"/>
+    <dependency from="T1.4" to="T1.4g" type="RED-to-GREEN"/>
+    <dependency from="T1.5" to="T1.5g" type="RED-to-GREEN"/>
+    <dependency from="T1.6" to="T1.6g" type="RED-to-GREEN"/>
+
+    <dependency from="T1.1g" to="T1.3" note="AnomalyDetector needs JobManifest"/>
+    <dependency from="T1.1g" to="T1.4" note="AlertDispatcher needs JobManifest"/>
+    <dependency from="T1.1g" to="T1.5" note="ManifestGenerator produces JobManifest"/>
+    <dependency from="T1.2g" to="T1.6" note="Monitor loop uses queue parser"/>
+    <dependency from="T1.3g" to="T1.6" note="Monitor loop uses anomaly detector"/>
+    <dependency from="T1.4g" to="T1.6" note="Monitor loop uses alert dispatcher"/>
+    <dependency from="T1.5g" to="T1.7" note="run_factorial.sh calls manifest generator"/>
+    <dependency from="T1.6g" to="T1.7" note="Integration after monitor works"/>
+    <dependency from="T1.6g" to="T1.8" note="Makefile after monitor works"/>
+    <dependency from="T1.6g" to="T1.9" note="Harness gate after monitor works"/>
+
+    <dependency from="T1.6g" to="T2.1" note="Phase 2 after Phase 1 core"/>
+    <dependency from="T1.6g" to="T3.1" note="Phase 3 wraps Phase 1 code"/>
+    <dependency from="T3.1g" to="T4.1" note="Phase 4 after Phase 3"/>
+    <dependency from="T1.4g" to="T4.3" note="Phase 4 extends alert dispatcher"/>
+  </dependency-graph>
+
+  <!-- ================================================================== -->
+  <!-- TESTING STRATEGY                                                   -->
+  <!-- ================================================================== -->
+  <testing-strategy>
+    <test-directory>tests/v2/unit/monitoring/</test-directory>
+    <conftest-note>
+      Create tests/v2/unit/monitoring/__init__.py and
+      tests/v2/unit/monitoring/conftest.py with shared fixtures:
+      - sample_manifest: A JobManifest with 5 realistic jobs (mixed status)
+      - sample_queue_output: Realistic sky jobs queue text output
+      - sample_11th_pass_queue: Exact queue output from 11th pass
+      - tmp_manifest_path: Path to temporary manifest JSON (uses tmp_path)
+      - mock_sky_command: Fixture that mocks subprocess.run for sky CLI calls
+    </conftest-note>
+
+    <test-files>
+      <file name="tests/v2/unit/monitoring/__init__.py" tests="0"/>
+      <file name="tests/v2/unit/monitoring/conftest.py" tests="0" note="Shared fixtures"/>
+      <file name="tests/v2/unit/monitoring/test_job_manifest.py" tests="12">
+        Data model: JobRecord, JobManifest serialization, computed properties
+      </file>
+      <file name="tests/v2/unit/monitoring/test_sky_queue_parser.py" tests="12">
+        Queue output parsing: duration, status, name, edge cases
+      </file>
+      <file name="tests/v2/unit/monitoring/test_anomaly_detector.py" tests="15">
+        Anomaly detection: all 5 root causes, scenario replay (passes 4/10/11)
+      </file>
+      <file name="tests/v2/unit/monitoring/test_alert_dispatcher.py" tests="10">
+        Alert routing: JSONL, notify-send, terminal bell, sky cancel
+      </file>
+      <file name="tests/v2/unit/monitoring/test_manifest_generator.py" tests="8">
+        Manifest generation: config parsing, duration lookup, job ID matching
+      </file>
+      <file name="tests/v2/unit/monitoring/test_monitor_factorial.py" tests="10">
+        Main loop: poll cycle, exit codes, PID guard, graceful degradation
+      </file>
+      <file name="tests/v2/unit/deployment/test_gcp_budget_alert.py" tests="4">
+        Pulumi budget alert: resource exists, thresholds, notifications
+      </file>
+      <file name="tests/v2/unit/orchestration/test_monitor_flow.py" tests="6">
+        Prefect flow: structure, retry, summary, budget failure
+      </file>
+    </test-files>
+
+    <expected-test-count>
+      <phase id="1">67 tests (5 test files)</phase>
+      <phase id="2">4 tests (1 test file)</phase>
+      <phase id="3">6 tests (1 test file)</phase>
+      <phase id="4">0 tests (documentation only, plus 1-2 extending Phase 1 tests)</phase>
+      <total>~77 new tests</total>
+    </expected-test-count>
+
+    <acceptance-gate>
+      Run ALL new tests: uv run pytest tests/v2/unit/monitoring/ -v --tb=short
+      Run staging gate: make test-staging (must still pass with new tests added)
+      Replay scenarios: Tests for passes 4, 10, 11 must ALL detect anomalies within
+      one simulated poll cycle.
+    </acceptance-gate>
+  </testing-strategy>
+
+  <!-- ================================================================== -->
+  <!-- INTEGRATION POINTS                                                 -->
+  <!-- ================================================================== -->
+  <integration-points>
+    <integration name="run_factorial.sh → manifest generator">
+      After all jobs are launched, run_factorial.sh calls create_job_manifest.py
+      to generate the manifest JSON. The job log file (already written by
+      run_factorial.sh) provides condition-to-job-ID mapping.
+    </integration>
+
+    <integration name="monitor_factorial.py → sky CLI">
+      Monitor calls `sky jobs queue` via subprocess. Parses tabular output
+      using str.split() (no regex). Also calls `sky jobs cancel {id} -y` for
+      auto-cancellation. Must handle CLI unavailability gracefully.
+    </integration>
+
+    <integration name="monitor_factorial.py → notify-send">
+      Desktop notifications via Linux notify-send. Must handle the binary
+      not being installed (e.g., headless server). Degrades to terminal-only.
+    </integration>
+
+    <integration name="monitor_factorial.py → experiment harness skill">
+      The harness skill's Phase 2 VALIDATE gate checks that
+      scripts/monitor_factorial.py exists. The harness's Phase 3 EXECUTE
+      prints the monitor command. No runtime coupling — the monitor is
+      independent infrastructure.
+    </integration>
+
+    <integration name="monitor_factorial.py → experiment report">
+      The monitor writes outputs/job_monitor.jsonl and
+      outputs/factorial_manifest.json. Claude Code sessions (manual or
+      scheduled) read these files for diagnosis and report updates.
+      One-way data flow: monitor writes, Claude reads.
+    </integration>
+
+    <integration name="Prefect monitor flow → Phase 1 library code">
+      The Prefect flow imports from src/minivess/compute/ (same modules
+      as the CLI script). Zero code duplication. The flow adds Prefect's
+      task tracking, retries, and UI visibility on top.
+    </integration>
+
+    <integration name="GCP Budget Alerts → email">
+      GCP-native alerting. Independent of all local infrastructure.
+      15-minute latency. Catches runaway cost if everything else fails.
+    </integration>
+  </integration-points>
+
+  <!-- ================================================================== -->
+  <!-- FILES CREATED/MODIFIED                                             -->
+  <!-- ================================================================== -->
+  <file-manifest>
+    <new-files>
+      <!-- Phase 1: Core monitoring infrastructure -->
+      <file>src/minivess/compute/job_manifest.py</file>
+      <file>src/minivess/compute/sky_queue_parser.py</file>
+      <file>src/minivess/compute/anomaly_detector.py</file>
+      <file>src/minivess/compute/alert_dispatcher.py</file>
+      <file>src/minivess/compute/manifest_generator.py</file>
+      <file>scripts/monitor_factorial.py</file>
+      <file>scripts/create_job_manifest.py</file>
+      <file>tests/v2/unit/monitoring/__init__.py</file>
+      <file>tests/v2/unit/monitoring/conftest.py</file>
+      <file>tests/v2/unit/monitoring/test_job_manifest.py</file>
+      <file>tests/v2/unit/monitoring/test_sky_queue_parser.py</file>
+      <file>tests/v2/unit/monitoring/test_anomaly_detector.py</file>
+      <file>tests/v2/unit/monitoring/test_alert_dispatcher.py</file>
+      <file>tests/v2/unit/monitoring/test_manifest_generator.py</file>
+      <file>tests/v2/unit/monitoring/test_monitor_factorial.py</file>
+
+      <!-- Phase 2: GCP budget alerts -->
+      <file>tests/v2/unit/deployment/test_gcp_budget_alert.py</file>
+
+      <!-- Phase 3: Prefect monitor flow -->
+      <file>src/minivess/orchestration/flows/monitor_flow.py</file>
+      <file>tests/v2/unit/orchestration/test_monitor_flow.py</file>
+      <file>docs/planning/prefect-monitor-automation-setup.md</file>
+
+      <!-- Phase 4: Claude scheduled triggers -->
+      <file>docs/planning/claude-schedule-monitor-integration.md</file>
+      <file>.claude/scheduled-tasks/monitor-experiment.yaml</file>
+    </new-files>
+
+    <modified-files>
+      <file>scripts/run_factorial.sh</file>
+      <file>Makefile</file>
+      <file>.claude/skills/experiment-harness/SKILL.md</file>
+      <file>deployment/pulumi/gcp/__main__.py</file>
+      <file>deployment/pulumi/gcp/CLAUDE.md</file>
+    </modified-files>
+  </file-manifest>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER                                                    -->
+  <!-- ================================================================== -->
+  <execution-order>
+    <step order="1" tasks="T1.1,T1.1g" description="Manifest data model (RED→GREEN)"/>
+    <step order="2" tasks="T1.2,T1.2g" description="SkyPilot queue parser (RED→GREEN)"/>
+    <step order="3" tasks="T1.3,T1.3g,T1.5,T1.5g" description="Anomaly detector + manifest generator (RED→GREEN, parallel)"/>
+    <step order="4" tasks="T1.4,T1.4g" description="Alert dispatcher (RED→GREEN)"/>
+    <step order="5" tasks="T1.6,T1.6g" description="Monitor main loop (RED→GREEN)"/>
+    <step order="6" tasks="T1.7,T1.8,T1.9" description="Integration: run_factorial.sh, Makefile, harness gate"/>
+    <step order="7" tasks="VERIFY" description="Run full Phase 1 tests: uv run pytest tests/v2/unit/monitoring/ -v AND make test-staging"/>
+    <step order="8" tasks="T2.1,T2.1g,T2.2" description="Phase 2: GCP budget alerts"/>
+    <step order="9" tasks="T3.1,T3.1g,T3.2" description="Phase 3: Prefect monitor flow"/>
+    <step order="10" tasks="T4.1,T4.2,T4.3" description="Phase 4: Claude scheduled triggers"/>
+    <step order="11" tasks="FINAL-VERIFY" description="Full test suite: make test-staging AND make test-prod"/>
+  </execution-order>
+
+  <!-- ================================================================== -->
+  <!-- ROLLBACK PLAN                                                      -->
+  <!-- ================================================================== -->
+  <rollback-plan>
+    <description>
+      Each phase is independently deployable. If Phase 1 is problematic:
+      - The monitor is a standalone script — delete it and nothing breaks
+      - run_factorial.sh changes are additive (manifest generation after launch)
+      - The Makefile target is additive
+      - The experiment harness gate is informational only
+
+      If Phase 2 (Pulumi) is problematic:
+      - `pulumi destroy` the budget alert resources
+      - No impact on the rest of the monitoring stack
+
+      If Phase 3 (Prefect) is problematic:
+      - Don't deploy the monitor flow — Phase 1 cron still works
+      - Prefect integration is an overlay, not a replacement
+
+      If Phase 4 (Claude schedule) is problematic:
+      - Delete the scheduled trigger — Phase 1 cron still works
+      - Claude diagnosis is a luxury layer
+    </description>
+
+    <rollback-commands>
+      <command description="Remove Phase 1 monitor (nuclear option)">
+        git revert --no-commit [monitor-commits]
+      </command>
+      <command description="Remove Phase 2 budget alerts">
+        cd deployment/pulumi/gcp &amp;&amp; pulumi destroy --target budget-alert-debug --target budget-alert-production --target budget-alert-hard-cap
+      </command>
+      <command description="Remove Phase 3 Prefect flow">
+        rm src/minivess/orchestration/flows/monitor_flow.py
+      </command>
+      <command description="Remove Phase 4 scheduled trigger">
+        rm .claude/scheduled-tasks/monitor-experiment.yaml
+      </command>
+    </rollback-commands>
+  </rollback-plan>
+
+  <!-- ================================================================== -->
+  <!-- SUCCESS CRITERIA                                                   -->
+  <!-- ================================================================== -->
+  <success-criteria>
+    <criterion id="SC1" phase="1" description="Monitor detects 10th pass scenario (12h stuck job) within 1 poll cycle">
+      Test: test_10th_pass_scenario_detected
+    </criterion>
+    <criterion id="SC2" phase="1" description="Monitor detects 11th pass scenario (10h PENDING) within 1 poll cycle">
+      Test: test_11th_pass_scenario_detected
+    </criterion>
+    <criterion id="SC3" phase="1" description="Monitor detects 4th pass scenario (8 FAILED_SETUP) within 1 poll cycle">
+      Test: test_4th_pass_scenario_detected
+    </criterion>
+    <criterion id="SC4" phase="1" description="Monitor sends desktop notification on WARN and above">
+      Test: test_notify_send_called_for_warn_and_above
+    </criterion>
+    <criterion id="SC5" phase="1" description="Monitor auto-cancels jobs exceeding cancel_duration">
+      Test: test_cancel_job_action_calls_sky_cancel
+    </criterion>
+    <criterion id="SC6" phase="1" description="Monitor works without Claude Code running">
+      Verified by: script is standalone Python with no Claude Code imports
+    </criterion>
+    <criterion id="SC7" phase="1" description="Monitor handles SkyPilot CLI failure gracefully">
+      Test: test_monitor_handles_sky_cli_failure_gracefully
+    </criterion>
+    <criterion id="SC8" phase="1" description="All ~67 Phase 1 tests pass">
+      Command: uv run pytest tests/v2/unit/monitoring/ -v --tb=short
+    </criterion>
+    <criterion id="SC9" phase="1" description="Staging gate passes with new tests">
+      Command: make test-staging
+    </criterion>
+    <criterion id="SC10" phase="2" description="Pulumi stack includes budget alert resources">
+      Command: cd deployment/pulumi/gcp &amp;&amp; pulumi preview
+    </criterion>
+    <criterion id="SC11" phase="3" description="Prefect monitor flow callable and testable">
+      Command: uv run pytest tests/v2/unit/orchestration/test_monitor_flow.py -v
+    </criterion>
+  </success-criteria>
+</execution-plan>

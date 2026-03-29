@@ -5,7 +5,7 @@
 # Override per-user: configs/user/<user_name>.yaml
 
 provider: gcp
-region: europe-west4
+region: us-central1
 use_spot: true
 disk_size: 100
 disk_tier: best
@@ -15,12 +15,14 @@ disk_tier: best
 # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
 accelerators:
   - L4:1
-  # A100 REMOVED — was never authorized by user (5.5x cost).
-  # Add back ONLY with explicit user authorization.
+  - A100:1       # Fallback tier 1 — A100-40GB SPOT ONLY ($1.10/hr), authorized 2026-03-28
+  - A100-80GB:1  # Fallback tier 2 — A100-80GB SPOT ONLY ($1.38/hr), authorized 2026-03-28
+  # A100-80GB NOT AUTHORIZED — 40GB sufficient for all models
+  # H100 NOT AUTHORIZED — overpowered for debug passes
 
 # Docker image from GAR (same-region, fast pulls, public).
 docker_registry: gar
-docker_image: europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+docker_image: us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
 
 # MLflow tracking via GCP Cloud Run — set MLFLOW_TRACKING_URI in .env.
 mlflow_env_var: MLFLOW_TRACKING_URI

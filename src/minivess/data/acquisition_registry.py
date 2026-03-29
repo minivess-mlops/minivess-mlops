@@ -81,13 +81,15 @@ ACQUISITION_REGISTRY: dict[str, DatasetAcquisitionEntry] = {
         source_url=(
             "https://ecommons.cornell.edu/items/a79bb6d8-77cf-4917-8e26-f2716a6ac2a3"
         ),
-        download_method="manual",
+        download_method="http_download",
         requires_auth=False,
         source_format="tiff",
         manual_instructions=(
+            "Automated: Flow 0 downloads from Cornell eCommons bitstream API.\n"
+            "Manual alternative:\n"
             "1. Go to https://ecommons.cornell.edu and search for 'DeepVess'\n"
-            "2. Download the TIFF data files\n"
-            "3. Place in data/raw/deepvess/images/ and data/raw/deepvess/labels/\n"
+            "2. Download HaftJavaherian_DeepVess2018_Images.zip (1.45 GB)\n"
+            "3. Extract TIFF files to data/raw/deepvess/images/ and labels/\n"
             "4. Flow 0 will convert TIFF → NIfTI automatically"
         ),
         expected_checksums=None,

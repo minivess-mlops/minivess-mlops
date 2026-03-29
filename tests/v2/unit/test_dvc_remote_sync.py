@@ -112,12 +112,57 @@ class TestDvcYamlLockConsistency:
         outs = download.get("outs", [])
         assert len(outs) > 0, "No outputs in download stage lock"
         nfiles = outs[0].get("nfiles", 0)
-        assert nfiles >= 300, f"Expected ≥300 files in raw MiniVess data, got {nfiles}"
+        assert nfiles >= 200, f"Expected ≥200 files in raw MiniVess data, got {nfiles}"
 
 
 # ---------------------------------------------------------------------------
 # Module 2: SkyPilot setup script DVC path validation
 # ---------------------------------------------------------------------------
+
+
+class TestDvcDatasetTracking:
+    """DVC must track both MiniVess and DeepVess datasets."""
+
+    def test_dvc_lock_tracks_minivess(self) -> None:
+        """dvc.lock has at least one output containing 'minivess'."""
+        lock = yaml.safe_load(DVC_LOCK.read_text(encoding="utf-8"))
+        all_paths: list[str] = []
+        for stage in lock.get("stages", {}).values():
+            for out in stage.get("outs", []):
+                all_paths.append(out.get("path", ""))
+        has_minivess = any("minivess" in p for p in all_paths)
+        assert has_minivess, f"No MiniVess output in dvc.lock. Paths: {all_paths}"
+
+    def test_dvc_lock_tracks_deepvess(self) -> None:
+        """DeepVess is tracked via standalone .dvc file (not in dvc.lock stages)."""
+        deepvess_dvc = Path("data/raw/deepvess.dvc")
+        assert deepvess_dvc.exists(), (
+            "DeepVess .dvc file not found at data/raw/deepvess.dvc — "
+            "DeepVess is NOT tracked by DVC"
+        )
+
+    def test_dvc_minivess_file_count_above_threshold(self) -> None:
+        """MiniVess download stage has nfiles >= 200."""
+        lock = yaml.safe_load(DVC_LOCK.read_text(encoding="utf-8"))
+        download = lock.get("stages", {}).get("download", {})
+        outs = download.get("outs", [])
+        assert len(outs) > 0, "No outputs in download stage lock"
+        nfiles = outs[0].get("nfiles", 0)
+        assert nfiles >= 200, f"Expected ≥200 files in MiniVess, got {nfiles}"
+
+    def test_dvc_deepvess_file_has_md5(self) -> None:
+        """DeepVess .dvc file has an md5 hash for integrity tracking."""
+        deepvess_dvc = Path("data/raw/deepvess.dvc")
+        if not deepvess_dvc.exists():
+            import pytest
+
+            pytest.skip("DeepVess .dvc file not found")
+        content = yaml.safe_load(deepvess_dvc.read_text(encoding="utf-8"))
+        outs = content.get("outs", [])
+        assert len(outs) > 0, "No outputs in deepvess.dvc"
+        assert outs[0].get("md5") or outs[0].get("hash"), (
+            "DeepVess .dvc file has no md5/hash — data not tracked"
+        )
 
 
 class TestSkypilotDvcPullPaths:

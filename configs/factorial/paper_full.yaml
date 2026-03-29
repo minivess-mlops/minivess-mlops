@@ -83,10 +83,12 @@ model_overrides:
     batch_size: 1
     gradient_accumulation_steps: 4
     gradient_checkpointing: true
+    use_spot: false  # 80% preemption rate on 25+ min jobs — on-demand is cheaper AND faster
   sam3_hybrid:
     batch_size: 1
     gradient_accumulation_steps: 4
     gradient_checkpointing: true
+    use_spot: false  # 80% preemption rate on 25+ min jobs — on-demand is cheaper AND faster
   sam3_vanilla:
     batch_size: 1
     gradient_accumulation_steps: 1

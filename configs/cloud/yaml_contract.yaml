@@ -20,6 +20,8 @@
 allowed_accelerators:
   gcp:
     - L4
+    - A100       # Fallback tier 1 — A100-40GB SPOT ONLY ($1.10/hr), authorized 2026-03-28
+    - A100-80GB  # Fallback tier 2 — A100-80GB SPOT ONLY ($1.38/hr), authorized 2026-03-28
   runpod:
     - RTX4090
     - RTX5090
@@ -77,6 +79,8 @@ allowed_resource_keys:
 factorial:
   allowed_accelerators:
     - L4
+    - A100       # Ordered fallback tier 1 — A100-40GB spot
+    - A100-80GB  # Ordered fallback tier 2 — A100-80GB spot
   required_cloud: gcp
   max_disk_size: 200  # GB, sanity check
   require_spot: true
@@ -90,9 +94,9 @@ max_hourly_cost_usd:
   RTX4090: 0.50  # ~$0.44/hr spot
   RTX5090: 0.80  # estimated
   RTX3090: 0.45  # ~$0.40/hr spot
-  A100: 1.50     # NOT AUTHORIZED — listed only for detection
-  A100-80GB: 1.80  # NOT AUTHORIZED
-  H100: 3.00     # NOT AUTHORIZED
+  A100: 1.50     # NOT AUTHORIZED — no quota (request denied)
+  A100-80GB: 1.80  # AUTHORIZED as fallback — SPOT ONLY, quota 1 (2026-03-28)
+  H100: 3.00     # NOT AUTHORIZED — overpowered for debug passes
 
 # ── GPU quota guard rails ──────────────────────────────────────────────
 # Minimum GPU quota (GPUS_ALL_REGIONS or per-GPU metric) required before launch.

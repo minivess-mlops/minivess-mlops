@@ -12,6 +12,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -78,6 +80,7 @@ class TestHealthRegressionGateExists:
         func_names = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
         assert "main" in func_names, "health_regression_gate.py must have a main() function"
 
+    @pytest.mark.slow
     def test_gate_script_runs_without_error(self) -> None:
         result = subprocess.run(
             ["uv", "run", "python", "scripts/health_regression_gate.py"],

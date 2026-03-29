@@ -1,0 +1,1511 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  11th Pass Infrastructure Follow-Up Plan — Vascadia v0.2-beta
+  Created: 2026-03-28
+  Author: Claude (iterated-llm-council analysis)
+
+  Context: During the 11th pass debug factorial experiment, 9 infrastructure
+  issues were discovered that need systematic improvement. This plan applies
+  5-expert council analysis to each issue and synthesizes a unified fix plan.
+  Issue I (SAM3 weight caching) was added after monitoring revealed spot
+  preemption cycling during SAM3 setup due to 10-min HuggingFace downloads.
+
+  Related files:
+    - docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-11th-pass.xml
+    - docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-11th-pass.md
+    - docs/planning/v0-2_archive/original_docs/gcp-finops-snapshot-2026-03-28-report.md
+    - .claude/metalearning/2026-03-28-context-amnesia-deferred-deepvess-whac-a-mole.md
+    - .claude/metalearning/2026-03-28-shortcut-taking-skip-production-quality.md
+-->
+<plan>
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 1: METADATA                                                    -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <metadata>
+    <title>11th Pass Infrastructure Follow-Up — Vascadia v0.2-beta</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-28</date>
+    <status>proposed</status>
+    <priority>P0-P2 (9 issues, mixed priority)</priority>
+    <estimated-total-effort>3-5 working days</estimated-total-effort>
+    <prerequisites>
+      <prereq>11th pass experiment completed (or Phase 1 results available)</prereq>
+      <prereq>Current branch: fix/10th-pass-production-readiness</prereq>
+      <prereq>GCP project: minivess-mlops, region: europe-west4</prereq>
+    </prerequisites>
+    <report-output>docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-11th-pass-infra-follow-up.xml</report-output>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 2: EXPERT COUNCIL                                              -->
+  <!--                                                                         -->
+  <!-- 5 expert perspectives analyze all 8 issues. Each expert reviews from    -->
+  <!-- their domain expertise and proposes solutions. The synthesis follows.    -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <expert-council>
+    <!-- ─── Expert 1: Platform Engineer ─────────────────────────────────── -->
+    <expert id="E1" role="Platform Engineer" domain="SkyPilot, GPU provisioning, quotas">
+      <analysis>
+        <issue-review ref="A" title="GPU capacity constraints">
+          <assessment severity="P0">
+            europe_strict with 1 L4 GPU quota in europe-west4 creates a hard bottleneck.
+            Jobs cycle PENDING/STARTING indefinitely when the single L4 is unavailable.
+            With 22 jobs to run sequentially (1 GPU quota), even if GPUs are available,
+            wall-clock time is ~22 x avg_duration. When GPUs are NOT available, the
+            experiment stalls entirely with no automatic fallback.
+          </assessment>
+          <root-cause>
+            Three factors compound: (1) europe_strict locks to a single region with
+            limited L4 pool, (2) GCP quota of 1 L4 GPU means zero parallelism,
+            (3) SkyPilot has no mechanism to notify when capacity becomes available.
+          </root-cause>
+          <proposal>
+            1. Create a new region config "europe_relaxed" that includes europe-west1
+               and europe-west3 as fallbacks (still EU-only, minimal egress ~$0.01/GiB).
+            2. Make europe_relaxed the default for debug runs. europe_strict remains
+               available for cost-sensitive production runs.
+            3. Request GCP quota increase for NVIDIA_L4_GPUS from 1 to 4 in europe-west4.
+               This allows 4-way parallelism and reduces wall-clock by 4x.
+            4. Add a preflight check that reads the region config and warns if only 1
+               region is configured AND GPU quota is 1 (bottleneck detection).
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="B" title="SkyPilot controller auto-stop">
+          <assessment severity="P1">
+            The controller auto-stops after 10 min idle (AUTOSTOP=10m). Before each
+            experiment, the user must restart it, adding 2-3 min latency. If the user
+            forgets, preflight fails. The controller costs ~EUR 93-100/month when running
+            24/7, so auto-stop is a cost control — but 10 min is too aggressive.
+          </assessment>
+          <root-cause>
+            SkyPilot default auto-stop is 10 minutes. The project never changed this
+            because the controller was only recently moved to GCP (post-migration).
+          </root-cause>
+          <proposal>
+            1. Increase auto-stop to 60 minutes during active experiment sessions.
+               This covers the typical gap between experiment preparation and launch.
+            2. Add a --ensure-controller flag to run_factorial.sh that calls
+               "sky jobs controller start" if the controller is stopped. This makes
+               controller state transparent to the user.
+            3. For overnight/weekend idle, keep auto-stop at 60 min — the controller
+               will stop naturally after the last job completes, saving ~EUR 3/day.
+            4. Document the "start controller" step in cold-start instructions as a
+               preflight gate, not a manual step.
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="H" title="No per-model spot/on-demand override">
+          <assessment severity="P1">
+            RESOLVED in this session. run_factorial.sh now reads model_overrides.use_spot
+            from the factorial YAML and passes --no-use-spot to sky jobs launch for
+            SAM3 models. Verified via dry-run. No further action needed — document the
+            mechanism for future reference.
+          </assessment>
+        </issue-review>
+
+        <issue-review ref="I" title="SAM3 weights downloaded from HuggingFace every job">
+          <assessment severity="P0">
+            SAM3 zero-shot jobs are getting spot-preempted during setup because the
+            setup phase takes ~15-20 min: Docker pull from GAR (~5 min, 6 GB), SAM3
+            weights from HuggingFace (~10 min, 9 GB external network), DVC data from
+            GCS (~3 min, same-region). The HuggingFace download is the longest single
+            step and uses external network (slow, variable latency, no GCP peering).
+            Every preempted job restarts the full setup — compounding the problem.
+
+            Solution: cache pretrained weights on GCS in europe-west4. Same-region
+            transfer is free and fast (1-2 min for 9 GB vs 10 min from HuggingFace).
+            This reduces total setup from ~15-20 min to ~8-10 min, making spot
+            preemption recovery much faster and reducing the window of vulnerability.
+          </assessment>
+          <root-cause>
+            train_factorial.yaml setup currently calls hf_hub_download('facebook/sam3',
+            'sam3.pt') on every job launch. This downloads 9 GB over the public internet
+            each time. No caching layer exists. Combined with the 6 GB Docker pull, the
+            setup phase exceeds the typical spot preemption grace period.
+          </root-cause>
+          <proposal>
+            1. One-time upload: gsutil cp sam3.pt gs://minivess-mlops-checkpoints/pretrained/sam3.pt
+            2. Update SkyPilot YAML setup to use: gsutil cp gs://minivess-mlops-checkpoints/pretrained/sam3.pt /app/pretrained/
+               instead of hf_hub_download. Same-region transfer: free, ~1-2 min.
+            3. Keep HuggingFace as fallback: if GCS copy fails, fall back to hf_hub_download.
+            4. This is NOT an artifact (trained output) — it is a pretrained INPUT weight.
+               Does NOT violate the mlflow_only_artifact_contract.
+            5. Storage cost: ~$0.05/month for 9 GB on GCS Standard.
+          </proposal>
+        </issue-review>
+      </analysis>
+    </expert>
+
+    <!-- ─── Expert 2: DevOps Engineer ──────────────────────────────────── -->
+    <expert id="E2" role="DevOps Engineer" domain="Docker, CI/CD, image management">
+      <analysis>
+        <issue-review ref="D" title="Docker image freshness check false positives">
+          <assessment severity="P1">
+            The preflight check_docker_image_freshness() compares the image's
+            org.opencontainers.image.revision label against git HEAD. When HEAD moves
+            for doc/test-only changes (no src/ changes), the image is functionally
+            identical but the check fails. This forces unnecessary Docker rebuilds
+            (~20 min each) and blocks experiment launches.
+          </assessment>
+          <root-cause>
+            The freshness check uses git HEAD as the reference, but HEAD includes ALL
+            commits (docs, tests, configs, metalearning). The Docker image only contains
+            src/, deployment/, configs/ — so doc-only commits create a false mismatch.
+          </root-cause>
+          <proposal>
+            1. Replace HEAD comparison with a "content hash" of Docker-relevant paths.
+               Compute: git diff --stat HEAD..IMAGE_COMMIT -- src/ deployment/docker/
+               configs/ pyproject.toml uv.lock. If the diff is empty, the image is fresh.
+            2. Implementation in scripts/preflight_gcp.py:check_docker_image_freshness():
+               - Get IMAGE_COMMIT from the OCI label (existing code).
+               - Run "git diff --name-only IMAGE_COMMIT..HEAD -- src/ deployment/docker/
+                 configs/ pyproject.toml uv.lock" to check if Docker-relevant files changed.
+               - If no Docker-relevant files changed, return PASS with message
+                 "Image commit {X} differs from HEAD {Y} but no Docker-relevant files changed."
+               - If Docker-relevant files DID change, return FAIL as today.
+            3. Add a Docker-relevant paths list as a constant in preflight_gcp.py:
+               DOCKER_RELEVANT_PATHS = ["src/", "deployment/docker/", "configs/",
+               "pyproject.toml", "uv.lock"].
+            4. Add test: test_docker_freshness_ignores_doc_changes.
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="G" title="Stale .venv paths after repo move">
+          <assessment severity="P2">
+            Moving the repo from github-personal/ to knowledge-hub/repositories/ broke
+            .venv shebangs. Every script that uses #!/path/to/.venv/bin/python had the
+            old absolute path baked in. This caused SkyPilot API server to fail on startup.
+          </assessment>
+          <root-cause>
+            Python venvs store absolute paths in shebangs and pyvenv.cfg. Moving the
+            parent directory invalidates all of them. The fix is always "recreate the
+            venv" but there is no automated detection.
+          </root-cause>
+          <proposal>
+            1. Add a preflight check that validates .venv/pyvenv.cfg "home" path matches
+               the current repo location. If mismatched, print "Stale venv detected.
+               Run: rm -rf .venv && uv sync --all-extras".
+            2. Implementation in scripts/preflight_gcp.py: new check_venv_paths() function.
+               Read .venv/pyvenv.cfg, parse "home = /path/to/python", verify the path exists.
+            3. Add this check to the cold-start instructions as CS0 (before all other checks).
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="F" title="SkyPilot API version mismatch">
+          <assessment severity="P2">
+            The SkyPilot API server was running v1.0.0.dev20260314 (12 days behind)
+            while the client was v1.0.0.dev20260326. This happened after venv recreation
+            — the client was updated but the server process was stale.
+          </assessment>
+          <root-cause>
+            "sky api start" launches a background process from the venv. After "uv sync"
+            updates the SkyPilot package, the running server process still uses the old
+            version. There is no automatic server restart on package update.
+          </root-cause>
+          <proposal>
+            1. Add a preflight check that compares "sky api version" (server) with
+               "sky --version" (client). If mismatched, print "SkyPilot API server
+               version mismatch. Run: sky api stop && sky api start".
+            2. Better: have the venv freshness check (issue G) also trigger
+               "sky api stop && sky api start" when the venv is recreated.
+            3. Add to cold-start instructions: after uv sync, always restart SkyPilot API.
+          </proposal>
+        </issue-review>
+      </analysis>
+    </expert>
+
+    <!-- ─── Expert 3: Data Engineer ────────────────────────────────────── -->
+    <expert id="E3" role="Data Engineer" domain="DVC, data pipelines, GCS">
+      <analysis>
+        <issue-review ref="C" title="DVC data not on GCS after region migration">
+          <assessment severity="P0">
+            After migrating from europe-north1 to europe-west4, all 3 GCS buckets were
+            empty. The Pulumi stack created new buckets in the new region but DVC data
+            was never re-pushed. This caused a 45-min delay: download MiniVess from
+            EBRAINS (5 min), push to GCS (2 min), discover DeepVess also missing (10 min),
+            download from Cornell eCommons (4 min), push to GCS (2 min), plus debugging.
+          </assessment>
+          <root-cause>
+            The region migration plan (gcp-spot-with-skypilot-and-pulumi-up-plan.xml)
+            focused on infrastructure (GAR, Cloud SQL, Cloud Run) but did not include a
+            "re-push data to new buckets" step. The DVC remote URL changed (same bucket
+            names, new region) but the data content was not migrated. Pulumi creates
+            empty buckets — it does not copy data.
+          </root-cause>
+          <proposal>
+            1. Create a post-migration checklist script: scripts/post_migration_verify.py.
+               Checks: (a) DVC data on new GCS remote, (b) Docker images on new GAR,
+               (c) MLflow experiments accessible, (d) Cloud SQL has expected databases.
+            2. Enhance preflight_gcp.py: the existing check_dvc_data_on_gcs() already
+               verifies data presence. Ensure it runs BEFORE any launch and has a clear
+               remediation message: "DVC data not on GCS. Run: dvc push -r gcs".
+            3. Add a "data migration" section to the Pulumi post-up hook. After
+               "pulumi up" succeeds, print: "Infrastructure created. Now push data:
+               dvc push -r gcs && gsutil cp -r data/external/ gs://minivess-mlops-dvc-data/external/".
+            4. For DeepVess specifically: the download_deepvess() function now exists in
+               src/minivess/data/downloaders.py. Register it in the acquisition flow so
+               "prefect deployment run 'acquisition-flow/default' --params '{dataset: deepvess}'"
+               handles the full download + push pipeline.
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="E" title="No automated DeepVess downloader">
+          <assessment severity="P1">
+            RESOLVED in this session. download_deepvess() implemented in
+            src/minivess/data/downloaders.py, registered in _DOWNLOADERS dict,
+            acquisition_registry.py updated from download_method="manual" to
+            "http_download". 3 tests written and passing.
+
+            However, the acquisition flow integration is incomplete: the downloader
+            function exists but the Prefect acquisition flow does not yet call it
+            automatically for DeepVess. The function must be manually invoked.
+          </assessment>
+          <root-cause>
+            The acquisition flow's downloader dispatch was designed for MiniVess only.
+            When DeepVess was added as a test dataset, the download_method was set to
+            "manual" as a placeholder. Nobody implemented the automated path.
+          </root-cause>
+          <proposal>
+            1. Wire download_deepvess() into the acquisition flow's downloader dispatch.
+               The dispatch in src/minivess/flows/acquisition_flow.py should check
+               _DOWNLOADERS[dataset_name] and call it automatically.
+            2. Add VesselNN downloader as well (drift detection dataset). All 3 known
+               datasets (MiniVess, DeepVess, VesselNN) should have automated downloaders.
+            3. Add an "acquisition flow smoke test" that verifies all registered datasets
+               have a working downloader (mock HTTP calls, verify dispatch).
+            4. Add a DVC push step after download: download → format_convert → dvc add → dvc push.
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="I" title="SAM3 pretrained weights not cached on GCS">
+          <assessment severity="P0">
+            Pretrained model weights are INPUTS to the pipeline, analogous to training
+            data. Currently SAM3 weights (9 GB) are fetched from HuggingFace on every
+            job launch — an external network dependency that adds ~10 min to setup.
+            The gs://minivess-mlops-checkpoints bucket already exists in europe-west4
+            and can store pretrained weights under a /pretrained/ prefix. Same-region
+            GCS transfer is free and ~5x faster than cross-network HuggingFace download.
+          </assessment>
+          <proposal>
+            1. Create gs://minivess-mlops-checkpoints/pretrained/ prefix for all
+               pretrained model weights (SAM3 today, VesselFM in future).
+            2. One-time upload: download sam3.pt locally, gsutil cp to the bucket.
+            3. Update SkyPilot setup block: gsutil cp gs://...pretrained/sam3.pt /app/
+            4. Add pretrained weight presence to post_migration_verify.py checks.
+            5. Storage cost: ~$0.05/month (9 GB Standard, europe-west4).
+          </proposal>
+        </issue-review>
+      </analysis>
+    </expert>
+
+    <!-- ─── Expert 4: Reliability Engineer ─────────────────────────────── -->
+    <expert id="E4" role="Reliability Engineer" domain="monitoring, alerting, auto-recovery">
+      <analysis>
+        <issue-review ref="A" title="GPU capacity constraints (reliability perspective)">
+          <assessment severity="P0">
+            The PENDING/STARTING cycle is a liveness issue. Jobs appear to be "running"
+            from SkyPilot's perspective but are actually cycling through failed provisioning
+            attempts. There is no alerting — the user must manually poll "sky jobs queue"
+            to discover the stall. The max_wait_hours=168 (1 week) means a stuck experiment
+            could burn controller costs for a week before auto-cancelling.
+          </assessment>
+          <proposal>
+            1. Add a "provisioning stall detector" to the monitoring protocol.
+               If a job has been in PENDING/STARTING for >30 min with 0 successful
+               provisions, emit a WARNING with the message: "Job X has been cycling
+               PENDING/STARTING for {N} min. Possible causes: (a) GPU capacity exhausted
+               in {region}, (b) quota insufficient, (c) image pull failing."
+            2. Reduce max_wait_hours from 168 (1 week) to 24 (1 day) for debug runs.
+               A debug experiment should not silently wait a week. Production runs can
+               keep 168h. Add max_wait_hours to debug.yaml infrastructure section.
+            3. Add a preflight GPU availability check: query SkyPilot for current spot
+               availability in the configured regions. "sky gpus --cloud gcp L4" shows
+               real-time availability. If 0 available in all configured regions, warn
+               the user BEFORE launching.
+            4. Implement a simple notification mechanism: when Phase 1 jobs have been
+               PENDING for >15 min, write a status file to outputs/experiment_status.txt
+               that can be polled by external tools or checked manually.
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="B" title="SkyPilot controller auto-stop (reliability perspective)">
+          <assessment severity="P1">
+            The auto-stop is a reliability risk during long experiments. If the controller
+            stops mid-experiment (unlikely with active jobs, but possible during inter-phase
+            gaps), in-flight job monitoring is lost. The controller manages job state —
+            if it dies, job status cannot be queried until restart.
+          </assessment>
+          <proposal>
+            1. The controller should NOT auto-stop while any jobs are in PENDING, STARTING,
+               RUNNING, or RECOVERING state. SkyPilot likely already handles this, but
+               verify by checking SkyPilot documentation.
+            2. Add a "controller health" check to the polling protocol: every 5 min during
+               experiment execution, verify "sky jobs queue" returns successfully. If it
+               fails, the controller may have stopped — restart automatically.
+            3. Add controller status to the experiment report: "Controller: UP (europe-west1-b,
+               n4-standard-4, uptime: 2h 15m)".
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="I" title="SAM3 weight download during setup (reliability perspective)">
+          <assessment severity="P0">
+            The 15-20 min setup window is the primary reliability risk for SAM3 spot
+            jobs. Spot preemption can occur at any time — the longer the setup, the
+            higher the probability of preemption before useful work begins. Each
+            preemption triggers a FULL re-download (Docker pull + weights + data),
+            creating a positive feedback loop: long setup → preemption → restart →
+            long setup again. Caching weights on GCS cuts setup by ~7-8 min,
+            significantly reducing the preemption vulnerability window.
+          </assessment>
+          <proposal>
+            1. Cache on GCS: reduces external network dependency from 2 (Docker + HuggingFace)
+               to 1 (Docker from GAR only). Both Docker and weights become same-region.
+            2. Add setup-time tracking: log the timestamp at setup start and at each
+               substep (docker pull, weight download, data pull) to measure improvement.
+            3. Consider pre-pulling Docker images to a GCE disk snapshot for further
+               setup reduction (future optimization, not blocking).
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="F" title="SkyPilot API version mismatch (reliability perspective)">
+          <assessment severity="P2">
+            API version mismatches can cause subtle bugs: the client sends requests the
+            server does not understand, or the server returns responses the client cannot
+            parse. This is especially dangerous with dev builds (v1.0.0.dev*) where the
+            API is not yet stable.
+          </assessment>
+          <proposal>
+            1. Make version mismatch a HARD FAIL in preflight, not just a warning.
+               If server != client, refuse to launch and print the fix command.
+            2. Add version check to run_factorial.sh as an early gate (before YAML parsing).
+          </proposal>
+        </issue-review>
+      </analysis>
+    </expert>
+
+    <!-- ─── Expert 5: Cost Engineer ────────────────────────────────────── -->
+    <expert id="E5" role="Cost Engineer" domain="FinOps, quota optimization, spot strategy">
+      <analysis>
+        <issue-review ref="A" title="GPU capacity constraints (cost perspective)">
+          <assessment severity="P0">
+            With 1 L4 GPU quota, all 22 jobs run sequentially. At ~15 min average per
+            job, that is ~5.5 hours wall-clock (best case). With PENDING gaps, easily
+            8-12 hours. The controller burns ~EUR 0.40/hour during this time (n4-standard-4).
+            Total controller cost for one debug experiment: EUR 2.20-4.80.
+
+            With 4 L4 GPU quota: 4-way parallelism, ~1.5 hours wall-clock, controller
+            cost EUR 0.60. The quota increase request is FREE — it only costs if GPUs
+            are actually provisioned.
+
+            Cost of PENDING: every hour of PENDING = EUR 0.13 (controller) + EUR 0 (no
+            GPU). But the human time cost is much higher — the researcher cannot proceed
+            with analysis until training completes.
+          </assessment>
+          <proposal>
+            1. Request quota increase: NVIDIA_L4_GPUS from 1 to 4 in europe-west4.
+               This is a GCP support request, typically approved in 24-48 hours.
+               Command: gcloud compute regions describe europe-west4 --project=minivess-mlops
+               to check current quotas, then request via Cloud Console.
+            2. Implement cost tracking in run_factorial.sh: after each job completes,
+               compute actual cost (duration x rate) and append to the job log. Sum at
+               the end. Compare against budget cap.
+            3. For SAM3 on-demand jobs: L4 on-demand is $0.70/hr. With 16 SAM3 conditions
+               at ~25 min each, that is 6.7 GPU-hours = $4.67. If 4-way parallel, the
+               wall-clock is 1.7 hours but GPU cost is the same ($4.67). Parallelism
+               saves human time, not GPU cost.
+            4. Consider time-of-day scheduling: GCP spot availability is typically higher
+               at night (EU time). Launching experiments at 22:00 CET may reduce PENDING time.
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="C" title="DVC data not on GCS (cost perspective)">
+          <assessment severity="P1">
+            The 45-min delay had no direct cloud cost (data was downloaded to local machine,
+            then pushed to GCS). However, the human time cost was significant — the session
+            context was consumed by data pipeline debugging instead of experiment execution.
+            Prevention is free (add a check), remediation is cheap (~5 min of GCS egress-free
+            push), but the discovery cost is high (debugging why jobs fail to pull data).
+          </assessment>
+          <proposal>
+            1. Add GCS bucket size to the FinOps snapshot: if any bucket is 0 bytes,
+               flag it as "EMPTY — data not pushed."
+            2. Add a cost estimate to the preflight output: "Data on GCS: 984 MB MiniVess
+               + 1.9 GB DeepVess. Estimated storage cost: $0.06/month."
+          </proposal>
+        </issue-review>
+
+        <issue-review ref="D" title="Docker freshness false positives (cost perspective)">
+          <assessment severity="P1">
+            Each false positive Docker rebuild costs: ~20 min build time (local CPU) +
+            ~5 min push to GAR (6 GiB upload) + ~2 min GAR storage delta. No direct cloud
+            cost (build is local), but the human time cost is ~25 min per false positive.
+            With frequent doc/test commits (5-10 per session), this could trigger 5-10
+            unnecessary rebuilds per week.
+          </assessment>
+        </issue-review>
+
+        <issue-review ref="I" title="SAM3 weight download cost (cost perspective)">
+          <assessment severity="P0">
+            Each SAM3 job currently downloads 9 GB from HuggingFace during setup (~10 min).
+            With 16 SAM3 conditions in a debug factorial, that is 16 x 9 GB = 144 GB of
+            external network transfer per experiment run. If jobs are preempted and retry,
+            the transfer multiplies further.
+
+            Cost comparison (per experiment, 16 SAM3 jobs):
+            - Current (HuggingFace): $0 egress but 16 x 10 min = 160 min of setup time.
+              With 50% preemption rate: 240 min setup. GPU idle during setup = wasted $.
+            - Cached (GCS same-region): $0 egress (same-region free), 16 x 1-2 min = 24 min setup.
+              Storage cost: $0.05/month (9 GB, Standard, europe-west4).
+            - GPU cost saved: setup reduction of ~136-216 min. At L4 on-demand $0.70/hr,
+              that is $1.59-2.52 saved per experiment just in GPU idle time during setup.
+            - ROI: $0.05/month storage pays for itself after 1 experiment.
+          </assessment>
+        </issue-review>
+      </analysis>
+    </expert>
+  </expert-council>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 3: SYNTHESIZED ISSUE REGISTRY                                  -->
+  <!--                                                                         -->
+  <!-- Unified view of all 9 issues with cross-expert consensus.               -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <issue-registry>
+    <issue id="A" title="GPU Capacity Constraints — europe_strict + 1 L4 Quota" priority="P0">
+      <status>OPEN — blocking experiment throughput</status>
+      <discovered>2026-03-28 09:00 UTC (Phase 1 jobs cycling PENDING/STARTING)</discovered>
+      <impact>
+        Experiments stall indefinitely when europe-west4 L4 GPUs are unavailable.
+        22 sequential jobs with PENDING gaps push wall-clock from 5.5h to 8-12h.
+        No automatic fallback, no alerting, no user notification.
+      </impact>
+      <root-cause>
+        Triple bottleneck: (1) europe_strict = 1 region, (2) GCP quota = 1 L4 GPU,
+        (3) europe-west4 L4 spot pool is small and contested. Any one factor alone
+        is manageable; all three together create a hard stall.
+      </root-cause>
+      <expert-consensus>
+        All 5 experts agree this is P0. The fix requires both quota increase (capacity)
+        and region fallback (availability). Neither alone is sufficient.
+      </expert-consensus>
+    </issue>
+
+    <issue id="B" title="SkyPilot Controller Auto-Stop Too Aggressive" priority="P1">
+      <status>OPEN — causes preflight failures and launch delays</status>
+      <discovered>2026-03-28 07:45 UTC (controller down, preflight failed)</discovered>
+      <impact>
+        Controller stops after 10 min idle. Before each experiment, user must manually
+        restart (+2-3 min). If forgotten, preflight fails with unclear error.
+        During inter-phase gaps (Phase 1 complete, preparing Phase 2), controller
+        may stop and lose job state visibility.
+      </impact>
+      <root-cause>
+        SkyPilot default AUTOSTOP=10m. Never adjusted for this project's workflow
+        where experiment preparation takes 15-30 min between controller use.
+      </root-cause>
+      <expert-consensus>
+        E1 and E4 agree: increase to 60 min, add auto-start in run_factorial.sh.
+        E5 notes controller idle cost is ~EUR 0.13/hour — 60 min auto-stop adds
+        EUR 0.13 per session vs 10 min. Negligible.
+      </expert-consensus>
+    </issue>
+
+    <issue id="C" title="DVC Data Not on GCS After Region Migration" priority="P0">
+      <status>RESOLVED (data pushed) — prevention mechanism needed</status>
+      <discovered>2026-03-28 07:50 UTC (empty GCS buckets after europe-west4 migration)</discovered>
+      <impact>
+        45-min delay: discover empty buckets, download MiniVess from EBRAINS,
+        discover DeepVess also missing, download from Cornell eCommons, push both.
+        Cloud VMs would fail at DVC pull if launched without data.
+      </impact>
+      <root-cause>
+        Region migration plan omitted "re-push data to new buckets" step. Pulumi
+        creates infrastructure (buckets, registries) but does not migrate data.
+        No post-migration verification script existed.
+      </root-cause>
+      <expert-consensus>
+        E3 and E5 agree: create post-migration verification script. E4 agrees:
+        existing preflight already checks DVC data — ensure it has clear remediation.
+        This is a process gap, not a code gap.
+      </expert-consensus>
+    </issue>
+
+    <issue id="D" title="Docker Image Freshness Check False Positives" priority="P1">
+      <status>OPEN — causes unnecessary rebuilds</status>
+      <discovered>2026-03-28 08:45 UTC (preflight failed for doc-only commit)</discovered>
+      <impact>
+        Every doc/test/metalearning commit triggers a false freshness failure.
+        Each unnecessary rebuild costs ~25 min (build + push). With frequent
+        commits (5-10 per session), this blocks experiment launches repeatedly.
+      </impact>
+      <root-cause>
+        check_docker_image_freshness() compares git HEAD with image OCI label.
+        HEAD includes ALL file changes; Docker image only contains src/, deployment/,
+        configs/, pyproject.toml, uv.lock. Doc-only commits create false mismatch.
+      </root-cause>
+      <expert-consensus>
+        E2 proposes content-aware comparison (diff Docker-relevant paths only).
+        E5 confirms cost justification. All agree this is a straightforward fix.
+      </expert-consensus>
+    </issue>
+
+    <issue id="E" title="No Automated DeepVess Downloader in Acquisition Flow" priority="P1">
+      <status>PARTIALLY RESOLVED — downloader exists, flow integration missing</status>
+      <discovered>2026-03-28 08:20 UTC (DeepVess needed on GCS, no automation)</discovered>
+      <impact>
+        download_deepvess() now exists and works. But the acquisition Prefect flow
+        does not dispatch to it automatically. User must call the function manually
+        or use the raw script. This violates TOP-2 (zero manual work).
+      </impact>
+      <root-cause>
+        Acquisition flow's downloader dispatch was MiniVess-only. DeepVess was
+        added as a test dataset with download_method="manual" placeholder.
+        Nobody wired the automated path.
+      </root-cause>
+      <expert-consensus>
+        E3 proposes full acquisition flow integration for all 3 datasets.
+        E4 proposes smoke test for downloader registry completeness.
+      </expert-consensus>
+    </issue>
+
+    <issue id="F" title="SkyPilot API Version Mismatch" priority="P2">
+      <status>RESOLVED (API restarted) — prevention mechanism needed</status>
+      <discovered>2026-03-28 07:45 UTC (server 12 days behind client)</discovered>
+      <impact>
+        Potential for subtle API incompatibilities between dev builds.
+        Server did not recognize client requests correctly until restarted.
+      </impact>
+      <root-cause>
+        "uv sync" updates the SkyPilot package but does not restart the running
+        API server process. The server continues running the old version.
+      </root-cause>
+      <expert-consensus>
+        E2 and E4 agree: add version check to preflight. E4 wants it as HARD FAIL.
+        E2 suggests coupling it with venv freshness check.
+      </expert-consensus>
+    </issue>
+
+    <issue id="G" title="Stale .venv Paths After Repo Move" priority="P2">
+      <status>RESOLVED (venv recreated) — prevention mechanism needed</status>
+      <discovered>2026-03-28 07:45 UTC (SkyPilot API failed to start)</discovered>
+      <impact>
+        All venv-based scripts fail after repo directory move. SkyPilot API, preflight,
+        and run_factorial.sh all break. Requires manual "rm -rf .venv && uv sync".
+      </impact>
+      <root-cause>
+        Python venvs store absolute paths in shebangs and pyvenv.cfg. Moving the
+        parent directory invalidates all paths. No automated detection existed.
+      </root-cause>
+      <expert-consensus>
+        E2 proposes pyvenv.cfg path validation in preflight. All agree this is a
+        one-time setup issue that should be caught early.
+      </expert-consensus>
+    </issue>
+
+    <issue id="I" title="SAM3 Pretrained Weights Not Cached on GCS — Setup Causes Spot Preemption" priority="P0">
+      <status>OPEN — directly causes SAM3 spot preemption cycling</status>
+      <discovered>2026-03-28 (monitoring revealed SAM3 zero-shot jobs cycling during setup)</discovered>
+      <impact>
+        SAM3 zero-shot jobs get spot-preempted during setup because the setup phase
+        takes ~15-20 min total: Docker pull from GAR (~5 min, 6 GB), SAM3 weights from
+        HuggingFace (~10 min, 9 GB over public internet), DVC data from GCS (~3 min).
+        The HuggingFace download is the single longest substep and uses external network
+        (slow, variable, no GCP peering). Every preempted job restarts the full setup,
+        creating a compounding failure loop. With 16 SAM3 conditions, this wastes
+        160+ minutes of setup time per experiment — more if preemptions cascade.
+      </impact>
+      <root-cause>
+        train_factorial.yaml setup calls hf_hub_download('facebook/sam3', 'sam3.pt')
+        on every job. No caching layer. The 9 GB download uses external network from
+        GCP to HuggingFace CDN. gs://minivess-mlops-checkpoints already exists in
+        europe-west4 but is only used for trained checkpoints, not pretrained inputs.
+      </root-cause>
+      <expert-consensus>
+        All 5 experts agree this is P0. E1 (Platform): reduces setup from 15-20 min
+        to 8-10 min, making spot viable for SAM3. E3 (Data): pretrained weights are
+        INPUTS not artifacts — no mlflow_only_artifact_contract violation. E4 (Reliability):
+        eliminates the primary preemption vulnerability window. E5 (Cost): $0.05/month
+        storage saves $1.59-2.52/experiment in GPU idle time. ROI: 1 experiment.
+      </expert-consensus>
+    </issue>
+
+    <issue id="H" title="No Per-Model Spot/On-Demand Override" priority="P1">
+      <status>RESOLVED — implemented in this session</status>
+      <discovered>2026-03-28 08:15 UTC (SAM3 needed on-demand, no mechanism)</discovered>
+      <impact>
+        No further impact. run_factorial.sh reads model_overrides.use_spot from
+        factorial YAML and passes --no-use-spot for SAM3 models.
+      </impact>
+      <root-cause>
+        Original run_factorial.sh used global spot=true for all models. SAM3's
+        80% preemption rate on 25+ min jobs made spot economically irrational.
+      </root-cause>
+      <expert-consensus>
+        Fully resolved. Document the mechanism in this plan for reference.
+      </expert-consensus>
+      <files-changed>
+        <file>configs/factorial/debug.yaml</file>
+        <file>configs/factorial/paper_full.yaml</file>
+        <file>scripts/run_factorial.sh</file>
+      </files-changed>
+    </issue>
+  </issue-registry>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 4: EXECUTION PHASES                                             -->
+  <!--                                                                         -->
+  <!-- Ordered by priority. Phase 1 = P0 blockers, Phase 2 = P1 improvements, -->
+  <!-- Phase 3 = P2 hardening.                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ─── PHASE 1: P0 Blockers (Day 1) ──────────────────────────────────── -->
+  <phase id="1" name="P0 Blockers — GPU Capacity + Data Migration Prevention + SAM3 Weight Caching" estimated-effort="5-7 hours">
+    <description>
+      Fix the three issues that can stall experiments entirely: GPU provisioning
+      bottleneck, missing data after infrastructure migration, and SAM3 spot
+      preemption caused by 10-min HuggingFace downloads during setup.
+    </description>
+
+    <task id="T1.1" title="Request GCP L4 GPU Quota Increase" issue-ref="A" effort="30 min">
+      <description>
+        Request NVIDIA_L4_GPUS quota increase from 1 to 4 in europe-west4.
+        This enables 4-way parallel job execution, reducing wall-clock from
+        5.5h to ~1.5h for the debug factorial.
+      </description>
+      <steps>
+        <step id="T1.1.1">
+          Check current quota:
+          gcloud compute regions describe europe-west4 --project=minivess-mlops
+          --format="yaml(quotas)" | grep -A2 NVIDIA_L4
+        </step>
+        <step id="T1.1.2">
+          Request increase via Cloud Console:
+          Console > IAM and Admin > Quotas > Filter: NVIDIA_L4_GPUS > europe-west4
+          > Request increase to 4.
+          Justification: "Academic research platform (Nature Protocols paper).
+          Running factorial experiments with 4 model families. 4 GPUs enables
+          parallel training, reducing experiment time from 6h to 1.5h."
+        </step>
+        <step id="T1.1.3">
+          Also request PREEMPTIBLE_NVIDIA_L4_GPUS quota increase to 4 (spot instances).
+        </step>
+      </steps>
+      <success-criteria>Quota approval email received from GCP (24-48h typical).</success-criteria>
+      <cost-impact>Zero — quota increase is free. Only actual GPU usage is billed.</cost-impact>
+    </task>
+
+    <task id="T1.2" title="Create europe_relaxed Region Config" issue-ref="A" effort="30 min">
+      <description>
+        Create a new region config that includes 3 EU regions as fallbacks.
+        This provides resilience against single-region capacity exhaustion
+        while keeping data egress within EU (minimal cost: ~$0.01/GiB intra-EU).
+      </description>
+      <files>
+        <file action="create">configs/cloud/regions/europe_relaxed.yaml</file>
+        <file action="modify">configs/factorial/debug.yaml</file>
+      </files>
+      <implementation>
+        <!-- europe_relaxed.yaml content -->
+        <code-spec file="configs/cloud/regions/europe_relaxed.yaml">
+          # EU multi-region — europe-west4 preferred, intra-EU fallbacks.
+          # Same-region to GCS: $0.00 egress. Cross-EU: ~$0.01/GiB (~$0.03/job).
+          # Best balance of cost predictability and availability for debug runs.
+          #
+          # Compared to europe_strict: adds 2 fallback regions for capacity resilience.
+          # Compared to europe_us: no transatlantic egress (~$0.12/GiB savings).
+
+          description: "EU multi-region — europe-west4 preferred, intra-EU fallbacks"
+
+          regions:
+            gcp:
+              L4:
+                - region: europe-west4     # Netherlands — 3 zones, co-located with GAR/GCS
+                  zones: 3
+                - region: europe-west1     # Belgium — 2 zones
+                  zones: 2
+                - region: europe-west3     # Frankfurt — 2 zones
+                  zones: 2
+        </code-spec>
+        <!-- NOTE: This is identical to the existing configs/cloud/regions/europe.yaml.
+             After reading europe.yaml, it already provides this exact fallback.
+             The task should instead UPDATE debug.yaml to use region_config: europe
+             (which already exists) instead of europe_strict. -->
+        <correction>
+          configs/cloud/regions/europe.yaml ALREADY provides the 3-EU-region fallback.
+          No new file needed. Instead, update debug.yaml:
+            infrastructure.region_config: europe  (was: europe_strict)
+          For cost-critical production runs, keep europe_strict in paper_full.yaml.
+        </correction>
+      </implementation>
+      <success-criteria>
+        debug.yaml uses region_config: europe. Dry run shows 3 EU regions in ordered: block.
+      </success-criteria>
+    </task>
+
+    <task id="T1.3" title="Add Provisioning Stall Detector to Preflight" issue-ref="A" effort="1 hour">
+      <description>
+        Add a preflight check that detects the GPU capacity bottleneck BEFORE
+        launch: (1) check GPU quota, (2) check configured regions, (3) warn
+        if single-region + low quota.
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_gcp.py</file>
+      </files>
+      <implementation>
+        <function name="check_gpu_quota_and_regions" file="scripts/preflight_gcp.py">
+          1. Read the factorial YAML's infrastructure.region_config.
+          2. Load the region config YAML to count configured regions.
+          3. Query GPU quota: "gcloud compute regions describe {region}
+             --project=minivess-mlops --format=json" → parse quotas.
+          4. If configured_regions == 1 AND gpu_quota == 1:
+             return WARNING: "Single region + 1 GPU quota = sequential execution.
+             Consider: (a) region_config: europe for fallback, (b) request quota increase."
+          5. If gpu_quota == 0: return FAIL: "No L4 GPU quota in {region}."
+          6. Report available quota: "L4 GPU quota: {used}/{limit} in {region}."
+        </function>
+      </implementation>
+      <success-criteria>
+        Preflight shows GPU quota status. Warns on single-region + quota=1.
+        Test covers all 3 paths (OK, WARNING, FAIL).
+      </success-criteria>
+    </task>
+
+    <task id="T1.4" title="Reduce max_wait_hours for Debug Runs" issue-ref="A" effort="15 min">
+      <description>
+        Reduce max_wait_hours from 168 (1 week) to 24 (1 day) in debug.yaml.
+        A debug experiment should not silently wait a week for GPU capacity.
+        paper_full.yaml keeps 168h for production runs.
+      </description>
+      <files>
+        <file action="modify">configs/factorial/debug.yaml</file>
+      </files>
+      <implementation>
+        In debug.yaml, change infrastructure.max_wait_hours from 168 to 24.
+        Add comment: "24h max wait for debug — escalate if PENDING longer."
+      </implementation>
+    </task>
+
+    <task id="T1.5" title="Create Post-Migration Verification Script" issue-ref="C" effort="2 hours">
+      <description>
+        Create scripts/post_migration_verify.py that validates all data and
+        infrastructure state after a region migration. This prevents the 45-min
+        data gap from recurring in future migrations.
+      </description>
+      <files>
+        <file action="create">scripts/post_migration_verify.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_gcp.py</file>
+      </files>
+      <implementation>
+        <checks>
+          <check name="gcs_data_presence">
+            For each bucket in Pulumi outputs, verify size > 0 bytes.
+            For DVC data bucket, verify MiniVess and DeepVess directories exist.
+            Remediation: "Run: dvc push -r gcs"
+          </check>
+          <check name="gar_image_presence">
+            Verify base:latest and mlflow:* images exist in the new GAR.
+            Remediation: "Run: make build-base-gpu && docker push {gar_url}"
+          </check>
+          <check name="cloud_sql_databases">
+            Verify mlflow and optuna databases exist in Cloud SQL.
+            Remediation: "Run: gcloud sql databases list --instance={instance}"
+          </check>
+          <check name="cloud_run_health">
+            Verify MLflow Cloud Run service returns HTTP 200.
+            Remediation: "Check deployment: gcloud run services describe minivess-mlflow"
+          </check>
+          <check name="region_consistency">
+            Verify all resources are in the same region (GAR, GCS, Cloud SQL, Cloud Run).
+            Flag any cross-region resources.
+          </check>
+        </checks>
+      </implementation>
+      <success-criteria>
+        Script runs post-migration and catches all 5 categories of gaps.
+        Would have caught the empty GCS buckets in the 11th pass.
+      </success-criteria>
+    </task>
+
+    <task id="T1.6" title="Cache SAM3 Pretrained Weights on GCS" issue-ref="I" effort="1 hour">
+      <description>
+        Cache SAM3 pretrained weights (sam3.pt, ~9 GB) on GCS in europe-west4 to
+        eliminate the 10-min HuggingFace download during SkyPilot job setup. This
+        directly addresses the spot preemption cycling observed during 11th pass
+        monitoring: SAM3 zero-shot jobs are preempted during setup because the
+        setup phase takes 15-20 min, with HuggingFace download being the single
+        longest substep.
+
+        Pre-trained weights are INPUTS (like training data), NOT trained artifacts.
+        This does NOT violate the mlflow_only_artifact_contract — that contract
+        governs trained model outputs, not pretrained foundation model weights.
+      </description>
+      <files>
+        <file action="modify">deployment/skypilot/train_factorial.yaml</file>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">scripts/post_migration_verify.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_gcp.py</file>
+      </files>
+      <implementation>
+        <step id="T1.6.1" title="One-time upload of SAM3 weights to GCS">
+          Download sam3.pt locally (if not already cached in ~/.cache/huggingface/):
+            python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt')"
+
+          Upload to GCS:
+            gsutil cp ~/.cache/huggingface/hub/models--facebook--sam3/.../sam3.pt \
+              gs://minivess-mlops-checkpoints/pretrained/sam3.pt
+
+          Verify:
+            gsutil ls -l gs://minivess-mlops-checkpoints/pretrained/sam3.pt
+        </step>
+        <step id="T1.6.2" title="Update SkyPilot YAML setup to use GCS-cached weights">
+          In train_factorial.yaml, replace the HuggingFace download step with:
+
+            # Pre-trained weights: GCS cache (same-region, free, fast) with HuggingFace fallback
+            mkdir -p /app/pretrained
+            if gsutil cp gs://minivess-mlops-checkpoints/pretrained/sam3.pt /app/pretrained/sam3.pt 2>/dev/null; then
+              echo "SAM3 weights loaded from GCS cache (same-region, ~1-2 min)"
+            else
+              echo "GCS cache miss — falling back to HuggingFace (~10 min)"
+              python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt', local_dir='/app/pretrained')"
+            fi
+
+          NOTE: The exact setup block structure depends on how train_factorial.yaml
+          currently handles the SAM3 weight download. Read the file before modifying.
+          Per CLAUDE.md Rule 31, this is a declarative config change — verify with
+          the user before modifying if the exact syntax is unclear.
+        </step>
+        <step id="T1.6.3" title="Update model adapter to check /app/pretrained/ first">
+          The SAM3 model adapter (src/minivess/adapters/sam3_adapter.py) should check
+          for weights at the GCS-cached path (/app/pretrained/sam3.pt) before calling
+          hf_hub_download. This is a Python code change, not a YAML change.
+
+          Pseudo-implementation:
+            pretrained_path = Path("/app/pretrained/sam3.pt")
+            if pretrained_path.exists():
+                weights = torch.load(pretrained_path)
+            else:
+                weights_path = hf_hub_download('facebook/sam3', 'sam3.pt')
+                weights = torch.load(weights_path)
+        </step>
+        <step id="T1.6.4" title="Add pretrained weight check to preflight">
+          In scripts/preflight_gcp.py, add check_pretrained_weights_on_gcs():
+            1. Run: gsutil ls gs://minivess-mlops-checkpoints/pretrained/
+            2. Verify sam3.pt exists and size is > 1 GB (sanity check).
+            3. If missing: return WARNING "SAM3 pretrained weights not cached on GCS.
+               Setup will download from HuggingFace (~10 min per job).
+               Fix: gsutil cp <local_path> gs://minivess-mlops-checkpoints/pretrained/sam3.pt"
+        </step>
+        <step id="T1.6.5" title="Add pretrained weights to post-migration verify">
+          In scripts/post_migration_verify.py, add a check for pretrained weights
+          under the gcs_data_presence section:
+            Verify gs://minivess-mlops-checkpoints/pretrained/sam3.pt exists.
+            Remediation: "Re-upload pretrained weights after region migration."
+        </step>
+      </implementation>
+      <success-criteria>
+        1. gsutil ls gs://minivess-mlops-checkpoints/pretrained/sam3.pt returns the file.
+        2. SkyPilot dry-run shows gsutil cp from GCS in setup block.
+        3. Preflight check reports pretrained weight cache status.
+        4. Measured setup time reduction: from ~15-20 min to ~8-10 min (Docker + GCS only).
+        5. SAM3 spot preemption during setup is significantly reduced.
+      </success-criteria>
+      <cost-impact>
+        Storage: $0.05/month (9 GB, GCS Standard, europe-west4).
+        Egress: $0.00 (same-region transfer is free).
+        Setup time saved: ~8-10 min per SAM3 job. With 16 SAM3 conditions: ~136 min/experiment.
+        GPU idle cost saved: ~$1.59-2.52 per experiment (L4 on-demand rate during setup).
+        ROI: pays for itself after 1 experiment run.
+      </cost-impact>
+    </task>
+  </phase>
+
+  <!-- ─── PHASE 2: P1 Improvements (Day 2) ──────────────────────────────── -->
+  <phase id="2" name="P1 Improvements — Docker Freshness, Controller, Acquisition Flow" estimated-effort="4-6 hours">
+    <description>
+      Fix issues that cause significant time waste but are not experiment-blocking.
+    </description>
+
+    <task id="T2.1" title="Fix Docker Image Freshness Check (Content-Aware)" issue-ref="D" effort="2 hours">
+      <description>
+        Replace the naive HEAD comparison with a content-aware check that only
+        fails when Docker-relevant files (src/, deployment/docker/, configs/,
+        pyproject.toml, uv.lock) have changed since the image was built.
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_gcp.py</file>
+      </files>
+      <implementation>
+        <function name="check_docker_image_freshness" file="scripts/preflight_gcp.py">
+          Replace current implementation with:
+
+          DOCKER_RELEVANT_PATHS = [
+              "src/",
+              "deployment/docker/",
+              "deployment/skypilot/",
+              "configs/",
+              "pyproject.toml",
+              "uv.lock",
+          ]
+
+          1. Get image_commit from OCI label (existing code, unchanged).
+          2. Get head_commit from git rev-parse HEAD (existing code, unchanged).
+          3. If image_commit == head_commit: return PASS (exact match, fast path).
+          4. If image_commit != head_commit:
+             a. Run: git diff --name-only {image_commit}..{head_commit} -- {paths}
+                where {paths} = DOCKER_RELEVANT_PATHS joined by space.
+             b. If diff output is empty: return PASS with message
+                "Image commit {image_commit[:12]} differs from HEAD {head_commit[:12]}
+                but no Docker-relevant files changed — image is functionally current."
+             c. If diff output is non-empty: return FAIL with message
+                "Docker image STALE: {N} Docker-relevant files changed since image build.
+                Changed paths: {file_list}. Rebuild: make build-base-gpu ..."
+          5. Edge case: if image_commit is not an ancestor of HEAD (e.g., force push),
+             fall back to FAIL with "Cannot determine diff — rebuild recommended."
+        </function>
+        <tests>
+          <test name="test_docker_freshness_exact_match">PASS when commits match.</test>
+          <test name="test_docker_freshness_doc_only_change">PASS when only docs/ changed.</test>
+          <test name="test_docker_freshness_src_change">FAIL when src/ changed.</test>
+          <test name="test_docker_freshness_config_change">FAIL when configs/ changed.</test>
+          <test name="test_docker_freshness_pyproject_change">FAIL when pyproject.toml changed.</test>
+        </tests>
+      </implementation>
+      <success-criteria>
+        Doc-only commits no longer trigger false freshness failures.
+        src/ changes still correctly trigger rebuild requirement.
+        5 tests pass.
+      </success-criteria>
+    </task>
+
+    <task id="T2.2" title="Auto-Start Controller in run_factorial.sh" issue-ref="B" effort="1 hour">
+      <description>
+        Add controller auto-start to run_factorial.sh so the user never has to
+        manually start the controller before launching experiments.
+      </description>
+      <files>
+        <file action="modify">scripts/run_factorial.sh</file>
+      </files>
+      <implementation>
+        Add after the preflight section in run_factorial.sh:
+
+        # ── Ensure SkyPilot controller is running ──────────────────────────
+        if [ "${DRY_RUN}" = false ]; then
+            echo "Checking SkyPilot jobs controller status..."
+            CONTROLLER_STATUS=$("${SKY_BIN}" jobs controller status 2>&amp;1 || echo "STOPPED")
+            if echo "${CONTROLLER_STATUS}" | grep -qi "stopped\|not found\|error"; then
+                echo "Controller is stopped. Starting..."
+                "${SKY_BIN}" jobs controller start || {
+                    echo "FATAL: Failed to start SkyPilot jobs controller."
+                    exit 1
+                }
+                echo "Controller started. Waiting 30s for readiness..."
+                sleep 30
+            else
+                echo "Controller is running."
+            fi
+        fi
+
+        Also: increase auto-stop timeout.
+        In SkyPilot config (~/.sky/config.yaml or equivalent), set:
+          jobs:
+            controller:
+              idle_minutes_to_autostop: 60
+      </implementation>
+      <success-criteria>
+        run_factorial.sh automatically starts controller if stopped.
+        No manual "sky jobs controller start" needed before experiments.
+        Auto-stop is 60 min (verified via sky jobs controller status).
+      </success-criteria>
+    </task>
+
+    <task id="T2.3" title="Wire DeepVess Downloader into Acquisition Flow" issue-ref="E" effort="2 hours">
+      <description>
+        Complete the acquisition flow integration so that all registered datasets
+        (MiniVess, DeepVess, VesselNN) can be downloaded via the Prefect flow,
+        not just via manual function calls.
+      </description>
+      <files>
+        <file action="modify">src/minivess/flows/acquisition_flow.py</file>
+        <file action="modify">src/minivess/data/downloaders.py</file>
+        <file action="modify">tests/v2/unit/data/test_downloaders.py</file>
+      </files>
+      <implementation>
+        1. In acquisition_flow.py, update the download_datasets task to:
+           - Read dataset names from the flow config (not hardcoded).
+           - For each dataset, look up the downloader in _DOWNLOADERS dict.
+           - Call the downloader function.
+           - After download, run format conversion if needed.
+           - After conversion, run "dvc add" + "dvc push -r gcs" if GCS is configured.
+
+        2. Add VesselNN downloader to src/minivess/data/downloaders.py:
+           download_vesselnn() — download from the VesselNN source.
+           Register in _DOWNLOADERS dict.
+
+        3. Add acquisition flow smoke test:
+           - For each dataset in acquisition_registry, verify _DOWNLOADERS[name] exists.
+           - Mock HTTP calls to verify the dispatch works without actual downloads.
+
+        4. Update acquisition_registry.py: verify all datasets have download_method != "manual".
+      </implementation>
+      <success-criteria>
+        "prefect deployment run 'acquisition-flow/default' --params '{dataset: deepvess}'"
+        downloads DeepVess, converts format, and pushes to GCS.
+        Smoke test verifies all 3 datasets have working dispatchers.
+      </success-criteria>
+    </task>
+  </phase>
+
+  <!-- ─── PHASE 3: P2 Hardening (Day 3) ─────────────────────────────────── -->
+  <phase id="3" name="P2 Hardening — Venv, API Version, Monitoring" estimated-effort="2-3 hours">
+    <description>
+      Add prevention mechanisms for one-time setup issues and improve monitoring.
+    </description>
+
+    <task id="T3.1" title="Add Venv Path Validation to Preflight" issue-ref="G" effort="45 min">
+      <description>
+        Detect stale .venv paths early by validating pyvenv.cfg against the
+        current repo location.
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_gcp.py</file>
+      </files>
+      <implementation>
+        <function name="check_venv_paths" file="scripts/preflight_gcp.py">
+          1. Read .venv/pyvenv.cfg (if exists).
+          2. Parse "home = /path/to/python/bin" line.
+          3. Verify the path exists on the filesystem.
+          4. Also check that REPO_ROOT/.venv/bin/python exists and is executable.
+          5. If either check fails:
+             return FAIL: "Stale .venv detected (repo was moved?).
+             Fix: rm -rf .venv && uv sync --all-extras"
+          6. If .venv does not exist:
+             return FAIL: "No .venv found. Run: uv sync --all-extras"
+        </function>
+      </implementation>
+      <success-criteria>
+        Preflight catches stale venv after repo move. Clear remediation message.
+      </success-criteria>
+    </task>
+
+    <task id="T3.2" title="Add SkyPilot API Version Check to Preflight" issue-ref="F" effort="45 min">
+      <description>
+        Detect SkyPilot client/server version mismatch before launching experiments.
+      </description>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+        <file action="modify">tests/v2/unit/deployment/test_preflight_gcp.py</file>
+      </files>
+      <implementation>
+        <function name="check_skypilot_api_version" file="scripts/preflight_gcp.py">
+          1. Run "sky api version" to get server version (or detect server is stopped).
+          2. Run "sky --version" to get client version.
+          3. If server is stopped: return WARNING "SkyPilot API not running.
+             Start with: sky api start" (not FAIL — run_factorial.sh auto-starts).
+          4. If server != client: return FAIL "SkyPilot API version mismatch:
+             server={server_ver}, client={client_ver}.
+             Fix: sky api stop && sky api start"
+          5. If match: return PASS "SkyPilot API: server={ver}, client={ver} (match)"
+        </function>
+      </implementation>
+      <success-criteria>
+        Preflight detects 12-day version mismatch. Hard fail prevents launch
+        with mismatched API versions.
+      </success-criteria>
+    </task>
+
+    <task id="T3.3" title="Add Provisioning Stall Notification to Experiment Report" issue-ref="A" effort="30 min">
+      <description>
+        When jobs cycle PENDING/STARTING for >15 min, write a status file that
+        can be polled externally. This provides passive notification without
+        requiring active monitoring.
+      </description>
+      <files>
+        <file action="modify">scripts/run_factorial.sh (or monitoring skill)</file>
+        <file action="create">outputs/.experiment_status_template.txt</file>
+      </files>
+      <implementation>
+        The /factorial-monitor skill already polls job status. Add logic:
+        1. Track time each job has been in PENDING/STARTING state.
+        2. If any job exceeds 15 min in PENDING/STARTING:
+           - Write outputs/experiment_status.txt with:
+             TIMESTAMP: {now}
+             STATUS: CAPACITY_CONSTRAINED
+             PENDING_JOBS: {list}
+             PENDING_DURATION: {minutes}
+             REGIONS_TRIED: {list}
+             SUGGESTION: Consider europe_us region config for US fallback
+        3. Update the file every 5 min while constraint persists.
+        4. Clear the file when jobs start running.
+      </implementation>
+      <success-criteria>
+        Status file appears within 15 min of PENDING stall.
+        File contains actionable information for the researcher.
+      </success-criteria>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 5: DEPENDENCY GRAPH                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <dependency-graph>
+    <note>
+      Tasks within each phase can be executed in parallel.
+      Phases must be sequential (Phase 1 before Phase 2 before Phase 3).
+    </note>
+
+    <!-- Phase 1: All independent -->
+    <group phase="1">
+      <task ref="T1.1" depends-on="none" note="GCP console request, no code"/>
+      <task ref="T1.2" depends-on="none" note="YAML edit only"/>
+      <task ref="T1.3" depends-on="none" note="New preflight function"/>
+      <task ref="T1.4" depends-on="none" note="YAML edit only"/>
+      <task ref="T1.5" depends-on="none" note="New script"/>
+      <task ref="T1.6" depends-on="none" note="GCS upload + YAML setup update + preflight check"/>
+    </group>
+
+    <!-- Phase 2: T2.2 and T2.3 independent; T2.1 independent -->
+    <group phase="2">
+      <task ref="T2.1" depends-on="none" note="Preflight function rewrite"/>
+      <task ref="T2.2" depends-on="none" note="Shell script addition"/>
+      <task ref="T2.3" depends-on="none" note="Flow integration"/>
+    </group>
+
+    <!-- Phase 3: T3.1 and T3.2 independent; T3.3 depends on monitoring skill -->
+    <group phase="3">
+      <task ref="T3.1" depends-on="none" note="Preflight function"/>
+      <task ref="T3.2" depends-on="none" note="Preflight function"/>
+      <task ref="T3.3" depends-on="T2.2" note="Uses experiment status tracking"/>
+    </group>
+  </dependency-graph>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 6: COST-BENEFIT ANALYSIS                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <cost-benefit-analysis>
+    <summary>
+      Total estimated effort: 3-5 working days (12-17 hours of implementation).
+      Total estimated cloud cost of fixes: $0.05/month (GCS storage for SAM3 weights).
+      Expected time savings per experiment session: 120-210 minutes
+      (60-90 min from parallelism/fewer rebuilds + 60-120 min from SAM3 weight caching).
+      Expected cost savings per experiment: $1.59-7.52
+      (parallelism + fewer false rebuilds + GPU idle reduction from faster SAM3 setup).
+    </summary>
+
+    <per-issue>
+      <issue ref="A" effort="2.25h" recurrence="every experiment session">
+        <cost-of-not-fixing>
+          2-6 hours of PENDING per experiment. EUR 0.26-0.78 controller idle cost.
+          High human time cost: researcher blocked waiting for GPUs.
+        </cost-of-not-fixing>
+        <cost-of-fixing>
+          2.25h implementation. Quota increase: 0 EUR. Region config: YAML edit.
+          Preflight check: 1h coding + testing.
+        </cost-of-fixing>
+        <roi>Pays for itself in 1 experiment session.</roi>
+      </issue>
+
+      <issue ref="B" effort="1h" recurrence="every experiment session">
+        <cost-of-not-fixing>2-3 min manual restart per session. Risk of forgotten restart.</cost-of-not-fixing>
+        <cost-of-fixing>1h implementation. EUR 0.13/session additional controller cost.</cost-of-fixing>
+        <roi>Pays for itself in 20 sessions (time) or immediately (risk reduction).</roi>
+      </issue>
+
+      <issue ref="C" effort="2h" recurrence="every region migration">
+        <cost-of-not-fixing>45 min delay per migration. Risk of launching without data.</cost-of-not-fixing>
+        <cost-of-fixing>2h implementation of verification script.</cost-of-fixing>
+        <roi>Pays for itself in 3 migrations. Also serves as documentation.</roi>
+      </issue>
+
+      <issue ref="D" effort="2h" recurrence="5-10 times per session">
+        <cost-of-not-fixing>25 min per false positive rebuild. 125-250 min/session wasted.</cost-of-not-fixing>
+        <cost-of-fixing>2h implementation of content-aware check.</cost-of-fixing>
+        <roi>Pays for itself in 1 session.</roi>
+      </issue>
+
+      <issue ref="E" effort="2h" recurrence="every experiment that uses DeepVess">
+        <cost-of-not-fixing>Manual download + push each time. ~15 min per occurrence.</cost-of-not-fixing>
+        <cost-of-fixing>2h to wire into acquisition flow.</cost-of-fixing>
+        <roi>Pays for itself in 8 uses. Also required for platform completeness.</roi>
+      </issue>
+
+      <issue ref="F" effort="0.75h" recurrence="every venv update">
+        <cost-of-not-fixing>Subtle API bugs. 5-15 min diagnosis per occurrence.</cost-of-not-fixing>
+        <cost-of-fixing>45 min preflight check implementation.</cost-of-fixing>
+        <roi>Pays for itself in 3-5 occurrences.</roi>
+      </issue>
+
+      <issue ref="G" effort="0.75h" recurrence="every repo move">
+        <cost-of-not-fixing>15-30 min diagnosis + venv recreation per occurrence.</cost-of-not-fixing>
+        <cost-of-fixing>45 min preflight check implementation.</cost-of-fixing>
+        <roi>Pays for itself in 2 occurrences.</roi>
+      </issue>
+
+      <issue ref="I" effort="1h" recurrence="every SAM3 job (16 per experiment)">
+        <cost-of-not-fixing>
+          10 min HuggingFace download per SAM3 job. 16 jobs/experiment = 160 min setup.
+          With 50% preemption rate during setup: 240+ min wasted. GPU idle during setup
+          costs $0.70/hr (L4 on-demand). $1.59-2.52 GPU idle cost per experiment.
+          The long setup window is the PRIMARY cause of SAM3 spot preemption cycling.
+        </cost-of-not-fixing>
+        <cost-of-fixing>
+          1h implementation. $0.05/month GCS storage (9 GB).
+          One-time upload: 10 min (local → GCS).
+        </cost-of-fixing>
+        <roi>Pays for itself after 1 experiment run. Also makes spot viable for SAM3.</roi>
+      </issue>
+    </per-issue>
+  </cost-benefit-analysis>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 7: TESTING STRATEGY                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <testing-strategy>
+    <principle>
+      Every new preflight check gets unit tests. Every config change gets
+      validated by dry-run. Follow TDD (RED-GREEN-VERIFY) per CLAUDE.md Rule 2.
+    </principle>
+
+    <test-matrix>
+      <task ref="T1.2">
+        <test>Dry run with europe region config shows 3 regions in ordered: block.</test>
+      </task>
+      <task ref="T1.3">
+        <test>test_gpu_quota_check_single_region_low_quota — returns WARNING.</test>
+        <test>test_gpu_quota_check_multi_region — returns PASS.</test>
+        <test>test_gpu_quota_check_zero_quota — returns FAIL.</test>
+      </task>
+      <task ref="T1.5">
+        <test>test_post_migration_empty_bucket — detects empty GCS bucket.</test>
+        <test>test_post_migration_missing_image — detects missing GAR image.</test>
+        <test>test_post_migration_all_ok — passes when all checks green.</test>
+      </task>
+      <task ref="T1.6">
+        <test>test_pretrained_weights_on_gcs — PASS when sam3.pt exists on GCS.</test>
+        <test>test_pretrained_weights_missing — WARNING when sam3.pt not on GCS.</test>
+        <test>test_setup_uses_gcs_cache — verify SkyPilot YAML setup uses gsutil cp from GCS.</test>
+        <test>test_post_migration_includes_pretrained — verify post-migration script checks pretrained weights.</test>
+      </task>
+      <task ref="T2.1">
+        <test>test_docker_freshness_exact_match — PASS on identical commits.</test>
+        <test>test_docker_freshness_doc_only — PASS when only docs/ changed.</test>
+        <test>test_docker_freshness_src_change — FAIL when src/ changed.</test>
+        <test>test_docker_freshness_config_change — FAIL when configs/ changed.</test>
+        <test>test_docker_freshness_pyproject_change — FAIL when pyproject.toml changed.</test>
+      </task>
+      <task ref="T2.2">
+        <test>Dry run verifies controller check logic does not block on dry-run.</test>
+        <test>Integration: run_factorial.sh --dry-run succeeds with controller stopped.</test>
+      </task>
+      <task ref="T2.3">
+        <test>test_acquisition_flow_dispatch_deepvess — mock download verifies dispatch.</test>
+        <test>test_acquisition_registry_all_have_downloaders — no "manual" download_method.</test>
+        <test>test_acquisition_flow_dispatch_vesselnn — mock download verifies dispatch.</test>
+      </task>
+      <task ref="T3.1">
+        <test>test_venv_path_valid — PASS when .venv paths are correct.</test>
+        <test>test_venv_path_stale — FAIL when pyvenv.cfg points to nonexistent path.</test>
+        <test>test_venv_missing — FAIL when .venv does not exist.</test>
+      </task>
+      <task ref="T3.2">
+        <test>test_skypilot_version_match — PASS when server == client.</test>
+        <test>test_skypilot_version_mismatch — FAIL when server != client.</test>
+        <test>test_skypilot_server_stopped — WARNING when server not running.</test>
+      </task>
+    </test-matrix>
+
+    <verification>
+      After all tasks complete:
+      1. make test-staging — must pass with 0 failures, 0 skips.
+      2. run_factorial.sh --dry-run configs/factorial/debug.yaml — must show
+         europe multi-region, controller check, content-aware freshness.
+      3. uv run python scripts/preflight_gcp.py — must show all new checks.
+      4. uv run python scripts/post_migration_verify.py — must pass all checks.
+    </verification>
+  </testing-strategy>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 8: DECISION LOG                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <decision-log>
+    <decision id="D1" title="Default debug region: europe (not europe_strict)">
+      <rationale>
+        europe_strict (1 region) causes PENDING stalls. europe (3 EU regions)
+        provides fallback at minimal cost (~$0.03/job intra-EU egress).
+        europe_strict remains available for cost-sensitive runs.
+      </rationale>
+      <impact>configs/factorial/debug.yaml — infrastructure.region_config</impact>
+    </decision>
+
+    <decision id="D2" title="Docker freshness: content-aware, not HEAD-based">
+      <rationale>
+        HEAD includes all commits. Docker image only includes src/, deployment/,
+        configs/, pyproject.toml, uv.lock. Content-aware diff eliminates
+        false positives from doc/test/metalearning changes.
+      </rationale>
+      <impact>scripts/preflight_gcp.py — check_docker_image_freshness()</impact>
+    </decision>
+
+    <decision id="D3" title="Controller auto-start in run_factorial.sh">
+      <rationale>
+        The controller is a prerequisite for SkyPilot job submission. Rather than
+        requiring manual restart, run_factorial.sh should ensure the controller
+        is running. The EUR 0.13/hour idle cost is negligible vs. human time.
+      </rationale>
+      <impact>scripts/run_factorial.sh — new controller check section</impact>
+    </decision>
+
+    <decision id="D4" title="max_wait_hours: 24h for debug, 168h for production">
+      <rationale>
+        Debug experiments are time-sensitive (researcher waiting). 1-week wait
+        is inappropriate — the researcher should be notified within 24h to
+        adjust region config or try later. Production runs may legitimately
+        wait for spot capacity.
+      </rationale>
+      <impact>configs/factorial/debug.yaml — infrastructure.max_wait_hours</impact>
+    </decision>
+
+    <decision id="D5" title="SkyPilot API version mismatch is a HARD FAIL">
+      <rationale>
+        Dev builds (v1.0.0.dev*) have unstable APIs. Running mismatched versions
+        risks silent data corruption or job submission failures. The fix is
+        trivial (sky api stop && sky api start) — hard fail is appropriate.
+      </rationale>
+      <impact>scripts/preflight_gcp.py — check_skypilot_api_version()</impact>
+    </decision>
+
+    <decision id="D6" title="Request L4 GPU quota increase to 4">
+      <rationale>
+        Current quota of 1 L4 GPU in europe-west4 forces sequential execution.
+        With 22 jobs, wall-clock is 5.5h+ (best case). 4 GPUs enable 4-way
+        parallelism, reducing wall-clock to ~1.5h. Quota increase is free —
+        only actual GPU usage is billed.
+      </rationale>
+      <impact>GCP project minivess-mlops — quota request</impact>
+    </decision>
+
+    <decision id="D7" title="Cache pretrained model weights on GCS (same-region)">
+      <rationale>
+        SAM3 weights (9 GB) downloaded from HuggingFace every job = 10 min/job setup.
+        This is the primary cause of SAM3 spot preemption during setup (15-20 min total).
+        GCS same-region transfer is free and ~5x faster. Pretrained weights are INPUTS
+        (like training data), NOT trained artifacts — this does NOT violate the
+        mlflow_only_artifact_contract. gs://minivess-mlops-checkpoints/pretrained/
+        is the canonical location. Storage: $0.05/month. Approach generalizes to
+        VesselFM and any future pretrained foundation model weights.
+      </rationale>
+      <impact>
+        deployment/skypilot/train_factorial.yaml — setup block change.
+        gs://minivess-mlops-checkpoints/pretrained/ — new prefix.
+        scripts/preflight_gcp.py — new check_pretrained_weights_on_gcs().
+      </impact>
+    </decision>
+  </decision-log>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 9: METALEARNING CAPTURE                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <metalearning-capture>
+    <insight id="ML1" title="Region migration must include data migration">
+      <pattern>
+        Infrastructure migration (Pulumi up) creates empty containers. Data must
+        be explicitly re-pushed to new storage locations. The migration checklist
+        must include: (1) infra up, (2) verify infra, (3) push data, (4) verify data.
+      </pattern>
+      <prevention>post_migration_verify.py + preflight DVC data check</prevention>
+    </insight>
+
+    <insight id="ML2" title="Single-region + low-quota = hard stall">
+      <pattern>
+        europe_strict (1 region) + 1 L4 GPU quota = zero parallelism + zero
+        fallback. Any capacity constraint stalls the entire experiment. Always
+        configure at least 2 fallback regions for non-critical runs.
+      </pattern>
+      <prevention>Preflight GPU quota + region count check</prevention>
+    </insight>
+
+    <insight id="ML3" title="Docker freshness must be content-aware">
+      <pattern>
+        Git HEAD includes ALL changes. Docker images include a subset of files.
+        Freshness checks must compare only the files that affect the image,
+        not the entire git history.
+      </pattern>
+      <prevention>DOCKER_RELEVANT_PATHS constant + content-aware diff</prevention>
+    </insight>
+
+    <insight id="ML4" title="Preflight is the primary defense layer">
+      <pattern>
+        Every infrastructure issue discovered in the 11th pass (stale venv,
+        API mismatch, empty buckets, image freshness) could have been caught
+        by a preflight check. Invest in preflight = invest in all future sessions.
+        6 of 8 issues would have been caught or prevented by better preflight.
+      </pattern>
+      <prevention>Expand preflight to cover all prerequisites. Never bypass.</prevention>
+    </insight>
+
+    <insight id="ML5" title="Cache pretrained weights same-region — setup time is the enemy of spot">
+      <pattern>
+        Spot preemption during setup creates a compounding failure loop: long setup
+        → preemption → full restart → long setup again. Every external network
+        dependency (HuggingFace, Docker Hub, pip install) adds to setup time and
+        increases preemption probability. Solution: cache ALL large inputs (pretrained
+        weights, Docker images, data) in the same GCS region as the compute. The goal
+        is to minimize setup time to minimize the preemption vulnerability window.
+        Pretrained model weights are INPUTS (like data), not ARTIFACTS (like trained
+        checkpoints) — caching them on GCS does not violate artifact contracts.
+      </pattern>
+      <prevention>
+        gs://minivess-mlops-checkpoints/pretrained/ for all foundation model weights.
+        GAR in europe-west4 for Docker images. GCS in europe-west4 for DVC data.
+        All three should be same-region. Setup should only use same-region transfers.
+      </prevention>
+    </insight>
+
+    <insight id="ML6" title="Auto-start > manual prerequisites">
+      <pattern>
+        Every manual step in the cold-start sequence is a potential failure point.
+        The controller restart, data push verification, venv validation should
+        all be automatic (or at least automated detection with clear remediation).
+        Reduce the number of manual steps to zero where possible.
+      </pattern>
+      <prevention>run_factorial.sh auto-starts controller. Preflight catches the rest.</prevention>
+    </insight>
+  </metalearning-capture>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 10: SUMMARY                                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <summary>
+    <total-issues>9 (3 P0, 4 P1, 2 P2)</total-issues>
+    <already-resolved>3 (H: spot override, C: data pushed, E: downloader created)</already-resolved>
+    <needs-prevention>6 (A: GPU capacity, B: controller, C: migration script, D: freshness, E: flow wiring, I: SAM3 weight caching)</needs-prevention>
+    <new-code-artifacts>
+      <artifact>scripts/post_migration_verify.py</artifact>
+      <artifact>configs/cloud/regions/europe_relaxed.yaml (CORRECTION: use existing europe.yaml instead)</artifact>
+    </new-code-artifacts>
+    <modified-artifacts>
+      <artifact>scripts/preflight_gcp.py (5 new checks: GPU quota, venv paths, API version, freshness rewrite, pretrained weights)</artifact>
+      <artifact>scripts/run_factorial.sh (controller auto-start)</artifact>
+      <artifact>configs/factorial/debug.yaml (region_config: europe, max_wait_hours: 24)</artifact>
+      <artifact>deployment/skypilot/train_factorial.yaml (setup block: GCS-cached SAM3 weights)</artifact>
+      <artifact>src/minivess/flows/acquisition_flow.py (DeepVess + VesselNN dispatch)</artifact>
+      <artifact>src/minivess/adapters/sam3_adapter.py (check /app/pretrained/ before hf_hub_download)</artifact>
+      <artifact>tests/v2/unit/deployment/test_preflight_gcp.py (19+ new tests)</artifact>
+      <artifact>gs://minivess-mlops-checkpoints/pretrained/sam3.pt (one-time upload)</artifact>
+    </modified-artifacts>
+    <estimated-total-effort>12-17 hours across 3 phases</estimated-total-effort>
+    <expected-outcome>
+      After implementation: experiments launch without manual prerequisites,
+      GPU capacity constraints are detected and worked around automatically,
+      Docker rebuilds only happen when needed, infrastructure migrations
+      include data verification, and SAM3 job setup drops from 15-20 min to
+      8-10 min (GCS-cached pretrained weights eliminate HuggingFace download).
+      The preflight script becomes a comprehensive defense layer that catches
+      all known failure modes. Spot preemption during SAM3 setup is significantly
+      reduced, making spot instances viable for SAM3 zero-shot evaluation.
+    </expected-outcome>
+  </summary>
+</plan>

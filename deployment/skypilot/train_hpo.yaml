@@ -18,8 +18,8 @@
 name: minivess-hpo
 
 resources:
-  # GAR image — Docker registry in europe-west4.
-  image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # GAR image — Docker registry in us-central1 (migrated from europe-west4 2026-03-28).
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   cloud: gcp
   use_spot: true
   disk_size: 100

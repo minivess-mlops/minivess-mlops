@@ -56,7 +56,7 @@ class TestGARRegionGovernance:
         with debug_yaml.open(encoding="utf-8") as f:
             debug = yaml.safe_load(f)
 
-        region_config_name = debug.get("region_config", "europe")
+        region_config_name = debug.get("infrastructure", {}).get("region_config", "us_central1")
         region_config_path = _CONFIGS / "cloud" / "regions" / f"{region_config_name}.yaml"
         with region_config_path.open(encoding="utf-8") as f:
             region_config = yaml.safe_load(f)
@@ -68,22 +68,18 @@ class TestGARRegionGovernance:
             f"This causes cross-region egress on every Docker pull."
         )
 
-    def test_no_intercontinental_fallback_in_debug(self) -> None:
-        """Debug experiments must NOT use region configs with US/Asia fallback."""
-        debug_yaml = _CONFIGS / "factorial" / "debug.yaml"
-        with debug_yaml.open(encoding="utf-8") as f:
-            debug = yaml.safe_load(f)
+    def test_gar_region_matches_gcp_spot_region(self) -> None:
+        """GAR region must match gcp_spot.yaml region (zero egress)."""
+        gar = _load_gar_config()
+        gar_region = gar["server"].split("-docker.pkg.dev")[0]
 
-        region_config_name = debug.get("region_config", "europe")
-        region_config_path = _CONFIGS / "cloud" / "regions" / f"{region_config_name}.yaml"
-        with region_config_path.open(encoding="utf-8") as f:
-            region_config = yaml.safe_load(f)
+        gcp_spot_path = _CONFIGS / "cloud" / "gcp_spot.yaml"
+        with gcp_spot_path.open(encoding="utf-8") as f:
+            gcp_spot = yaml.safe_load(f)
 
-        regions = [r["region"] for r in region_config["regions"]["gcp"]["L4"]]
-        non_eu = [r for r in regions if not r.startswith("europe-")]
-        assert not non_eu, (
-            f"Debug region config '{region_config_name}' contains non-EU regions: {non_eu}. "
-            f"Intercontinental Docker pulls cost €0.068/GB. Use europe_strict or europe."
+        assert gar_region == gcp_spot["region"], (
+            f"GAR region ({gar_region}) != gcp_spot region ({gcp_spot['region']}). "
+            f"Cross-region Docker pulls cause egress costs."
         )
 
 

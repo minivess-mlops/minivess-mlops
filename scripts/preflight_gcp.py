@@ -34,7 +34,7 @@ import yaml
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-GAR_IMAGE = "europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest"
+GAR_IMAGE = "us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest"
 GCS_BUCKET = "gs://minivess-mlops-dvc-data"
 CHECKPOINT_BUCKET = "gs://minivess-mlops-checkpoints"
 SKYPILOT_YAML = REPO_ROOT / "deployment" / "skypilot" / "train_factorial.yaml"

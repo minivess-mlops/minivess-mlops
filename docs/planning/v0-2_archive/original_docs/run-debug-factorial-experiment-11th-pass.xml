@@ -16,7 +16,7 @@
   <!-- SECTION 1: METADATA                                                -->
   <!-- ═══════════════════════════════════════════════════════════════════ -->
   <metadata>
-    <title>11th Pass Debug Factorial — Post-Infrastructure-Fix, All Regions europe-west4</title>
+    <title>11th Pass Debug Factorial — Vascadia v0.2-beta, Post-Infrastructure-Fix, europe-west4</title>
     <branch>fix/10th-pass-production-readiness</branch>
     <date>2026-03-27</date>
     <status>ready-to-launch</status>
@@ -233,7 +233,7 @@
     <step id="CS1" name="Branch and Environment">
       <description>Ensure you are on the correct branch with all fixes.</description>
       <commands>
-        <cmd>cd /home/petteri/Dropbox/github-personal/vascadia</cmd>
+        <cmd>cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia</cmd>
         <cmd>git checkout fix/10th-pass-production-readiness</cmd>
         <cmd>git pull origin fix/10th-pass-production-readiness</cmd>
         <cmd>uv sync --all-extras</cmd>
@@ -642,10 +642,19 @@ print(f'MLflow OK: {len(exps)} experiments')
     </monitoring>
 
     <launch-notes>
-      SAM3 on-demand: override use_spot in the sky jobs launch command.
-      The SkyPilot YAML default is spot=true, but run_factorial.sh can
-      override per-condition via environment variables or --env flag.
-      Ensure the launch script correctly sets use_spot=false for SAM3.
+      SAM3 on-demand: IMPLEMENTED. debug.yaml model_overrides has use_spot: false
+      for sam3_topolora and sam3_hybrid. run_factorial.sh reads this and passes
+      --no-use-spot to sky jobs launch for those models. Verified via dry-run
+      (2026-03-28): SAM3 shows spot=false + --no-use-spot flag, DynUNet/Mamba spot=true.
+
+      Phase 2 selective launch: run_factorial.sh launches ALL 32 conditions.
+      Use --resume to skip already-SUCCEEDED/PENDING/RUNNING conditions from prior passes.
+      Phase 1 J1 (DynUNet) will be in SUCCEEDED state, so --resume skips it automatically.
+      For the 18 failed SAM3 conditions, all are new — they will launch fresh.
+
+      DeepVess gap: P2.18 (VesselFM zero-shot on DeepVess) requires DeepVess data
+      on GCS which is NOT yet available. Launch P2.1-P2.17 first. Handle P2.18 after
+      downloading DeepVess from Cornell eCommons and pushing to GCS.
     </launch-notes>
   </phase>
 
@@ -771,7 +780,192 @@ print(f'MLflow OK: {len(exps)} experiments')
       Untagged MLflow image in GAR (267 MiB). Cleanup candidate to save
       ~$0.03/month. Low priority.
     </item>
+    <item id="W4-resolved" severity="RESOLVED" source="W4">
+      MiniVess data pushed to GCS (211 files, 984 MB) on 2026-03-28.
+      DVC cache populated via dvc commit download -f, then dvc push -r gcs.
+    </item>
+    <item id="W4b" severity="HIGH" source="new">
+      DeepVess data NOT yet on GCS. Source: Cornell eCommons (not EBRAINS).
+      VesselFM zero-shot (P2.18) will fail at DVC pull (exit 33) until pushed.
+      Download from: https://ecommons.cornell.edu/items/a79bb6d8-77cf-4917-8e26-f2716a6ac2a3
+      Then: dvc commit data/raw/deepvess.dvc, dvc push -r gcs.
+      WORKAROUND: Launch P2.1-P2.17 first, handle P2.18 after DeepVess download.
+    </item>
+    <item id="W8" severity="MEDIUM" source="council-review">
+      SkyPilot API server version mismatch resolved by restart (sky api stop/start)
+      on 2026-03-28. Server now matches client v1.0.0.dev20260326.
+    </item>
   </watchlist>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 11B: COUNCIL REVIEW FINDINGS (2026-03-28)                   -->
+  <!--                                                                     -->
+  <!-- 5-agent iterated-llm-council review of this plan.                   -->
+  <!-- Agents: Infrastructure, FinOps, Monitoring, Scientific Rigor, DevEx -->
+  <!-- All CRITICAL issues have been fixed in code/config.                 -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <council-review date="2026-03-28">
+    <summary>
+      5-domain expert agents reviewed this plan independently.
+      Overall scores: Infrastructure 7/10, FinOps 8/10, Monitoring 6/10,
+      Scientific Rigor 8/10, DevEx 5/10. Three CRITICAL issues found and fixed.
+    </summary>
+
+    <critical-fixes-applied>
+      <fix id="CF1" status="FIXED">
+        CS1 stale repo path: /home/petteri/Dropbox/github-personal/vascadia
+        corrected to /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+      </fix>
+      <fix id="CF2" status="FIXED">
+        SAM3 on-demand mechanism: Added use_spot: false to debug.yaml model_overrides
+        for sam3_topolora and sam3_hybrid. run_factorial.sh now reads this and passes
+        --no-use-spot to sky jobs launch. Verified via dry-run: SAM3 shows spot=false
+        while DynUNet/MambaVesselNet remain spot=true.
+      </fix>
+      <fix id="CF3" status="PARTIAL">
+        GCS data: MiniVess pushed (211 files, 984 MB). DeepVess NOT yet pushed —
+        download from Cornell eCommons required. P2.18 deferred until available.
+      </fix>
+    </critical-fixes-applied>
+
+    <cost-corrections>
+      L4 on-demand: $0.74/hr (plan said $0.70/hr, delta +6%).
+      SAM3 duration: 30 min realistic estimate (plan said 25 min aspirational).
+      Corrected Phase 2 SAM3 cost: 16 x 30 min x $0.74/hr = ~$5.92 (plan: $4.67).
+      Corrected total: ~$6.53 (plan: $5.30, delta +23%).
+      Budget cap $15 still has 2.3x headroom. APPROVED.
+      RECOMMENDATION: Two-tier budget alarm — $8 WARNING + $15 STOP.
+    </cost-corrections>
+
+    <monitoring-gaps>
+      <gap id="MG1" severity="HIGH">
+        Monitoring exists only as XML declarations. ralph_monitor.py has zero
+        duration-checking logic. Duration alarms, kill-switch, and cost tracking
+        depend entirely on the Claude Code session maintaining coherence for 2+ hours.
+      </gap>
+      <gap id="MG2" severity="HIGH">
+        RECOMMENDATION: Use Phase 1 as calibration — record actual durations from
+        J1/J2/J3 and update warn/cancel thresholds before Phase 2.
+      </gap>
+      <gap id="MG3" severity="MEDIUM">
+        Reduce SAM3 CANCEL threshold from 5x (125 min) to 3x (75 min).
+        At on-demand rates, 125 min cancel = $1.54/job wasted. 16 jobs = $24.64 worst case.
+      </gap>
+    </monitoring-gaps>
+
+    <scientific-observations>
+      <observation>Factorial design verified correct: 4x4x2x2x2x5=640 + 2 zero-shot</observation>
+      <observation>Rule 27 compliance EXCELLENT — debug.yaml identical to paper_full.yaml factors</observation>
+      <observation>SWAG correctly defined as Maddox et al. 2019 (not checkpoint averaging)</observation>
+      <observation>VesselFM data leakage correctly handled (DeepVess only)</observation>
+      <observation>RECOMMENDATION: Add SAM3 Vanilla zero-shot on DeepVess for direct comparison (~$0.06)</observation>
+    </scientific-observations>
+
+    <devex-improvements-needed>
+      <improvement>Add explicit Phase 1 launch commands (see phase1-launch-commands below)</improvement>
+      <improvement>Document selective launch mechanism for Phase 2 (18 of 32 conditions)</improvement>
+      <improvement>Rename user-facing "MinIVess" strings to "Vascadia" (separate PR)</improvement>
+    </devex-improvements-needed>
+  </council-review>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- SECTION 11C: PHASE 1 LAUNCH COMMANDS (added by council review)     -->
+  <!--                                                                     -->
+  <!-- Explicit sky jobs launch commands for the 3 infrastructure           -->
+  <!-- validation jobs. Copy-paste ready for a fresh session.              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <phase1-launch-commands>
+    <description>
+      These are the EXACT commands to launch Phase 1 validation jobs.
+      Run from the repo root. Requires: .env with MLFLOW_TRACKING_URI + HF_TOKEN,
+      SkyPilot configured (sky check gcp), Docker image on GAR, DVC data on GCS.
+    </description>
+
+    <job id="J1" name="DynUNet baseline + GCS artifact verify">
+      <command><![CDATA[
+uv run sky jobs launch deployment/skypilot/train_factorial.yaml \
+  --name dynunet-dice_ce-calibfalse-f0 \
+  --env MODEL_FAMILY=dynunet \
+  --env LOSS_NAME=dice_ce \
+  --env FOLD_ID=0 \
+  --env WITH_AUX_CALIB=false \
+  --env MAX_EPOCHS=2 \
+  --env MAX_TRAIN_VOLUMES=23 \
+  --env MAX_VAL_VOLUMES=12 \
+  --env EXPERIMENT_NAME=debug_factorial \
+  --env ZERO_SHOT=false \
+  --env EVAL_DATASET=minivess \
+  --env POST_TRAINING_METHODS=none,swag \
+  --env BATCH_SIZE=2 \
+  --env GRAD_ACCUM_STEPS=1 \
+  --env GRADIENT_CHECKPOINTING=false \
+  --env-file .env \
+  -y
+      ]]></command>
+      <pricing>spot (~$0.04)</pricing>
+    </job>
+
+    <job id="J2" name="SAM3 Hybrid large checkpoint + GCS upload">
+      <command><![CDATA[
+uv run sky jobs launch deployment/skypilot/train_factorial.yaml \
+  --name sam3_hybrid-cbdice_cldice-calibfalse-f0 \
+  --no-use-spot \
+  --env MODEL_FAMILY=sam3_hybrid \
+  --env LOSS_NAME=cbdice_cldice \
+  --env FOLD_ID=0 \
+  --env WITH_AUX_CALIB=false \
+  --env MAX_EPOCHS=2 \
+  --env MAX_TRAIN_VOLUMES=23 \
+  --env MAX_VAL_VOLUMES=12 \
+  --env EXPERIMENT_NAME=debug_factorial \
+  --env ZERO_SHOT=false \
+  --env EVAL_DATASET=minivess \
+  --env POST_TRAINING_METHODS=none,swag \
+  --env BATCH_SIZE=1 \
+  --env GRAD_ACCUM_STEPS=4 \
+  --env GRADIENT_CHECKPOINTING=true \
+  --env-file .env \
+  -y
+      ]]></command>
+      <pricing>on-demand (~$0.37)</pricing>
+    </job>
+
+    <job id="J3" name="SAM3 Vanilla zero-shot path verify">
+      <command><![CDATA[
+uv run sky jobs launch deployment/skypilot/train_factorial.yaml \
+  --name sam3_vanilla-zeroshot-minivess-f0 \
+  --env MODEL_FAMILY=sam3_vanilla \
+  --env LOSS_NAME=none \
+  --env FOLD_ID=0 \
+  --env WITH_AUX_CALIB=false \
+  --env MAX_EPOCHS=0 \
+  --env MAX_TRAIN_VOLUMES=23 \
+  --env MAX_VAL_VOLUMES=12 \
+  --env EXPERIMENT_NAME=debug_factorial \
+  --env ZERO_SHOT=true \
+  --env EVAL_DATASET=minivess \
+  --env POST_TRAINING_METHODS=none \
+  --env BATCH_SIZE=1 \
+  --env GRAD_ACCUM_STEPS=1 \
+  --env GRADIENT_CHECKPOINTING=false \
+  --env-file .env \
+  -y
+      ]]></command>
+      <pricing>spot (~$0.06)</pricing>
+    </job>
+
+    <gate>
+      ALL 3 jobs MUST reach SUCCEEDED before proceeding to Phase 2.
+      After each job completes, verify:
+        - gsutil ls gs://minivess-mlops-mlflow-artifacts/ (artifacts uploaded)
+        - sky jobs logs JOB_ID | grep -c "413" (must be 0)
+        - Record ACTUAL duration for Phase 2 threshold calibration:
+          J1 actual: __ min (expected 10 min, warn 30, cancel 50)
+          J2 actual: __ min (expected 25 min, warn 75, cancel 75)
+          J3 actual: __ min (expected 15 min, warn 45, cancel 75)
+        - If J1_actual > 15 min: multiply all Phase 2 thresholds by J1_actual/10
+    </gate>
+  </phase1-launch-commands>
 
   <!-- ═══════════════════════════════════════════════════════════════════ -->
   <!-- SECTION 12: SUCCESS CRITERIA                                       -->

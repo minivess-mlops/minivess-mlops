@@ -1,0 +1,36 @@
+# Skip Allowlist — permitted skip reasons for test-staging and test-prod
+#
+# EVERY entry here represents a test that CANNOT run in local dev environment.
+# The goal is to SHRINK this list, not grow it.
+# Max entries: 10. If you need more, tests are in the wrong tier.
+#
+# See: docs/planning/v0-2_archive/original_docs/silent-ignoring-and-kicking-the-can-down-the-road-problem.xml
+# See: CLAUDE.md Rule 28 (Zero Silent Skips)
+
+max_entries: 10
+
+entries:
+  - pattern: "cloud credentials not set"
+    justification: "SkyPilot cloud tests require MLFLOW_CLOUD_* env vars not available locally"
+    added_date: "2026-03-29"
+    issue: null  # Acceptable — cloud tests auto-skip
+
+  - pattern: "MLFLOW_CLOUD"
+    justification: "Cloud MLflow integration tests require remote server credentials"
+    added_date: "2026-03-29"
+    issue: null  # Acceptable — cloud tier only
+
+  - pattern: "MONAI Label server not running"
+    justification: "MONAI Label annotation tests require running MONAI Label server"
+    added_date: "2026-03-29"
+    issue: null  # Acceptable — integration tier
+
+  - pattern: "Docker daemon not running"
+    justification: "Docker integration tests require running Docker daemon"
+    added_date: "2026-03-29"
+    issue: null  # Acceptable — integration tier
+
+  - pattern: "minivess-network"
+    justification: "Flow network connectivity tests require Docker Compose infra stack"
+    added_date: "2026-03-29"
+    issue: null  # Acceptable — integration tier

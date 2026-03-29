@@ -18,8 +18,8 @@
 name: minivess-production
 
 resources:
-  # GAR image — Docker registry in europe-west4.
-  image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # GAR image — Docker registry in us-central1 (migrated from europe-west4 2026-03-28).
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. T4 BANNED. A100 requires explicit user authorization.
   cloud: gcp
   use_spot: true

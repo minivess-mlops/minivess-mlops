@@ -9,6 +9,15 @@
             "command": "if echo \"$TOOL_INPUT\" | grep -q 'knowledge-graph/'; then uv run python -c \"from scripts.build_plan_archive import DB_PATH; print(f'Plan archive: {DB_PATH}')\" 2>/dev/null; fi"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$TOOL_INPUT\" | grep -qE 'pytest|make test'; then echo \"$TOOL_OUTPUT\" | python3 /home/petteri/Dropbox/knowledge-hub/repositories/vascadia/scripts/parse_test_output.py --json /home/petteri/Dropbox/knowledge-hub/repositories/vascadia/tests/last_test_result.json 2>/dev/null || true; fi"
+          }
+        ]
       }
     ]
   }

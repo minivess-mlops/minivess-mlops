@@ -1,0 +1,1718 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>GCP Region Migration: europe-west4 to us-central1 (Iowa)</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-28</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — GPU capacity exhausted in europe-west4 for 13+ hours, blocking all experiments</priority>
+    <approach>
+      Clean-slate migration: destroy europe-west4 Pulumi stack, recreate in us-central1.
+      Same pattern as the successful europe-north1 to europe-west4 migration (2026-03-27).
+      This is the SECOND region migration — lessons from the first are applied.
+    </approach>
+    <estimated-time>3-4 hours total (Phase 0-6). Phase 7-8 are post-migration follow-up.</estimated-time>
+    <key-constraint>
+      GCS bucket names are GLOBALLY UNIQUE. Pulumi will delete-then-create when region changes.
+      Since all 3 GCS buckets are EMPTY (verified in FinOps snapshot), data loss is zero.
+      Cloud SQL must be recreated (region is immutable). Current DB has experiment data
+      from the europe-west4 Cloud Run MLflow — assess whether to export before destroying.
+    </key-constraint>
+    <user-authorization>
+      User explicitly authorized this migration due to 13+ hours GPU capacity exhaustion
+      in europe-west4. No GDPR restriction — all datasets are public CC-BY mouse brain
+      microscopy data. us-central1 has the highest GPU availability globally.
+    </user-authorization>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- EXPERT COUNCIL: 5 PERSPECTIVES                                      -->
+  <!-- ================================================================== -->
+  <council>
+    <expert id="E1" role="Pulumi IaC Engineer">
+      <assessment>
+        The Pulumi code at deployment/pulumi/gcp/__main__.py is already parameterized:
+        region = config.get("region") or "europe-west4". Changing region requires updating
+        3 files: Pulumi.yaml (default), Pulumi.dev.yaml (stack config), and __main__.py
+        (default fallback + comments). Pulumi will delete-then-create ALL region-bound
+        resources (GCS buckets, Cloud SQL, GAR, Cloud Run) because GCS location and Cloud
+        SQL region are immutable attributes. force_destroy=True on buckets and
+        deletion_protection=False on Cloud SQL make this safe. The enable_cloud_run flag
+        is currently "true" in Pulumi.dev.yaml, so Cloud Run MLflow will be recreated too.
+      </assessment>
+      <recommendation>
+        Modify existing stack (not blue-green). All 3 GCS buckets are empty per FinOps
+        snapshot. Cloud SQL has experiment metadata but no irreplaceable data (all training
+        artifacts were lost to the 413 bug). pulumi destroy then pulumi up with new region
+        is the simplest path. Update GAR URL in all referencing files.
+      </recommendation>
+      <risk>
+        Pulumi destroy may timeout on Cloud SQL deletion (can take 5-10 min). Cloud Run
+        service deletion is fast. GAR repo deletion may leave dangling image layers.
+        Mitigation: use --yes flag and wait patiently.
+      </risk>
+    </expert>
+
+    <expert id="E2" role="Data Migration Engineer">
+      <assessment>
+        Current data state (verified 2026-03-28 FinOps snapshot):
+        - GCS buckets: ALL EMPTY (0 bytes across all 3 buckets)
+        - GAR: 6.38 GB (base:latest 5.97 GiB + mlflow:v3.10.0 267 MiB)
+        - Cloud SQL: Experiment metadata from Cloud Run MLflow sessions
+        - DVC data: Must be re-pushed from local to new GCS bucket (2.89 GB from EBRAINS)
+
+        Docker images: Cannot use gcrane for cross-region copy because source GAR repo
+        will be destroyed by Pulumi. Must re-push from local Docker cache. Verify local
+        images exist before destroying old stack.
+      </assessment>
+      <recommendation>
+        1. Verify local Docker images exist: docker images | grep minivess-base
+        2. If local cache is missing, docker pull from europe-west4 GAR BEFORE destroy
+        3. After new GAR is created in us-central1, docker tag + docker push
+        4. Re-push DVC data to new GCS bucket via dvc push -r gcs
+        5. Total data transfer: ~6 GB images (upload) + ~3 GB DVC data (upload) = ~9 GB
+        6. Estimated time: 30-60 min on residential internet (10-20 Mbps upload)
+      </recommendation>
+      <risk>
+        If local Docker cache was pruned, base image must be rebuilt (45-60 min).
+        Mitigation: check docker images BEFORE destroying old stack.
+      </risk>
+    </expert>
+
+    <expert id="E3" role="SRE / Reliability Engineer">
+      <assessment>
+        This is a clean-slate migration with zero production traffic and zero users beyond
+        the single researcher. Risk is low. The main concerns are:
+        1. Rollback complexity: once europe-west4 resources are destroyed, rollback means
+           re-running the migration in reverse. Since europe-west4 is GPU-exhausted anyway,
+           there is no rollback to a working state in that region.
+        2. DNS/URL changes: Cloud Run URL will change (region embedded in URL). All
+           MLFLOW_TRACKING_URI references must be updated.
+        3. SkyPilot controller: currently in europe-west1-b. After migration, jobs target
+           us-central1. Cross-region controller-to-job SSH will work but adds latency.
+           Should move controller to us-central1 as well.
+        4. GCS bucket names can be reused since location is set at creation time and
+           Pulumi destroy + create with same name in new region works (verified in first migration).
+      </assessment>
+      <recommendation>
+        Pre-migration checklist (verify before ANY destructive action):
+        [ ] Docker images cached locally (docker images | grep minivess)
+        [ ] DVC data cached locally (ls data/raw/minivess/imagesTr/ | wc -l)
+        [ ] us-central1 GPU quotas verified (L4 + A100-80GB)
+        [ ] us-central1 service availability verified (GAR, Cloud SQL, Cloud Run, GCS)
+        [ ] Current .env backed up (cp .env .env.backup-ew4)
+
+        Post-migration verification:
+        [ ] pulumi stack output shows us-central1 for all resources
+        [ ] GAR image accessible from us-central1 VMs
+        [ ] DVC data present in new GCS bucket
+        [ ] Cloud Run MLflow responding (curl health check)
+        [ ] SkyPilot can provision L4 in us-central1 (smoke test)
+      </recommendation>
+      <risk>
+        us-central1 could also become capacity-exhausted, though this is much less likely
+        given its 4 zones and highest global GPU inventory. Long-term solution: multi-region
+        config (already exists as europe_us.yaml) with co-located infra in both regions.
+        For now, single-region in us-central1 is the pragmatic choice.
+      </risk>
+    </expert>
+
+    <expert id="E4" role="SkyPilot Expert">
+      <assessment>
+        SkyPilot integration points that reference europe-west4:
+        1. .sky.yaml: controller infra: gcp/europe-west4
+        2. deployment/skypilot/train_factorial.yaml: image_id docker:europe-west4-docker.pkg.dev/...
+        3. deployment/skypilot/train_production.yaml: same image_id pattern
+        4. deployment/skypilot/train_hpo.yaml: same
+        5. deployment/skypilot/hpo_grid_worker.yaml: same + explicit region field
+        6. deployment/skypilot/smoke_test_gcp.yaml: same
+        7. configs/cloud/gcp_spot.yaml: region + docker_image fields
+        8. configs/cloud/regions/europe_strict.yaml: region: europe-west4
+        9. configs/cloud/regions/europe_a100_fallback.yaml: region: europe-west4
+        10. configs/cloud/regions/europe_us.yaml: europe-west4 as first priority
+        11. configs/cloud/regions/europe.yaml: europe-west4 references
+
+        Controller placement: the current controller (europe-west1-b, n4-standard-4) must
+        be stopped. The .sky.yaml must be updated to target us-central1. SkyPilot will
+        auto-provision a new controller in us-central1 when the next job is submitted.
+
+        IMPORTANT: The old controller VM will NOT be auto-deleted. Must manually stop it
+        via sky jobs controller stop and verify the GCE instance is terminated.
+      </assessment>
+      <recommendation>
+        1. Stop old controller: sky jobs controller stop (frees EUR 3.22/day)
+        2. Update .sky.yaml: infra: gcp/us-central1
+        3. Update ALL SkyPilot YAMLs: image_id to us-central1-docker.pkg.dev/...
+        4. Create us_central1_strict.yaml for single-region zero-egress config
+        5. Update europe_us.yaml to put us-central1 FIRST (since infra is now there)
+        6. Verify quota: sky show-gpus L4 --cloud gcp (check us-central1 availability)
+        7. Run smoke test before factorial launch
+      </recommendation>
+    </expert>
+
+    <expert id="E5" role="Test Engineer">
+      <assessment>
+        Test files referencing europe-west4 (from previous migration, grep results):
+        - tests/v2/unit/deployment/test_skypilot_yamls.py
+        - tests/v2/unit/deployment/test_docker_image_consistency.py
+        - tests/v2/unit/deployment/test_preflight_mocked.py
+        - tests/v2/unit/test_docker_pull_optimization.py
+        - tests/v2/unit/finops/test_cost_governance.py (if it exists from 11th pass)
+        - tests/v2/unit/deployment/test_yaml_contract_enforcement.py
+
+        The previous migration plan noted a DESIGN IMPROVEMENT: tests should read region
+        from configs/registry/gar.yaml (single source of truth) instead of hardcoding.
+        If this was implemented, many tests will auto-adapt. If not, we need to update
+        all hardcoded europe-west4 assertions to us-central1.
+
+        Post-migration test gate: make test-staging must pass with 0 failures.
+        New tests to add: region consistency tests (all config files reference same region).
+      </assessment>
+      <recommendation>
+        1. Run grep for "europe-west4" across entire codebase to find all references
+        2. Batch-update all references to us-central1
+        3. Run make test-staging immediately after code changes
+        4. Add T8 cloud test suite improvements for future migrations
+      </recommendation>
+    </expert>
+  </council>
+
+  <!-- ================================================================== -->
+  <!-- COUNCIL CONSENSUS                                                    -->
+  <!-- ================================================================== -->
+  <consensus>
+    <decision>Clean-slate migration: pulumi destroy (europe-west4), pulumi up (us-central1).</decision>
+    <rationale>
+      All 5 experts agree: zero data at risk (GCS empty, Cloud SQL expendable), Pulumi
+      code is already parameterized, Docker images re-pushable from local cache. The
+      second migration benefits from the first migration's lessons learned. Estimated
+      wall-clock: 3-4 hours including Docker image upload time.
+    </rationale>
+    <lessons-from-first-migration>
+      1. DATA NOT MIGRATED: GCS buckets were created empty — DVC data was not copied.
+         Prevention: Push DVC data to new GCS bucket immediately after Pulumi up.
+      2. DVC CACHE LOST: Had to re-download from EBRAINS.
+         Prevention: Verify local DVC cache exists before starting.
+      3. STALE SKYPILOT PATHS: API server had stale region paths.
+         Prevention: sky api stop and sky api start after migration.
+      4. DOCKER IMAGE FRESHNESS: Image needed rebuild.
+         Prevention: Verify local Docker cache before destroying old GAR.
+    </lessons-from-first-migration>
+  </consensus>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: PRE-MIGRATION VERIFICATION (30 min, no changes, no risk)   -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Pre-Migration Verification">
+    <description>
+      Verify us-central1 readiness and local cache state before any destructive action.
+      NOTHING is modified in this phase. All actions are read-only verification.
+    </description>
+    <estimated-time>30 minutes</estimated-time>
+
+    <task id="T0.1" status="NOT_STARTED" priority="P0">
+      <title>Verify us-central1 GPU quotas (L4 + A100-80GB)</title>
+      <expert-source>E3 (SRE), E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Check L4 GPU quota in us-central1
+gcloud compute regions describe us-central1 --project=minivess-mlops \
+  --format="table(quotas.filter('metric:NVIDIA_L4_GPUS').extract(limit,usage))"
+
+# Check A100-80GB GPU quota in us-central1
+gcloud compute regions describe us-central1 --project=minivess-mlops \
+  --format="table(quotas.filter('metric:NVIDIA_A100_80GB_GPUS').extract(limit,usage))"
+
+# Check general CPU quota (needed for controller + training VMs)
+gcloud compute regions describe us-central1 --project=minivess-mlops \
+  --format="table(quotas.filter('metric:CPUS').extract(limit,usage))"
+
+# Verify SkyPilot can see L4 in us-central1
+uv run sky show-gpus L4 --cloud gcp 2>&1 | grep us-central1
+      ]]></commands>
+      <verification>
+        L4 quota >= 1 in us-central1.
+        CPU quota >= 8 (controller 2 vCPU + training VM 4+ vCPU).
+        sky show-gpus shows us-central1 with L4 availability.
+      </verification>
+      <rollback>No changes made. If quota is 0, request increase via GCP Console:
+        https://console.cloud.google.com/iam-admin/quotas?project=minivess-mlops
+        Filter by region=us-central1, metric contains "GPU".
+        Request L4 quota >= 1 and GPUS_ALL_REGIONS >= 1.
+      </rollback>
+      <failure-action>
+        STOP entire migration. If us-central1 has zero GPU quota, the migration will
+        not help. Request quota increase (takes 24-48h for L4, sometimes instant).
+        Alternative: check us-east4 or us-west1 as backup targets.
+      </failure-action>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T0.2" status="NOT_STARTED" priority="P0">
+      <title>Verify us-central1 service availability (GAR, Cloud SQL, Cloud Run, GCS)</title>
+      <expert-source>E1 (Pulumi), E3 (SRE)</expert-source>
+      <commands><![CDATA[
+# Verify Artifact Registry is available in us-central1
+gcloud artifacts locations list --format="value(name)" | grep us-central1
+
+# Verify Cloud SQL supports us-central1
+gcloud sql tiers list --format="table(tier,region)" | grep us-central1 | head -3
+
+# Verify Cloud Run supports us-central1
+gcloud run regions list --format="value(name)" | grep us-central1
+
+# Verify GCS supports us-central1 (GCS supports all regions)
+echo "GCS supports all regions — no verification needed."
+      ]]></commands>
+      <verification>
+        us-central1 appears in GAR locations, Cloud SQL tiers, and Cloud Run regions.
+      </verification>
+      <rollback>No changes made. If any service is unavailable, choose alternative US region.</rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T0.3" status="NOT_STARTED" priority="P0">
+      <title>Verify local Docker image cache exists</title>
+      <expert-source>E2 (Data Migration)</expert-source>
+      <commands><![CDATA[
+# Check if base image is in local Docker cache
+docker images | grep minivess-base
+docker images | grep "minivess.*mlflow"
+
+# If images are NOT found locally, pull from europe-west4 GAR BEFORE destroying:
+# docker pull europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+# docker pull europe-west4-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0
+# docker pull europe-west4-docker.pkg.dev/minivess-mlops/minivess/mlflow-gcp:latest
+      ]]></commands>
+      <verification>
+        docker images shows minivess-base:latest (~6 GB) and mlflow images.
+        If not found, pull them from europe-west4 GAR before proceeding to Phase 1.
+      </verification>
+      <rollback>No changes made.</rollback>
+      <failure-action>
+        If images not in local cache AND europe-west4 GAR is inaccessible:
+        Must rebuild from source (deployment/docker/Dockerfile.base). Takes 45-60 min.
+        Proceed to Phase 1 after rebuild completes.
+      </failure-action>
+      <estimated-time>2 minutes (check) or 30-60 min (if rebuild needed)</estimated-time>
+    </task>
+
+    <task id="T0.4" status="NOT_STARTED" priority="P0">
+      <title>Verify local DVC data cache exists</title>
+      <expert-source>E2 (Data Migration)</expert-source>
+      <commands><![CDATA[
+# Check local MiniVess data
+ls data/raw/minivess/imagesTr/ 2>/dev/null | wc -l
+# Expected: 70 files (70 volumes)
+
+# Check local DeepVess data (if available)
+ls data/raw/deepvess/images/ 2>/dev/null | wc -l
+
+# Check DVC tracking status
+dvc status
+      ]]></commands>
+      <verification>
+        At least 70 files in data/raw/minivess/imagesTr/.
+        DVC data is locally cached and ready for push to new GCS bucket.
+      </verification>
+      <rollback>No changes made.</rollback>
+      <failure-action>
+        If local DVC data is missing, must re-download from EBRAINS:
+        python -m minivess.data.acquisition --dataset minivess
+        Takes ~15-30 min depending on EBRAINS bandwidth.
+      </failure-action>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T0.5" status="NOT_STARTED" priority="P0">
+      <title>Snapshot current europe-west4 state for reference</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <commands><![CDATA[
+# Capture current Pulumi outputs for reference
+cd deployment/pulumi/gcp && pulumi stack output 2>&1 | tee /tmp/pulumi-ew4-outputs.txt && cd -
+
+# Capture current .env for rollback
+cp .env .env.backup-europe-west4 2>/dev/null || echo "No .env file to backup"
+
+# Record current Cloud Run URL
+gcloud run services describe minivess-mlflow --region=europe-west4 --project=minivess-mlops \
+  --format="value(status.url)" 2>/dev/null || echo "Cloud Run not found or not accessible"
+
+# Record current Cloud SQL IP
+gcloud sql instances describe mlflow-db-479b793 --project=minivess-mlops \
+  --format="value(ipAddresses[0].ipAddress)" 2>/dev/null || echo "Cloud SQL not found"
+      ]]></commands>
+      <verification>
+        Pulumi outputs captured to /tmp/pulumi-ew4-outputs.txt.
+        .env backup created at .env.backup-europe-west4.
+      </verification>
+      <rollback>No changes made. This IS the rollback preparation.</rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T0.6" status="NOT_STARTED" priority="P0">
+      <title>Cancel stuck europe-west4 SkyPilot jobs</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Check current job status
+uv run sky jobs queue
+
+# Cancel all PENDING jobs (they will never provision in europe-west4)
+# Replace job IDs with actual PENDING job IDs from sky jobs queue output:
+uv run sky jobs cancel 165
+uv run sky jobs cancel 166
+# Cancel any other PENDING jobs listed
+
+# Verify all jobs cancelled
+uv run sky jobs queue
+      ]]></commands>
+      <verification>No PENDING or RUNNING jobs remain in the queue.</verification>
+      <rollback>Jobs were already stuck PENDING — cancelling them is non-destructive.</rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: PULUMI INFRASTRUCTURE MIGRATION (1-2 hours)                -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Pulumi Infrastructure Migration">
+    <description>
+      Update Pulumi config to us-central1, destroy old stack, deploy new stack.
+      Clean-slate approach: no data migration needed (GCS buckets are empty).
+    </description>
+    <estimated-time>1-2 hours (including Docker push time)</estimated-time>
+    <depends-on>Phase 0 (all tasks PASSED)</depends-on>
+
+    <task id="T1.1" status="NOT_STARTED" priority="P0">
+      <title>Update Pulumi configuration files for us-central1</title>
+      <expert-source>E1 (Pulumi)</expert-source>
+      <files>
+        <file action="modify">deployment/pulumi/gcp/__main__.py</file>
+        <file action="modify">deployment/pulumi/gcp/Pulumi.yaml</file>
+        <file action="modify">deployment/pulumi/gcp/Pulumi.dev.yaml</file>
+      </files>
+      <changes><![CDATA[
+# deployment/pulumi/gcp/__main__.py:
+#   Line 3: "europe-west4 (Netherlands)" -> "us-central1 (Iowa)"
+#   Line 30: 'or "europe-west4"' -> 'or "us-central1"'
+#   Line 144: comment "europe-west4" -> "us-central1"
+#   Line 155: comment "europe-west4" -> "us-central1"
+
+# deployment/pulumi/gcp/Pulumi.yaml:
+#   Line 11: description "europe-west4" -> "us-central1"
+#   Line 18: default: europe-west4 -> default: us-central1
+#   Line 19: description "europe-west4 = Netherlands" -> "us-central1 = Iowa"
+
+# deployment/pulumi/gcp/Pulumi.dev.yaml:
+#   Line 3: gcp:region: europe-west4 -> gcp:region: us-central1
+      ]]></changes>
+      <verification>
+        cd deployment/pulumi/gcp
+        grep -n "us-central1" __main__.py Pulumi.yaml Pulumi.dev.yaml
+        # Should show us-central1 in all config locations
+        grep -n "europe-west4" __main__.py Pulumi.yaml Pulumi.dev.yaml
+        # Should show ZERO matches (except possibly in historical comments)
+      </verification>
+      <rollback>
+        git checkout -- deployment/pulumi/gcp/__main__.py
+        git checkout -- deployment/pulumi/gcp/Pulumi.yaml
+        git checkout -- deployment/pulumi/gcp/Pulumi.dev.yaml
+      </rollback>
+      <estimated-time>10 minutes</estimated-time>
+    </task>
+
+    <task id="T1.2" status="NOT_STARTED" priority="P0">
+      <title>Run pulumi preview to see planned changes</title>
+      <expert-source>E1 (Pulumi)</expert-source>
+      <commands><![CDATA[
+cd deployment/pulumi/gcp
+pulumi preview --diff 2>&1 | tee /tmp/pulumi-preview-usc1.txt
+# Expected: ALL region-bound resources show "replace" (delete + create):
+#   - GCS buckets: replace (location change)
+#   - Cloud SQL: replace (region change)
+#   - GAR repos: replace (location change)
+#   - Cloud Run: replace (location change)
+#   - IAM: no change (global)
+      ]]></commands>
+      <verification>
+        Preview shows "replace" for GCS, Cloud SQL, GAR, Cloud Run resources.
+        NO unexpected deletions of global resources (IAM, project settings).
+        Total resource count matches current stack.
+      </verification>
+      <rollback>Preview is read-only. No changes made.</rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T1.3" status="NOT_STARTED" priority="P0">
+      <title>Stop SkyPilot controller and destroy old Pulumi stack</title>
+      <expert-source>E1 (Pulumi), E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Stop SkyPilot controller (frees the VM in europe-west1-b)
+uv run sky jobs controller stop --yes
+
+# Verify controller is stopped
+gcloud compute instances list --project=minivess-mlops \
+  --format="table(name,zone,machineType,status)" | grep sky-jobs
+
+# Destroy old europe-west4 Pulumi stack
+cd deployment/pulumi/gcp
+pulumi destroy --yes
+
+# Verify: no resources remain
+pulumi stack export | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+resources = d.get('deployment', {}).get('resources', [])
+print(f'{len(resources)} resources remaining (should be 1 — the stack itself)')
+"
+      ]]></commands>
+      <verification>
+        Controller VM is TERMINATED or not listed.
+        pulumi stack export shows 1 resource (the stack itself).
+        gcloud artifacts repositories list shows no europe-west4 repos.
+        gcloud sql instances list shows no instances.
+        gcloud run services list shows no services.
+      </verification>
+      <rollback>
+        If pulumi destroy fails partway:
+        1. Check which resources remain: pulumi stack export
+        2. Delete manually via gcloud if needed
+        3. Then run pulumi refresh to sync state
+      </rollback>
+      <warning>
+        This DELETES all europe-west4 resources including Cloud SQL with experiment
+        metadata. Verified acceptable: GCS buckets are empty, experiment data is
+        expendable for a greenfield project.
+      </warning>
+      <estimated-time>10-15 minutes (Cloud SQL deletion can take 5-10 min)</estimated-time>
+    </task>
+
+    <task id="T1.4" status="NOT_STARTED" priority="P0">
+      <title>Deploy new Pulumi stack in us-central1</title>
+      <expert-source>E1 (Pulumi)</expert-source>
+      <commands><![CDATA[
+cd deployment/pulumi/gcp
+pulumi up --yes
+
+# This creates in us-central1:
+#   - GCS buckets: minivess-mlops-dvc-data, minivess-mlops-mlflow-artifacts, minivess-mlops-checkpoints
+#   - Cloud SQL: mlflow-db (PostgreSQL 15, db-g1-small)
+#   - GAR: minivess (STANDARD), docker-hub-cache (REMOTE)
+#   - Cloud Run: minivess-mlflow (if enable_cloud_run=true)
+#   - IAM: skypilot-training SA, mlflow-server SA
+      ]]></commands>
+      <verification><![CDATA[
+# Verify all outputs point to us-central1
+pulumi stack output 2>&1 | tee /tmp/pulumi-usc1-outputs.txt
+
+# Expected outputs:
+#   docker_registry: us-central1-docker.pkg.dev/minivess-mlops/minivess
+#   region: us-central1
+#   mlflow_url: https://minivess-mlflow-*.run.app (us-central1)
+
+# Verify GCS buckets exist in US-CENTRAL1
+gsutil ls -L -b gs://minivess-mlops-dvc-data/ 2>&1 | grep "Location"
+# Expected: US-CENTRAL1
+
+gsutil ls -L -b gs://minivess-mlops-mlflow-artifacts/ 2>&1 | grep "Location"
+gsutil ls -L -b gs://minivess-mlops-checkpoints/ 2>&1 | grep "Location"
+
+# Verify GAR repository
+gcloud artifacts repositories list --project=minivess-mlops \
+  --format="table(name,format,mode)" --location=us-central1
+
+# Verify Cloud SQL
+gcloud sql instances list --project=minivess-mlops \
+  --format="table(name,region,state,tier)"
+
+# Verify Cloud Run (if enabled)
+gcloud run services list --project=minivess-mlops \
+  --format="table(name,region,url)"
+      ]]></verification>
+      <rollback>
+        If pulumi up fails:
+        1. Read error message — likely quota or API issue
+        2. Fix the issue (enable API, request quota)
+        3. Re-run pulumi up --yes
+        If partial deployment, pulumi destroy --yes and start over
+      </rollback>
+      <estimated-time>10-15 minutes</estimated-time>
+    </task>
+
+    <task id="T1.5" status="NOT_STARTED" priority="P0">
+      <title>Push Docker images to us-central1 GAR</title>
+      <expert-source>E2 (Data Migration)</expert-source>
+      <commands><![CDATA[
+# Authenticate to new GAR region
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+# Tag and push base image
+docker tag minivess-base:latest \
+  us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+docker push us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+
+# Tag and push MLflow image (for Cloud Run)
+docker tag minivess-mlflow:latest \
+  us-central1-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0
+docker push us-central1-docker.pkg.dev/minivess-mlops/minivess/mlflow:v3.10.0
+
+# Tag and push MLflow GCP image (for Cloud Run with GCS)
+docker tag minivess-mlflow-gcp:latest \
+  us-central1-docker.pkg.dev/minivess-mlops/minivess/mlflow-gcp:latest
+docker push us-central1-docker.pkg.dev/minivess-mlops/minivess/mlflow-gcp:latest
+      ]]></commands>
+      <verification><![CDATA[
+# Verify images in us-central1 GAR
+gcloud artifacts docker images list \
+  us-central1-docker.pkg.dev/minivess-mlops/minivess \
+  --include-tags --format="table(package,tags,createTime)"
+
+# Expected: base:latest, mlflow:v3.10.0, mlflow-gcp:latest
+      ]]></verification>
+      <rollback>
+        If push fails (auth error): gcloud auth configure-docker us-central1-docker.pkg.dev
+        If push fails (quota): check GAR storage quota in us-central1
+        If local image missing: rebuild from source (see T0.3 failure-action)
+      </rollback>
+      <note>
+        Upload time: ~30-60 min for 6.4 GB base image on residential internet.
+        MLflow images are small (~267 MiB each, ~2-3 min).
+        This is the LONGEST task in the migration. Start it and proceed to T1.6 in parallel.
+      </note>
+      <estimated-time>30-60 minutes (dominated by base image upload)</estimated-time>
+    </task>
+
+    <task id="T1.6" status="NOT_STARTED" priority="P1">
+      <title>Push DVC data to us-central1 GCS bucket</title>
+      <expert-source>E2 (Data Migration)</expert-source>
+      <commands><![CDATA[
+# Configure DVC remote to point to new GCS bucket (same name, new region)
+dvc remote modify gcs url gs://minivess-mlops-dvc-data
+
+# Push MiniVess data to new GCS bucket
+dvc push data/raw/minivess -r gcs
+
+# Push DeepVess data if available locally
+dvc push data/raw/deepvess.dvc -r gcs 2>/dev/null || echo "DeepVess not in local DVC cache"
+
+# Verify data on GCS
+gsutil du -s gs://minivess-mlops-dvc-data/
+      ]]></commands>
+      <verification>
+        gsutil du -s shows ~2-3 GB in gs://minivess-mlops-dvc-data/.
+        dvc status -r gcs shows no untracked changes.
+      </verification>
+      <rollback>
+        DVC push is idempotent. If it fails, fix the issue and re-run.
+        If local data is missing, re-download from EBRAINS.
+      </rollback>
+      <note>
+        Can run in PARALLEL with T1.5 (Docker push) since they use different upload paths.
+        DVC data: ~2.89 GB, estimated 10-20 min on residential internet.
+      </note>
+      <estimated-time>10-20 minutes</estimated-time>
+    </task>
+
+    <task id="T1.7" status="NOT_STARTED" priority="P1">
+      <title>Verify Cloud Run MLflow is healthy in us-central1</title>
+      <expert-source>E1 (Pulumi), E3 (SRE)</expert-source>
+      <commands><![CDATA[
+# Get the new Cloud Run URL from Pulumi output
+MLFLOW_URL=$(cd deployment/pulumi/gcp && pulumi stack output mlflow_url && cd -)
+
+# Health check — MLflow should respond
+curl -s -o /dev/null -w "%{http_code}" "${MLFLOW_URL}/health" || \
+curl -s -o /dev/null -w "%{http_code}" "${MLFLOW_URL}/api/2.0/mlflow/experiments/search?max_results=1"
+
+# Test MLflow client connectivity
+python3 -c "
+import mlflow
+import os
+os.environ['MLFLOW_TRACKING_URI'] = '${MLFLOW_URL}'
+client = mlflow.tracking.MlflowClient()
+exps = client.search_experiments(max_results=1)
+print(f'MLflow OK: {len(exps)} experiments')
+"
+      ]]></commands>
+      <verification>
+        HTTP 200 from Cloud Run MLflow health endpoint.
+        MLflow client can connect and list experiments.
+      </verification>
+      <rollback>
+        If Cloud Run not responding:
+        1. Check Cloud Run logs: gcloud run services logs read minivess-mlflow --region us-central1
+        2. Verify Cloud SQL IP is accessible from Cloud Run (check authorized networks)
+        3. Verify MLflow image was pushed correctly to us-central1 GAR
+      </rollback>
+      <depends-on>T1.4 (Pulumi stack deployed), T1.5 (MLflow image pushed to GAR)</depends-on>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: CONFIGURATION UPDATES (30 min)                             -->
+  <!-- ================================================================== -->
+  <phase id="2" name="Configuration Updates — All Region References">
+    <description>
+      Update ALL files referencing europe-west4 to us-central1.
+      Single atomic commit after all changes are made and tests pass.
+      Expert E5 (Test Engineer) identified the full file list.
+    </description>
+    <estimated-time>30 minutes</estimated-time>
+    <depends-on>Phase 1 (Pulumi stack deployed in us-central1)</depends-on>
+
+    <task id="T2.1" status="NOT_STARTED" priority="P0">
+      <title>Update .env and .env.example — GCP region and MLflow URL</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <files>
+        <file action="modify">.env.example</file>
+        <file action="modify">.env</file>
+      </files>
+      <changes><![CDATA[
+# .env.example:
+#   Line 417: GCP_REGION=europe-west4 -> GCP_REGION=us-central1
+
+# .env (actual values):
+#   GCP_REGION=us-central1
+#   MLFLOW_TRACKING_URI=<new Cloud Run URL from pulumi stack output mlflow_url>
+      ]]></changes>
+      <verification>
+        grep GCP_REGION .env.example  # Should show us-central1
+        grep GCP_REGION .env          # Should show us-central1
+        grep MLFLOW_TRACKING_URI .env # Should show new Cloud Run URL
+      </verification>
+      <rollback>cp .env.backup-europe-west4 .env</rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T2.2" status="NOT_STARTED" priority="P0">
+      <title>Update configs/registry/gar.yaml — GAR server URL</title>
+      <expert-source>E4 (SkyPilot), E5 (Test)</expert-source>
+      <files>
+        <file action="modify">configs/registry/gar.yaml</file>
+      </files>
+      <changes><![CDATA[
+# configs/registry/gar.yaml:
+#   server: europe-west4-docker.pkg.dev -> server: us-central1-docker.pkg.dev
+#   image_prefix: europe-west4-docker.pkg.dev/... -> image_prefix: us-central1-docker.pkg.dev/...
+      ]]></changes>
+      <verification>
+        grep "us-central1" configs/registry/gar.yaml  # Should match
+        grep "europe-west4" configs/registry/gar.yaml  # Should NOT match
+      </verification>
+      <rollback>git checkout -- configs/registry/gar.yaml</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.3" status="NOT_STARTED" priority="P0">
+      <title>Update configs/cloud/gcp_spot.yaml — region and docker_image</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="modify">configs/cloud/gcp_spot.yaml</file>
+      </files>
+      <changes><![CDATA[
+# configs/cloud/gcp_spot.yaml:
+#   Line 2: comment "europe-west4" -> "us-central1"
+#   Line 8: region: europe-west4 -> region: us-central1
+#   Line 24: docker_image: europe-west4-docker.pkg.dev/... -> us-central1-docker.pkg.dev/...
+      ]]></changes>
+      <verification>
+        grep "region:" configs/cloud/gcp_spot.yaml  # Should show us-central1
+        grep "docker_image:" configs/cloud/gcp_spot.yaml  # Should show us-central1
+      </verification>
+      <rollback>git checkout -- configs/cloud/gcp_spot.yaml</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.4" status="NOT_STARTED" priority="P0">
+      <title>Create configs/cloud/regions/us_central1_strict.yaml</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="create">configs/cloud/regions/us_central1_strict.yaml</file>
+      </files>
+      <content><![CDATA[
+# Single-region us-central1 — same region as GAR, GCS, Cloud SQL.
+# Zero cross-region egress. Lowest latency to all GCP infrastructure.
+#
+# Use for debug runs where cost predictability matters more than availability.
+# us-central1 has 3 L4 zones + 4 A100 zones — highest GPU availability globally.
+
+description: "Single-region us-central1 — zero cross-region egress"
+
+regions:
+  gcp:
+    L4:
+      - region: us-central1     # Iowa — 3 zones, co-located with GAR/GCS
+        zones: 3
+      ]]></content>
+      <verification>
+        cat configs/cloud/regions/us_central1_strict.yaml  # Should be valid YAML
+        python3 -c "import yaml; yaml.safe_load(open('configs/cloud/regions/us_central1_strict.yaml'))"
+      </verification>
+      <rollback>rm configs/cloud/regions/us_central1_strict.yaml</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.5" status="NOT_STARTED" priority="P0">
+      <title>Create configs/cloud/regions/us_central1_a100_fallback.yaml</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="create">configs/cloud/regions/us_central1_a100_fallback.yaml</file>
+      </files>
+      <content><![CDATA[
+# US regions with A100 fallback — use when L4 spot is capacity-exhausted.
+#
+# Priority order (enforced by region_injection.py iteration order):
+#   1. L4 in us-central1    — cheapest ($0.224/hr spot), co-located with GAR/GCS
+#   2. A100 in us-central1  — fallback ($1.10/hr spot), same region as infra
+#
+# User authorization: 2026-03-28 (region migration to us-central1)
+# Cost impact: A100 debug pass = ~$18.70 vs L4 at ~$6.85 (+$11.85)
+#
+# See: docs/planning/v0-2_archive/original_docs/gpu-instances-finops-report.md
+
+description: "US regions with A100 fallback — L4 primary, A100 when L4 exhausted"
+
+regions:
+  gcp:
+    L4:
+      - region: us-central1      # Iowa — co-located with GAR/GCS
+        zones: 3
+    A100-80GB:
+      - region: us-central1      # Iowa — same region as infra (PREEMPTIBLE ONLY, quota 1)
+        zones: 3
+      ]]></content>
+      <verification>
+        python3 -c "import yaml; yaml.safe_load(open('configs/cloud/regions/us_central1_a100_fallback.yaml'))"
+      </verification>
+      <rollback>rm configs/cloud/regions/us_central1_a100_fallback.yaml</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.6" status="NOT_STARTED" priority="P0">
+      <title>Update configs/factorial/debug.yaml — region_config</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="modify">configs/factorial/debug.yaml</file>
+      </files>
+      <changes><![CDATA[
+# configs/factorial/debug.yaml:
+#   Line 135: region_config: europe_a100_fallback -> us_central1_a100_fallback
+      ]]></changes>
+      <verification>
+        grep "region_config:" configs/factorial/debug.yaml
+        # Should show: us_central1_a100_fallback
+      </verification>
+      <rollback>git checkout -- configs/factorial/debug.yaml</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.7" status="NOT_STARTED" priority="P0">
+      <title>Update SkyPilot YAMLs — GAR image_id to us-central1</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="modify">deployment/skypilot/train_factorial.yaml</file>
+        <file action="modify">deployment/skypilot/train_production.yaml</file>
+        <file action="modify">deployment/skypilot/train_hpo.yaml</file>
+        <file action="modify">deployment/skypilot/hpo_grid_worker.yaml</file>
+        <file action="modify">deployment/skypilot/smoke_test_gcp.yaml</file>
+      </files>
+      <changes><![CDATA[
+# ALL SkyPilot YAMLs:
+#   image_id: docker:europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest
+#   ->
+#   image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+
+# hpo_grid_worker.yaml ALSO:
+#   region: europe-west4 -> region: us-central1 (if explicit region field exists)
+
+# ALL: update comments referencing europe-west4 to us-central1
+      ]]></changes>
+      <verification><![CDATA[
+# Verify ALL SkyPilot YAMLs reference us-central1 GAR
+grep -r "europe-west4" deployment/skypilot/*.yaml
+# Should return ZERO matches
+
+grep -r "us-central1" deployment/skypilot/*.yaml
+# Should show image_id lines for all files
+      ]]></verification>
+      <rollback>git checkout -- deployment/skypilot/</rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T2.8" status="NOT_STARTED" priority="P0">
+      <title>Update .sky.yaml — controller placement to us-central1</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="modify">.sky.yaml</file>
+      </files>
+      <changes><![CDATA[
+# .sky.yaml:
+#   infra: gcp/europe-west4 -> infra: gcp/us-central1
+#   Comment: "europe-west4 (Netherlands)" -> "us-central1 (Iowa)"
+      ]]></changes>
+      <verification>
+        grep "infra:" .sky.yaml  # Should show gcp/us-central1
+        grep "europe-west4" .sky.yaml  # Should return ZERO matches
+      </verification>
+      <rollback>git checkout -- .sky.yaml</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.9" status="NOT_STARTED" priority="P0">
+      <title>Update scripts/preflight_gcp.py — GAR image URL</title>
+      <expert-source>E5 (Test)</expert-source>
+      <files>
+        <file action="modify">scripts/preflight_gcp.py</file>
+      </files>
+      <changes><![CDATA[
+# scripts/preflight_gcp.py:
+#   Line 37: GAR_IMAGE = "europe-west4-docker.pkg.dev/..." -> "us-central1-docker.pkg.dev/..."
+      ]]></changes>
+      <verification>
+        grep "GAR_IMAGE" scripts/preflight_gcp.py  # Should show us-central1
+      </verification>
+      <rollback>git checkout -- scripts/preflight_gcp.py</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T2.10" status="NOT_STARTED" priority="P0">
+      <title>Update region config files — europe_strict, europe_a100_fallback, europe_us</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <files>
+        <file action="modify">configs/cloud/regions/europe_strict.yaml</file>
+        <file action="modify">configs/cloud/regions/europe_a100_fallback.yaml</file>
+        <file action="modify">configs/cloud/regions/europe_us.yaml</file>
+        <file action="modify">configs/cloud/regions/europe.yaml</file>
+      </files>
+      <changes><![CDATA[
+# europe_strict.yaml:
+#   Update comments to note "LEGACY — infra has moved to us-central1"
+#   Keep the file for reference but it's no longer the co-located config
+
+# europe_a100_fallback.yaml:
+#   Update comments to note "LEGACY — infra has moved to us-central1"
+
+# europe_us.yaml:
+#   Move us-central1 to FIRST position (since that's where infra lives now)
+#   Update comment: "closest to GCS us-central1"
+
+# europe.yaml:
+#   Update comments referencing "GAR/GCS in europe-west4"
+      ]]></changes>
+      <verification>
+        # Verify us_central1_strict.yaml is the new default co-located config
+        cat configs/cloud/regions/us_central1_strict.yaml
+      </verification>
+      <rollback>git checkout -- configs/cloud/regions/</rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T2.11" status="NOT_STARTED" priority="P0">
+      <title>Update governance and documentation files</title>
+      <expert-source>E5 (Test)</expert-source>
+      <files>
+        <file action="modify">CLAUDE.md</file>
+        <file action="modify">deployment/pulumi/gcp/CLAUDE.md</file>
+        <file action="modify">.claude/rules/two-providers-only.md</file>
+        <file action="modify">.claude/rules/data-on-gcs.md</file>
+        <file action="modify">knowledge-graph/domains/cloud.yaml</file>
+      </files>
+      <changes><![CDATA[
+# CLAUDE.md:
+#   All references to "europe-west4 (Netherlands)" -> "us-central1 (Iowa)"
+#   GCP_REGION, docker registry URLs, Cloud Run references
+
+# deployment/pulumi/gcp/CLAUDE.md:
+#   Region: europe-west4 -> us-central1
+#   GAR URL: europe-west4-docker.pkg.dev -> us-central1-docker.pkg.dev
+#   Prerequisites: GPU quota region
+
+# .claude/rules/two-providers-only.md:
+#   region: europe-west4 -> region: us-central1
+
+# .claude/rules/data-on-gcs.md:
+#   No region references (bucket names are region-agnostic) — verify
+
+# knowledge-graph/domains/cloud.yaml:
+#   Line 130: region: europe-west4 -> region: us-central1
+#   Line 163: url: europe-west4-docker.pkg.dev/... -> us-central1-docker.pkg.dev/...
+      ]]></changes>
+      <verification><![CDATA[
+# Comprehensive grep for stale europe-west4 references
+grep -r "europe-west4" \
+  CLAUDE.md \
+  deployment/pulumi/gcp/CLAUDE.md \
+  .claude/rules/ \
+  knowledge-graph/domains/cloud.yaml \
+  configs/ \
+  deployment/skypilot/ \
+  scripts/preflight_gcp.py \
+  .sky.yaml \
+  .env.example
+
+# Should return ZERO matches (except historical/archived docs)
+      ]]></verification>
+      <rollback>git checkout -- CLAUDE.md deployment/pulumi/gcp/CLAUDE.md .claude/rules/ knowledge-graph/domains/cloud.yaml</rollback>
+      <estimated-time>10 minutes</estimated-time>
+    </task>
+
+    <task id="T2.12" status="NOT_STARTED" priority="P0">
+      <title>Update test files referencing europe-west4</title>
+      <expert-source>E5 (Test)</expert-source>
+      <commands><![CDATA[
+# Find ALL test files referencing europe-west4
+grep -rl "europe-west4" tests/ 2>/dev/null
+
+# Update each file: replace europe-west4 with us-central1
+# Files likely affected (from previous migration experience):
+#   tests/v2/unit/deployment/test_skypilot_yamls.py
+#   tests/v2/unit/deployment/test_docker_image_consistency.py
+#   tests/v2/unit/deployment/test_preflight_mocked.py
+#   tests/v2/unit/test_docker_pull_optimization.py
+#   tests/v2/unit/deployment/test_yaml_contract_enforcement.py
+#   tests/v2/unit/finops/test_cost_governance.py
+
+# DESIGN IMPROVEMENT (from 11th pass plan):
+# Tests that read from configs/registry/gar.yaml will auto-adapt.
+# Tests with hardcoded "europe-west4" assertions must be updated to read from config.
+      ]]></commands>
+      <verification>
+        grep -r "europe-west4" tests/  # Should return ZERO matches
+        grep -r "us-central1" tests/   # Should show updated assertions
+      </verification>
+      <rollback>git checkout -- tests/</rollback>
+      <estimated-time>10 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: SKYPILOT SETUP (15 min)                                    -->
+  <!-- ================================================================== -->
+  <phase id="3" name="SkyPilot Setup">
+    <description>
+      Configure SkyPilot for us-central1. Restart API server to clear stale paths.
+      Verify controller auto-provisions in us-central1 on next job launch.
+    </description>
+    <estimated-time>15 minutes</estimated-time>
+    <depends-on>Phase 2 (all config files updated)</depends-on>
+
+    <task id="T3.1" status="NOT_STARTED" priority="P0">
+      <title>Restart SkyPilot API server (clear stale region state)</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Lesson from first migration: SkyPilot API server caches stale region paths.
+# Must restart to pick up new .sky.yaml config.
+uv run sky api stop
+uv run sky api start
+
+# Verify API server version
+uv run sky api status
+      ]]></commands>
+      <verification>
+        SkyPilot API server is running with current client version.
+        No version mismatch warning.
+      </verification>
+      <rollback>If API server won't start: sky api stop --force, then sky api start</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T3.2" status="NOT_STARTED" priority="P0">
+      <title>Verify SkyPilot GCP backend is configured</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Verify GCP is enabled in SkyPilot
+uv run sky check gcp
+
+# Verify us-central1 L4 GPU availability
+uv run sky show-gpus L4 --cloud gcp 2>&1 | head -20
+
+# Verify .sky.yaml is loaded correctly
+uv run sky api status
+cat .sky.yaml
+      ]]></commands>
+      <verification>
+        sky check gcp shows GCP as enabled.
+        sky show-gpus L4 shows us-central1 with availability.
+        .sky.yaml shows infra: gcp/us-central1.
+      </verification>
+      <rollback>
+        If GCP not enabled: gcloud auth application-default login
+        Then: uv run sky check gcp
+      </rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T3.3" status="NOT_STARTED" priority="P0">
+      <title>Verify old controller VM is terminated</title>
+      <expert-source>E3 (SRE), E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Check for any lingering controller VMs
+gcloud compute instances list --project=minivess-mlops \
+  --format="table(name,zone,machineType,status)" | grep sky-jobs
+
+# If old controller still exists:
+# gcloud compute instances delete <name> --zone=europe-west1-b --project=minivess-mlops --quiet
+      ]]></commands>
+      <verification>
+        No sky-jobs-controller instances in europe-west1-b or europe-west4.
+        Only resources should be those created by Pulumi in us-central1.
+      </verification>
+      <rollback>N/A — the old controller is waste. Deletion is always correct.</rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: VERIFICATION (30 min)                                      -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Verification — Full Test Suite + Smoke Test">
+    <description>
+      Run all verification gates before launching any experiments.
+      This phase catches any stale references or misconfiguration.
+    </description>
+    <estimated-time>30 minutes</estimated-time>
+    <depends-on>Phase 2 + Phase 3</depends-on>
+
+    <task id="T4.1" status="NOT_STARTED" priority="P0">
+      <title>Run make test-staging — all tests must pass</title>
+      <expert-source>E5 (Test)</expert-source>
+      <commands><![CDATA[
+make test-staging
+      ]]></commands>
+      <verification>
+        All tests pass. 0 failures. Minimal skips (only hardware-gated acceptable).
+        No europe-west4 assertion failures.
+      </verification>
+      <rollback>
+        If tests fail:
+        1. Run with --maxfail=200 (not -x) to see ALL failures
+        2. Group by root cause (likely stale region references)
+        3. Batch-fix all instances of each root cause
+        4. Re-run make test-staging
+      </rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T4.2" status="NOT_STARTED" priority="P0">
+      <title>Run scripts/preflight_gcp.py — all checks must pass</title>
+      <expert-source>E5 (Test)</expert-source>
+      <commands><![CDATA[
+uv run python scripts/preflight_gcp.py
+      ]]></commands>
+      <verification>
+        All preflight checks pass (15/15 or whatever the current count is).
+        Docker image found on us-central1 GAR.
+        GCS bucket accessible.
+        DVC data present.
+      </verification>
+      <rollback>
+        If Docker image check fails: verify T1.5 completed successfully.
+        If GCS bucket check fails: verify T1.4 completed successfully.
+        If DVC data check fails: verify T1.6 completed successfully.
+      </rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T4.3" status="NOT_STARTED" priority="P0">
+      <title>Run validate_yaml_contract.py — YAML contract compliance</title>
+      <expert-source>E5 (Test)</expert-source>
+      <commands><![CDATA[
+uv run python scripts/validate_yaml_contract.py
+      ]]></commands>
+      <verification>
+        All SkyPilot YAMLs pass contract validation.
+        No unauthorized GPU types, cloud providers, or resource configurations.
+      </verification>
+      <rollback>Fix any contract violations found. Most likely: stale region in YAML.</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+
+    <task id="T4.4" status="NOT_STARTED" priority="P0">
+      <title>Dry-run: run_factorial.sh --dry-run</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml
+      ]]></commands>
+      <verification>
+        Dry run prints all job launch commands.
+        All image_id references show us-central1-docker.pkg.dev.
+        Region injection uses us_central1_a100_fallback or us_central1_strict config.
+        No europe-west4 references in any generated command.
+      </verification>
+      <rollback>Fix any stale references in configs/factorial/debug.yaml or run_factorial.sh.</rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T4.5" status="NOT_STARTED" priority="P0">
+      <title>Verify MLflow Cloud Run connectivity from Python</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <commands><![CDATA[
+# Load .env and test MLflow connectivity
+set -a; source .env; set +a
+
+python3 -c "
+import os
+import mlflow
+
+uri = os.environ['MLFLOW_TRACKING_URI']
+print(f'Testing MLflow at: {uri}')
+client = mlflow.tracking.MlflowClient(tracking_uri=uri)
+exps = client.search_experiments(max_results=5)
+print(f'MLflow OK: {len(exps)} experiments found')
+print(f'Artifact root: {exps[0].artifact_location if exps else \"no experiments\"}')
+"
+      ]]></commands>
+      <verification>
+        MLflow client connects successfully.
+        Artifact root points to gs://minivess-mlops-mlflow-artifacts.
+      </verification>
+      <rollback>
+        If connection fails:
+        1. Verify MLFLOW_TRACKING_URI in .env matches pulumi stack output mlflow_url
+        2. Verify Cloud Run service is healthy: gcloud run services describe minivess-mlflow --region us-central1
+        3. Check Cloud SQL connectivity from Cloud Run
+      </rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T4.6" status="NOT_STARTED" priority="P0">
+      <title>Verify DVC pull from us-central1 GCS bucket</title>
+      <expert-source>E2 (Data Migration)</expert-source>
+      <commands><![CDATA[
+# Verify DVC remote points to correct bucket
+dvc remote list
+dvc remote default
+
+# Test DVC status (should show "OK" or "up to date")
+dvc status -r gcs
+
+# Verify data count in GCS
+gsutil ls gs://minivess-mlops-dvc-data/ | head -20
+gsutil du -s gs://minivess-mlops-dvc-data/
+      ]]></commands>
+      <verification>
+        DVC remote 'gcs' points to gs://minivess-mlops-dvc-data.
+        gsutil du shows >0 bytes (data was pushed in T1.6).
+      </verification>
+      <rollback>
+        If DVC data missing: re-run T1.6 (dvc push -r gcs).
+        If bucket is wrong: dvc remote modify gcs url gs://minivess-mlops-dvc-data
+      </rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T4.7" status="NOT_STARTED" priority="P0">
+      <title>Comprehensive stale-reference grep</title>
+      <expert-source>E5 (Test)</expert-source>
+      <commands><![CDATA[
+# Search for ANY remaining europe-west4 references in active code/config
+# Exclude: docs/planning/ (archived plans), .claude/metalearning/ (historical),
+#          node_modules, .git, __pycache__
+grep -r "europe-west4" \
+  --include="*.py" --include="*.yaml" --include="*.yml" --include="*.sh" \
+  --include="*.md" --include="*.toml" --include="*.json" --include="*.env*" \
+  --exclude-dir=".git" --exclude-dir="__pycache__" --exclude-dir="node_modules" \
+  --exclude-dir="docs/planning/v0-2_archive" \
+  --exclude-dir=".claude/metalearning" \
+  . 2>/dev/null | grep -v "Binary file" | sort
+
+# For active config/code files, this should return ZERO results.
+# Historical docs (metalearning, archived plans) are OK to keep old references.
+      ]]></commands>
+      <verification>
+        Zero matches in active code, config, and deployment files.
+        Only matches in archived/historical documentation (acceptable).
+      </verification>
+      <rollback>Fix any stale references found.</rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: LAUNCH (10 min)                                            -->
+  <!-- ================================================================== -->
+  <phase id="5" name="Launch — Smoke Test in us-central1">
+    <description>
+      Launch a single smoke test job in us-central1 to verify end-to-end:
+      Docker pull, DVC data access, CUDA availability, MLflow connectivity.
+      Only after smoke test succeeds, proceed with factorial experiment.
+    </description>
+    <estimated-time>10-20 minutes</estimated-time>
+    <depends-on>Phase 4 (all verification tasks PASSED)</depends-on>
+
+    <task id="T5.1" status="NOT_STARTED" priority="P0">
+      <title>Launch DynUNet smoke test in us-central1</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+cd deployment/skypilot
+uv run sky jobs launch train_factorial.yaml \
+  --env MODEL_FAMILY=dynunet \
+  --env LOSS_NAME=dice_ce \
+  --env WITH_AUX_CALIB=false \
+  --env FOLD_ID=0 \
+  --env MAX_EPOCHS=2 \
+  --env MAX_TRAIN_VOLUMES=23 \
+  --env MAX_VAL_VOLUMES=12 \
+  --env EXPERIMENT_NAME=test_us_central1 \
+  --env-file ../../.env \
+  -y
+      ]]></commands>
+      <verification><![CDATA[
+# Monitor job status
+uv run sky jobs queue
+
+# Expected progression: PENDING -> STARTING -> RUNNING -> SUCCEEDED
+# In us-central1, PENDING -> RUNNING should take < 5 min (high GPU availability)
+
+# Verify job is in us-central1
+uv run sky jobs queue --format json | python3 -c "
+import sys, json
+jobs = json.load(sys.stdin)
+for j in jobs:
+    print(f'Job {j[\"id\"]}: {j[\"status\"]} region={j.get(\"region\", \"unknown\")}')
+"
+
+# After job reaches RUNNING, verify in GCE:
+gcloud compute instances list --project=minivess-mlops \
+  --filter="zone:us-central1-*" --format="table(name,machineType,zone,status)"
+      ]]></verification>
+      <rollback>
+        If job fails:
+        1. Check logs: uv run sky jobs logs <job_id>
+        2. Common failures:
+           - Docker pull error: verify GAR image exists in us-central1
+           - DVC pull error: verify data in GCS bucket
+           - CUDA error: GPU quota issue
+           - MLflow error: verify Cloud Run URL in .env
+        3. Fix and re-launch
+      </rollback>
+      <estimated-time>10-20 minutes (provisioning + 2-epoch training)</estimated-time>
+    </task>
+
+    <task id="T5.2" status="NOT_STARTED" priority="P0">
+      <title>Verify controller provisioned in us-central1</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# After first job launch, SkyPilot auto-provisions controller in us-central1
+# Verify controller placement
+gcloud compute instances list --project=minivess-mlops \
+  --format="table(name,zone,machineType,status)" | grep sky-jobs
+
+# Expected: controller in us-central1-* zone (a, b, or c)
+# Expected: machine type e2-medium or similar (from .sky.yaml cpus: 2+, memory: 4+)
+      ]]></commands>
+      <verification>
+        Controller VM in us-central1 (not europe-west1 or europe-west4).
+        Machine type matches .sky.yaml spec (cpus: 2+, memory: 4+).
+      </verification>
+      <rollback>
+        If controller not in us-central1:
+        1. Verify .sky.yaml has infra: gcp/us-central1
+        2. sky jobs controller stop --yes
+        3. Re-launch job (controller will re-provision)
+      </rollback>
+      <estimated-time>3 minutes</estimated-time>
+    </task>
+
+    <task id="T5.3" status="NOT_STARTED" priority="P1">
+      <title>Verify smoke test Docker pull time (same-region validation)</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Check job logs for Docker pull timing
+uv run sky jobs logs <JOB_ID> 2>&1 | grep -i "pull\|docker\|image" | head -20
+
+# Same-region Docker pull should complete in < 60 seconds (6.4 GB)
+# Cross-region (europe -> US) would take 5-10 minutes
+      ]]></commands>
+      <verification>
+        Docker pull time < 60 seconds (confirms same-region pull from us-central1 GAR).
+        No cross-region egress charges (verify in billing console next day).
+      </verification>
+      <rollback>N/A — this is a verification step.</rollback>
+      <estimated-time>2 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: FACTORIAL LAUNCH (after smoke test succeeds)               -->
+  <!-- ================================================================== -->
+  <phase id="6" name="Factorial Experiment Launch">
+    <description>
+      After smoke test succeeds in us-central1, launch the full factorial experiment.
+      This is the actual work that was blocked by europe-west4 GPU exhaustion.
+    </description>
+    <estimated-time>10 minutes (launch time; experiments run for hours)</estimated-time>
+    <depends-on>Phase 5 (smoke test SUCCEEDED)</depends-on>
+
+    <task id="T6.1" status="NOT_STARTED" priority="P0">
+      <title>Launch Phase 1 validation jobs in us-central1</title>
+      <expert-source>E4 (SkyPilot)</expert-source>
+      <commands><![CDATA[
+# Launch the factorial experiment using the debug config
+./scripts/run_factorial.sh configs/factorial/debug.yaml
+
+# Or launch individual Phase 1 validation jobs:
+cd deployment/skypilot
+for condition in \
+  "MODEL_FAMILY=dynunet LOSS_NAME=dice_ce WITH_AUX_CALIB=false FOLD_ID=0" \
+  "MODEL_FAMILY=dynunet LOSS_NAME=cbdice_cldice WITH_AUX_CALIB=false FOLD_ID=0" \
+  "MODEL_FAMILY=mambavesselnet LOSS_NAME=dice_ce WITH_AUX_CALIB=false FOLD_ID=0"
+do
+  uv run sky jobs launch train_factorial.yaml \
+    --env ${condition} \
+    --env MAX_EPOCHS=2 \
+    --env MAX_TRAIN_VOLUMES=23 \
+    --env MAX_VAL_VOLUMES=12 \
+    --env EXPERIMENT_NAME=debug_factorial \
+    --env-file ../../.env \
+    -y &
+  sleep 5  # Rate limit between submissions
+done
+wait
+      ]]></commands>
+      <verification><![CDATA[
+# Monitor all jobs
+uv run sky jobs queue
+
+# In us-central1, jobs should transition from PENDING to RUNNING within minutes
+# (not 13+ hours like in europe-west4)
+
+# Expected: all 3 jobs RUNNING within 10 minutes of submission
+      ]]></verification>
+      <rollback>
+        If jobs still PENDING after 30 min in us-central1:
+        1. Check quota: gcloud compute regions describe us-central1 --project=minivess-mlops
+        2. Check if it's a spot capacity issue: try --no-use-spot for one job
+        3. If us-central1 is also exhausted: fall back to us-east4 or us-west1
+      </rollback>
+      <estimated-time>10 minutes to launch; experiments run for 1-3 hours each</estimated-time>
+    </task>
+
+    <task id="T6.2" status="NOT_STARTED" priority="P0">
+      <title>Monitor initial provisioning (first 30 min)</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <commands><![CDATA[
+# Poll every 60 seconds for 30 minutes
+for i in $(seq 1 30); do
+  echo "=== Check $i ($(date -u +%H:%M:%S)) ==="
+  uv run sky jobs queue --format json | python3 -c "
+import sys, json
+jobs = json.load(sys.stdin)
+for j in jobs:
+    print(f'  Job {j[\"id\"]}: {j[\"status\"]}')
+"
+  sleep 60
+done
+      ]]></commands>
+      <verification>
+        All jobs reach RUNNING status within 30 minutes.
+        No persistent PENDING state (which would indicate us-central1 capacity issues).
+      </verification>
+      <rollback>
+        If jobs stuck PENDING > 30 min:
+        This is unlikely in us-central1 (highest global GPU inventory).
+        If it happens: escalate to user, consider us-east4 or us-west1.
+      </rollback>
+      <estimated-time>30 minutes (monitoring window)</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 7: CLEANUP (optional, after experiments succeed)              -->
+  <!-- ================================================================== -->
+  <phase id="7" name="Post-Migration Cleanup">
+    <description>
+      Clean up stale resources and update documentation.
+      Only execute AFTER verifying experiments run successfully in us-central1.
+    </description>
+    <estimated-time>30 minutes</estimated-time>
+    <depends-on>Phase 6 (at least one experiment SUCCEEDED in us-central1)</depends-on>
+
+    <task id="T7.1" status="NOT_STARTED" priority="P2">
+      <title>Verify no europe-west4 resources remain</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <commands><![CDATA[
+# Check for any lingering europe-west4 resources
+gcloud artifacts repositories list --project=minivess-mlops --location=europe-west4
+gcloud sql instances list --project=minivess-mlops --format="table(name,region)"
+gcloud run services list --project=minivess-mlops --format="table(name,region)"
+gcloud compute instances list --project=minivess-mlops --format="table(name,zone,status)"
+
+# Expected: ZERO resources in europe-west4 or europe-west1
+# Only resources should be in us-central1
+      ]]></commands>
+      <verification>Zero resources in any European region. All resources in us-central1.</verification>
+      <rollback>
+        If stale resources found: delete manually via gcloud.
+        These are orphaned and cost money even when idle.
+      </rollback>
+      <estimated-time>5 minutes</estimated-time>
+    </task>
+
+    <task id="T7.2" status="NOT_STARTED" priority="P2">
+      <title>Update FinOps snapshot for us-central1</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <files>
+        <file action="create">docs/planning/v0-2_archive/original_docs/gcp-finops-snapshot-us-central1-2026-03-28-report.md</file>
+      </files>
+      <changes>
+        Create a new FinOps snapshot documenting the us-central1 infrastructure state.
+        Same format as gcp-finops-snapshot-2026-03-28-report.md but for new region.
+      </changes>
+      <estimated-time>15 minutes</estimated-time>
+    </task>
+
+    <task id="T7.3" status="NOT_STARTED" priority="P2">
+      <title>Create metalearning document for this migration</title>
+      <expert-source>E3 (SRE)</expert-source>
+      <files>
+        <file action="create">.claude/metalearning/2026-03-28-second-region-migration-europe-west4-to-us-central1.md</file>
+      </files>
+      <content><![CDATA[
+# Metalearning: Second Region Migration (europe-west4 -> us-central1)
+
+**Date**: 2026-03-28
+**Type**: Infrastructure migration
+**Duration**: ~3-4 hours
+**Reason**: GPU capacity exhaustion in europe-west4 for 13+ hours
+
+## What Happened
+Second region migration in 2 days. europe-west4 L4 GPUs were fully exhausted
+across all 3 zones for 13+ hours, blocking all factorial experiments.
+
+## Key Lessons
+1. EU regions have LIMITED GPU capacity — 3 zones is not enough for guaranteed availability
+2. us-central1 (Iowa) has 3 L4 zones + 4 A100 zones = highest global GPU availability
+3. Clean-slate migration is fast when GCS buckets are empty
+4. Docker image upload is the bottleneck (~30-60 min for 6 GB on residential internet)
+5. The Pulumi code was already parameterized from the first migration — changing region
+   was a config change, not a code change
+
+## Prevention for Future
+- Multi-region config with us-central1 as primary, other US regions as fallback
+- Consider multi-region GAR repository for Docker image availability
+- Monitor GPU availability before launching large factorial experiments
+      ]]></content>
+      <estimated-time>10 minutes</estimated-time>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 8: CLOUD TEST SUITE IMPROVEMENTS                             -->
+  <!-- ================================================================== -->
+  <phase id="8" name="Cloud Test Suite Improvements">
+    <description>
+      Add deterministic tests that prevent future region drift and catch migration issues.
+      These tests run as part of make test-staging and act as guardrails.
+    </description>
+    <estimated-time>1-2 hours (via /self-learning-iterative-coder TDD)</estimated-time>
+    <depends-on>Phase 6 (migration verified)</depends-on>
+
+    <task id="T8.1" status="NOT_STARTED" priority="P1">
+      <title>Test: all config files reference the same GCP region</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        Read GCP_REGION from .env.example, configs/registry/gar.yaml (server prefix),
+        configs/cloud/gcp_spot.yaml (region field), and deployment/pulumi/gcp/Pulumi.yaml
+        (default). Assert all four agree. Prevents region drift where one file gets
+        updated and others are forgotten.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_all_config_files_reference_same_region</test-name>
+    </task>
+
+    <task id="T8.2" status="NOT_STARTED" priority="P1">
+      <title>Test: GAR URL in SkyPilot YAMLs matches gar.yaml config</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        Read image_prefix from configs/registry/gar.yaml. For each SkyPilot YAML in
+        deployment/skypilot/*.yaml, verify image_id starts with "docker:{image_prefix}".
+        Prevents stale GAR URLs after region migration.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_skypilot_yamls_match_gar_config</test-name>
+    </task>
+
+    <task id="T8.3" status="NOT_STARTED" priority="P1">
+      <title>Test: .sky.yaml controller region matches gcp_spot.yaml region</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        Controller must be co-located with job region. Read gcp_spot.yaml region and
+        .sky.yaml infra field. Assert they reference the same region.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_controller_region_matches_job_region</test-name>
+    </task>
+
+    <task id="T8.4" status="NOT_STARTED" priority="P1">
+      <title>Test: preflight_gcp.py GAR_IMAGE matches gar.yaml config</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        Read GAR_IMAGE from preflight_gcp.py (via AST parse, not regex per Rule 16).
+        Read image_prefix from gar.yaml. Assert GAR_IMAGE starts with image_prefix.
+        Prevents stale hardcoded URLs in the preflight script.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_preflight_gar_image_matches_config</test-name>
+    </task>
+
+    <task id="T8.5" status="NOT_STARTED" priority="P1">
+      <title>Test: region config files only reference the active region for co-located configs</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        For "strict" and "a100_fallback" region configs (the co-located configs), verify
+        all region references match the configured GCP_REGION. Non-co-located configs
+        (europe_us.yaml, world.yaml) are exempt — they intentionally reference multiple regions.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_colocated_region_configs_match_active_region</test-name>
+    </task>
+
+    <task id="T8.6" status="NOT_STARTED" priority="P2">
+      <title>Test: Pulumi default region matches .env.example GCP_REGION</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        Read Pulumi.yaml default region and .env.example GCP_REGION. Assert they match.
+        Prevents Pulumi deploying to a different region than the configs expect.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_pulumi_default_region_matches_env</test-name>
+    </task>
+
+    <task id="T8.7" status="NOT_STARTED" priority="P2">
+      <title>Test: knowledge graph cloud.yaml region matches active config</title>
+      <expert-source>E5 (Test)</expert-source>
+      <description>
+        The KG cloud.yaml has a gcp.region field. Assert it matches the active region
+        from configs/registry/gar.yaml. Prevents KG staleness.
+      </description>
+      <test-file>tests/v2/unit/deployment/test_region_consistency.py</test-file>
+      <test-name>test_knowledge_graph_region_matches_config</test-name>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- VERIFICATION GATES                                                  -->
+  <!-- ================================================================== -->
+  <verification>
+    <gate name="pre-migration" phase="0">
+      All T0.* tasks pass. us-central1 has GPU quota, Docker images cached locally,
+      DVC data cached locally.
+    </gate>
+    <gate name="infrastructure" phase="1">
+      Pulumi stack outputs show us-central1 for all resources. GAR images pushed.
+      GCS buckets have DVC data. Cloud Run MLflow responds.
+    </gate>
+    <gate name="config-consistency" phase="2">
+      Zero active files reference europe-west4 (grep returns no matches).
+      All config files reference us-central1 consistently.
+    </gate>
+    <gate name="staging-tests" phase="4">
+      make test-staging passes with 0 failures. preflight_gcp.py passes all checks.
+      validate_yaml_contract.py passes. Dry-run factorial shows us-central1 references.
+    </gate>
+    <gate name="smoke-test" phase="5">
+      Single DynUNet job provisions, runs, and completes in us-central1.
+      Docker pull time &lt; 60s (same-region). Controller in us-central1.
+    </gate>
+    <gate name="factorial" phase="6">
+      Phase 1 validation jobs provision in us-central1 within 10 minutes.
+      No 13-hour PENDING state (the problem this migration solves).
+    </gate>
+  </verification>
+
+  <!-- ================================================================== -->
+  <!-- ROLLBACK PLAN                                                       -->
+  <!-- ================================================================== -->
+  <rollback>
+    <strategy>
+      If us-central1 migration fails at any phase, the rollback depends on how far
+      we progressed. europe-west4 resources are destroyed in Phase 1, so rollback
+      after Phase 1 means re-creating in europe-west4 (not restoring).
+
+      However: europe-west4 is GPU-EXHAUSTED. Rolling back to europe-west4 means
+      returning to the 13+ hour PENDING state. There is no working state to roll back to.
+      The only "rollback" is trying a different US region (us-east4, us-west1).
+    </strategy>
+    <phases>
+      <phase-rollback phase="0">
+        No changes made. Simply stop migration.
+      </phase-rollback>
+      <phase-rollback phase="1">
+        If pulumi destroy succeeded but pulumi up failed:
+        1. Fix the issue (quota, API, etc.)
+        2. Re-run pulumi up
+        3. Or: change region to us-east4 in Pulumi config and try there
+      </phase-rollback>
+      <phase-rollback phase="2">
+        git checkout -- . to revert all file changes.
+        But infrastructure is already in us-central1 — config would be inconsistent.
+        Must also revert Pulumi config and re-deploy to europe-west4 (not recommended).
+      </phase-rollback>
+      <phase-rollback phase="4-5">
+        If tests fail or smoke test fails: fix the issue. Do not revert infrastructure.
+        The problem is likely a stale reference, not a fundamental migration issue.
+      </phase-rollback>
+    </phases>
+  </rollback>
+
+  <!-- ================================================================== -->
+  <!-- COST PROJECTION                                                     -->
+  <!-- ================================================================== -->
+  <cost-projection>
+    <current-monthly description="europe-west4 (all idle, GPU-exhausted)">
+      GAR storage: EUR 0.57
+      GCS storage: EUR 0.00 (empty buckets)
+      Cloud SQL: EUR 23.50
+      Cloud Run: EUR 2-6
+      SkyPilot Controller: EUR 93-100 (n4-standard-4, europe-west1-b)
+      GPU compute: EUR 0 (cannot provision — capacity exhausted)
+      Total: EUR 119-130/month (ZERO productive training)
+    </current-monthly>
+    <projected-monthly description="us-central1 (active training)">
+      GAR storage: ~EUR 0.57 (us-central1 pricing similar)
+      GCS storage: ~EUR 0.10-0.70 (once data is pushed)
+      Cloud SQL: ~EUR 23.50 (same tier, similar pricing)
+      Cloud Run: ~EUR 2-6 (similar)
+      SkyPilot Controller: ~EUR 25-35 (e2-medium in us-central1, from .sky.yaml cpus: 2+)
+      GPU compute (L4 spot): ~$0.224/hr (34% cheaper than europe-west4's $0.340/hr)
+      Total always-on: ~EUR 52-66/month (controller downsized saves ~EUR 60/month)
+      Per training job: ~EUR 0.80 (5h x $0.224/hr, 20% cheaper than europe-west4)
+    </projected-monthly>
+    <savings>
+      Controller downsize: EUR 60-70/month savings
+      L4 spot price: 34% cheaper ($0.224 vs $0.340/hr)
+      GPU availability: us-central1 has 3 L4 zones + 4 A100 zones (highest globally)
+      No more 13h PENDING waste: saves EUR 4.10/day of idle infrastructure per incident
+      Cross-region egress: EUR 0 (same-region, identical to europe-west4 pattern)
+    </savings>
+  </cost-projection>
+
+  <!-- ================================================================== -->
+  <!-- DESIGN PRINCIPLE                                                    -->
+  <!-- ================================================================== -->
+  <design-principle name="Reproducible Region Changes (Post-Migration)">
+    After this migration, changing region AGAIN requires:
+    1. Edit deployment/pulumi/gcp/Pulumi.yaml: default region
+    2. Edit deployment/pulumi/gcp/Pulumi.dev.yaml: gcp:region
+    3. Edit deployment/pulumi/gcp/__main__.py: default fallback + comments
+    4. Edit configs/registry/gar.yaml: server + image_prefix
+    5. Edit configs/cloud/gcp_spot.yaml: region + docker_image
+    6. Edit .sky.yaml: controller infra
+    7. Edit .env.example + .env: GCP_REGION + MLFLOW_TRACKING_URI
+    8. Create new configs/cloud/regions/{region}_strict.yaml
+    9. Update configs/factorial/debug.yaml: region_config
+    10. Update deployment/skypilot/*.yaml: image_id
+    11. Update scripts/preflight_gcp.py: GAR_IMAGE
+    12. Update CLAUDE.md + deployment/pulumi/gcp/CLAUDE.md
+    13. Update knowledge-graph/domains/cloud.yaml
+    14. Update .claude/rules/two-providers-only.md
+    15. Run: pulumi destroy + pulumi up
+    16. Push Docker images to new GAR
+    17. Push DVC data to new GCS bucket
+    18. Run: make test-staging (with Phase 8 tests, auto-catches drift)
+
+    Total effort: ~2-3 hours (Pulumi + Docker push + config + tests).
+    Phase 8 tests catch region drift automatically — no manual grep needed.
+  </design-principle>
+</plan>

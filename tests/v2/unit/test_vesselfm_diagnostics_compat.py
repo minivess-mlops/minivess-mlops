@@ -47,6 +47,7 @@ def _make_sample_batch() -> dict[str, torch.Tensor]:
 
 
 @pytest.mark.model_loading
+@pytest.mark.timeout(600)  # VesselFM model loading takes 5+ min on CPU
 class TestVesselFMPreTrainingChecks:
     """Verify pre-training checks work with VesselFM's binary→2-class output."""
 

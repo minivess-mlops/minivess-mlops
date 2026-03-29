@@ -1,0 +1,1341 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Test Coverage Improvement Plan — 11th Pass Session Learnings
+  Branch: fix/10th-pass-production-readiness
+  Date: 2026-03-28
+
+  PURPOSE: Capture ALL infrastructure learnings from the 10th/11th experiment passes
+  as automated regression tests. Every failure mode, config drift, region migration,
+  GPU fallback, monitoring gap, and cost guardrail discovered in this session becomes
+  a test that prevents recurrence.
+
+  METHODOLOGY: Iterated LLM Council with 5 expert perspectives for DEEP CODE REVIEW.
+  Each expert reviews all 6 categories, identifies coverage gaps, proposes tests,
+  and cross-reviews other experts' proposals.
+
+  EXECUTE WITH: /self-learning-iterative-coder (RED -> GREEN -> VERIFY)
+  TDD: Write failing tests FIRST, implement if needed, verify.
+
+  CONTEXT DOCUMENTS READ:
+    - gpu-instances-finops-report.md (multi-cloud strategy, pricing)
+    - gcs-region-analysis-on-availability.md (region capacity analysis)
+    - gcs-region-migration-to-us-central1.xml (migration plan)
+    - experiment-harness-improvement-plan.xml (24 monitoring tasks)
+    - gcs-a100-fallback-plan.xml (A100 authorization)
+    - experiment-harness-improvement.md (7 hypotheses analysis)
+    - run-debug-factorial-experiment-report-11th-pass.md (observations)
+    - gcs-weights-caching-report.md (GCS pretrained weight caching)
+    - run-debug-factorial-experiment-11th-pass-infra-follow-up.xml (9 issues)
+    - run-debug-factorial-experiment-11th-pass.xml (full plan with C1-C8 changes)
+    - run-debug-factorial-experiment-report-10th-pass-improvement-triple-check.xml
+
+  SOURCE CODE READ:
+    - src/minivess/data/downloaders.py (DeepVess downloader)
+    - src/minivess/compute/job_manifest.py (JobRecord, JobManifest)
+    - src/minivess/compute/sky_queue_parser.py (parse_jobs_queue)
+    - src/minivess/compute/anomaly_detector.py (AnomalyDetector, Alert)
+    - scripts/collect_availability.py (GPU availability collector)
+    - scripts/run_factorial.sh (use_spot per-model override)
+    - scripts/preflight_gcp.py (GAR_IMAGE constant, region URL)
+    - configs/cloud/yaml_contract.yaml (A100 + A100-80GB added)
+    - configs/cloud/gcp_spot.yaml (us-central1, A100 fallback)
+    - configs/cloud/regions/us_central1.yaml (new region config)
+    - configs/cloud/regions/europe_a100_fallback.yaml (A100 fallback)
+    - configs/factorial/debug.yaml (use_spot, region_config)
+    - deployment/skypilot/train_factorial.yaml (us-central1 GAR URL)
+    - deployment/pulumi/gcp/Pulumi.dev.yaml (us-central1)
+
+  EXISTING TESTS READ:
+    - tests/v2/unit/monitoring/test_job_manifest.py (13 tests)
+    - tests/v2/unit/monitoring/test_sky_queue_parser.py (13 tests)
+    - tests/v2/unit/monitoring/test_anomaly_detector.py (14 tests)
+    - tests/v2/unit/test_downloaders.py (10 tests)
+    - tests/v2/unit/deployment/test_yaml_contract_enforcement.py (70 tests)
+    - tests/v2/unit/test_dvc_remote_sync.py (7 tests)
+    - tests/v2/unit/config/test_debug_production_factor_consistency.py (11 tests)
+
+  METALEARNING READ:
+    - 2026-03-28-context-amnesia-deferred-deepvess-whac-a-mole.md
+    - 2026-03-28-shortcut-taking-skip-production-quality.md
+    - 2026-03-28-10hr-pending-no-monitoring-intervention.md
+-->
+<execution-plan>
+  <metadata>
+    <title>11th Pass Test Coverage Improvement — Regression Tests for Infrastructure Learnings</title>
+    <date>2026-03-28</date>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <approach>TDD via /self-learning-iterative-coder — RED tests first, GREEN implementation, VERIFY</approach>
+    <skill>self-learning-iterative-coder</skill>
+    <total-tasks>42</total-tasks>
+    <estimated-new-tests>~80-100 new test functions</estimated-new-tests>
+    <test-tier-distribution>
+      <tier name="staging" count="~70" reason="Config consistency, YAML parsing, data model — no model loading, no cloud"/>
+      <tier name="prod" count="~10" reason="Slower tests involving subprocess mocks or file I/O"/>
+    </test-tier-distribution>
+  </metadata>
+
+  <!-- ================================================================== -->
+  <!-- EXPERT COUNCIL: 5 Perspectives for Deep Code Review                 -->
+  <!-- ================================================================== -->
+  <council-review>
+
+    <!-- ─── Expert 1: Test Architecture Expert ──────────────────────── -->
+    <expert id="E1" role="Test Architecture Expert" domain="Test organization, coverage gaps, tier assignment">
+      <analysis>
+        <finding severity="HIGH" category="coverage-gap">
+          The region migration from europe-west4 to us-central1 touched 15+ config
+          files but only test_yaml_contract_enforcement.py was updated. No test
+          verifies that ALL config files agree on the same region. A grep-based
+          cross-file consistency test is missing. This is the #1 gap — every
+          migration creates stale references that only surface at launch time.
+        </finding>
+        <finding severity="HIGH" category="coverage-gap">
+          The anomaly detector has 14 tests but no test for alert DEDUPLICATION.
+          The _already_fired set prevents duplicate alerts, but no test verifies
+          that calling check_all() twice for the same state returns zero alerts
+          the second time. This is critical — duplicate alerts would overwhelm
+          the notification system.
+        </finding>
+        <finding severity="MEDIUM" category="tier-assignment">
+          All monitoring tests (test_job_manifest.py, test_sky_queue_parser.py,
+          test_anomaly_detector.py) are pure Python with zero external deps.
+          They belong in staging tier. Verify they have no model_loading or
+          slow markers.
+        </finding>
+        <finding severity="MEDIUM" category="organization">
+          Region consistency tests should be in tests/v2/unit/deployment/ alongside
+          test_yaml_contract_enforcement.py. Cost guardrail tests should be in
+          tests/v2/unit/finops/. Monitoring edge-case tests extend the existing
+          tests/v2/unit/monitoring/ directory.
+        </finding>
+      </analysis>
+      <recommendations>
+        <rec>Create tests/v2/unit/deployment/test_region_consistency.py for ALL cross-file region checks</rec>
+        <rec>Extend test_anomaly_detector.py with deduplication and edge-case tests</rec>
+        <rec>Create tests/v2/unit/finops/test_cost_guardrails.py for budget/cost tests</rec>
+        <rec>Verify all new tests run in staging tier (no model_loading, no slow markers)</rec>
+      </recommendations>
+    </expert>
+
+    <!-- ─── Expert 2: Cloud Infrastructure Tester ──────────────────── -->
+    <expert id="E2" role="Cloud Infrastructure Tester" domain="GCP resources, region consistency, YAML contracts">
+      <analysis>
+        <finding severity="CRITICAL" category="region-drift">
+          After two region migrations (europe-north1 -> europe-west4 -> us-central1),
+          the risk of stale region references is extremely high. The project has
+          config files in: configs/cloud/, configs/cloud/regions/, configs/factorial/,
+          deployment/skypilot/, deployment/pulumi/gcp/, scripts/, .env.example, and
+          .sky.yaml. A single stale reference causes cross-region egress ($89/month)
+          or FAILED_SETUP (wrong GAR URL). No comprehensive cross-file check exists.
+        </finding>
+        <finding severity="HIGH" category="contract-evolution">
+          The YAML contract was updated to allow A100 + A100-80GB on 2026-03-28.
+          The old test_contract_gcp_does_not_include_a100 was likely updated, but
+          we need NEW tests that verify the ordering invariant: L4 entries MUST
+          precede A100 entries in all region configs and ordered: blocks. Without
+          this, a misconfigured region config could default to A100 (5x cost).
+        </finding>
+        <finding severity="MEDIUM" category="preflight-hardcoding">
+          scripts/preflight_gcp.py has GAR_IMAGE hardcoded as a string constant:
+          "us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest".
+          If the region changes again, this constant must be manually updated.
+          A test should verify this constant matches gcp_spot.yaml's docker_image.
+        </finding>
+      </analysis>
+      <recommendations>
+        <rec>Grep-based test: zero stale europe-west4 references in active configs</rec>
+        <rec>Cross-file region consistency: all configs agree on the same region</rec>
+        <rec>GAR URL consistency: preflight_gcp.py matches gcp_spot.yaml</rec>
+        <rec>GPU ordering invariant: L4 before A100 before A100-80GB in all region configs</rec>
+        <rec>Pulumi region matches gcp_spot.yaml region</rec>
+      </recommendations>
+    </expert>
+
+    <!-- ─── Expert 3: Monitoring/Observability Tester ──────────────── -->
+    <expert id="E3" role="Monitoring/Observability Tester" domain="Anomaly detection, alerts, manifest lifecycle">
+      <analysis>
+        <finding severity="HIGH" category="scenario-coverage">
+          The anomaly detector tests cover basic cases but miss the EXACT failure
+          scenarios from passes 4, 10, and 11. We should have tests that reconstruct
+          the actual observed states:
+          - Pass 4: 8 identical FAILED_SETUP jobs (kill switch should trigger)
+          - Pass 10: Job running 12h for a 5-min task (duration cancel)
+          - Pass 11: 3 jobs PENDING for 10h (pending timeout)
+          Each test should verify the EXACT alert type, severity, and action.
+        </finding>
+        <finding severity="HIGH" category="edge-cases">
+          Missing edge cases in sky_queue_parser:
+          - RECOVERING status (spot preemption recovery in progress)
+          - CANCELLING status (user or auto-cancel in progress)
+          - Multiword REQUESTED field ("1x[A100-80GB:1, L4:1][Spot]")
+          - Duration parsing for "1d 4h 55m 45s" (day-scale durations)
+          The parser handles these in code but tests only cover basic cases.
+        </finding>
+        <finding severity="MEDIUM" category="manifest-lifecycle">
+          No test verifies the full manifest lifecycle:
+          1. Create manifest with PENDING jobs
+          2. Update statuses from queue output
+          3. Run anomaly detection
+          4. Verify correct alerts fired
+          This integration-level test across the three modules is missing.
+        </finding>
+      </analysis>
+      <recommendations>
+        <rec>Add historical scenario tests mirroring passes 4, 10, 11</rec>
+        <rec>Add RECOVERING and CANCELLING status parsing tests</rec>
+        <rec>Add alert deduplication test (check_all twice = zero new alerts)</rec>
+        <rec>Add budget alarm at both warning AND cap thresholds</rec>
+        <rec>Add manifest-to-detection integration test</rec>
+      </recommendations>
+    </expert>
+
+    <!-- ─── Expert 4: Data Pipeline Tester ─────────────────────────── -->
+    <expert id="E4" role="Data Pipeline Tester" domain="DVC, DeepVess downloader, data integrity, GCS">
+      <analysis>
+        <finding severity="HIGH" category="downloader-coverage">
+          test_downloaders.py has 3 tests for VesselNN and likely 3-4 for DeepVess
+          (added in this session), but missing:
+          - Test that DeepVess ZIP extraction produces images/ and labels/ subdirs
+          - Test that download_deepvess uses httpx (not requests or urllib)
+          - Test that the eCommons URL constant matches the expected format
+          - Test that skip_existing checks the images/ subdir (not .git)
+        </finding>
+        <finding severity="MEDIUM" category="acquisition-registry">
+          The acquisition_registry.py was updated from download_method="manual" to
+          "http_download" for DeepVess. No test verifies this value. A regression
+          could silently revert it to "manual", breaking the acquisition flow.
+        </finding>
+        <finding severity="MEDIUM" category="dvc-consistency">
+          test_dvc_remote_sync.py was modified with a new nfiles threshold but
+          the test only checks dvc.yaml/dvc.lock consistency. No test verifies
+          that BOTH MiniVess and DeepVess are tracked in DVC. The file counts
+          (210+ for MiniVess, 26+ for DeepVess) should be asserted.
+        </finding>
+      </analysis>
+      <recommendations>
+        <rec>Extend DeepVess downloader tests for ZIP extraction structure</rec>
+        <rec>Test acquisition registry download_method values</rec>
+        <rec>Test DVC tracks both MiniVess and DeepVess datasets</rec>
+        <rec>Verify eCommons URL format is a valid DSpace 7 bitstream URL</rec>
+      </recommendations>
+    </expert>
+
+    <!-- ─── Expert 5: Security/Compliance Tester ───────────────────── -->
+    <expert id="E5" role="Security/Compliance Tester" domain="Config drift, unauthorized GPUs, cost guardrails">
+      <analysis>
+        <finding severity="HIGH" category="cost-guardrails">
+          No test verifies the cost estimation logic. The preflight calculates
+          per-pass cost as: n_jobs * time_per_job * hourly_rate. With the A100
+          fallback, incorrect hourly rates in yaml_contract.yaml could lead to
+          budget overruns. Tests should verify:
+          - L4 cost: 34 jobs * 55min * $0.22/hr = ~$6.85
+          - A100 cost: 34 jobs * 30min * $1.10/hr = ~$18.70
+          - A100-80GB cost: 34 jobs * 30min * $1.38/hr = ~$23.46
+          - Budget alarm triggers at correct thresholds
+        </finding>
+        <finding severity="HIGH" category="unauthorized-gpu-detection">
+          test_yaml_contract_enforcement.py has banned GPU tests but the test
+          for "A100 not in GCP allowed list" was updated when A100 was authorized.
+          We need a NEW test: "H100 is NOT in GCP allowed list" — the current
+          highest-cost unauthorized GPU. Also: V100 ban test should exist.
+        </finding>
+        <finding severity="MEDIUM" category="config-drift">
+          No test verifies that gcp_spot.yaml's accelerator list matches the
+          contract's GCP allowed list EXACTLY. Config drift (gcp_spot.yaml
+          adding H100 while contract forbids it) would bypass the contract.
+        </finding>
+        <finding severity="MEDIUM" category="spot-override">
+          The use_spot per-model override in debug.yaml is a critical cost
+          control (SAM3 on-demand prevents 80% preemption waste). No test
+          verifies that SAM3 models have use_spot: false in model_overrides.
+        </finding>
+      </analysis>
+      <recommendations>
+        <rec>Test cost estimation for each GPU type against yaml_contract hourly rates</rec>
+        <rec>Test that H100, V100, T4 are NOT in GCP allowed list</rec>
+        <rec>Test gcp_spot.yaml accelerators match contract GCP list</rec>
+        <rec>Test SAM3 model_overrides have use_spot: false</rec>
+        <rec>Test budget warning and cap thresholds are set in factorial configs</rec>
+      </recommendations>
+    </expert>
+
+    <!-- ─── Council Consensus ──────────────────────────────────────── -->
+    <consensus>
+      All 5 experts agree on 6 test categories with 42 tasks totaling ~80-100
+      new test functions. Priority order:
+
+      1. Region Migration Consistency (Cat 1) — P0: prevents $89/month egress recurrence
+      2. GPU Fallback and Contract (Cat 2) — P0: prevents 5.5x cost escalation
+      3. Monitoring Infrastructure (Cat 3) — P0: prevents 10h+ undetected failures
+      4. Data Pipeline (Cat 4) — P1: prevents broken acquisition flow
+      5. Infrastructure Resilience (Cat 5) — P1: prevents launch-time failures
+      6. Cost Guard Rails (Cat 6) — P1: prevents budget overruns
+
+      All tests target staging tier (no model loading, no cloud resources, no slow).
+      Tests read configs from disk and use mock data — zero cloud dependency.
+
+      Test file organization:
+        tests/v2/unit/deployment/test_region_consistency.py      (Cat 1: ~15 tests)
+        tests/v2/unit/deployment/test_gpu_fallback_contract.py   (Cat 2: ~15 tests)
+        tests/v2/unit/monitoring/test_anomaly_detector.py        (Cat 3: ~15 tests, EXTEND existing)
+        tests/v2/unit/monitoring/test_monitor_integration.py     (Cat 3: ~5 tests, NEW)
+        tests/v2/unit/test_downloaders.py                        (Cat 4: ~8 tests, EXTEND existing)
+        tests/v2/unit/config/test_acquisition_registry.py        (Cat 4: ~4 tests, NEW)
+        tests/v2/unit/deployment/test_preflight_consistency.py   (Cat 5: ~8 tests, NEW)
+        tests/v2/unit/finops/test_cost_guardrails.py             (Cat 6: ~10 tests, NEW)
+    </consensus>
+  </council-review>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 1: Region Migration Consistency Tests (P0)                 -->
+  <!--                                                                     -->
+  <!-- RATIONALE: Two region migrations (europe-north1 -> europe-west4 ->  -->
+  <!-- us-central1) have caused $89/month egress, FAILED_SETUP, and 12+h  -->
+  <!-- PENDING. Stale region references are the #1 infrastructure risk.    -->
+  <!-- ================================================================== -->
+  <category id="1" name="Region Migration Consistency" priority="P0">
+    <file>tests/v2/unit/deployment/test_region_consistency.py</file>
+    <tier>staging</tier>
+    <estimated-tests>15</estimated-tests>
+    <rationale>
+      Every region migration touches 15+ files. A single stale reference causes
+      cross-region egress ($89/month) or FAILED_SETUP (wrong GAR URL). These tests
+      form a regression safety net that catches stale references at make test-staging.
+    </rationale>
+
+    <task id="T1.1" type="RED">
+      <title>SkyPilot YAML image_id matches configured region</title>
+      <description>
+        All SkyPilot YAML files with image_id: docker:... must reference the same
+        GAR region as gcp_spot.yaml's docker_image field. Read both configs, extract
+        the region prefix from the GAR URL, and assert they match.
+      </description>
+      <tests>
+        <test name="test_skypilot_yamls_image_id_region_matches_gcp_spot">
+          For each SkyPilot YAML in deployment/skypilot/*.yaml:
+            Parse resources.image_id.
+            Extract region from GAR URL pattern: {region}-docker.pkg.dev/...
+            Load gcp_spot.yaml, extract region from docker_image.
+            Assert regions match.
+        </test>
+        <test name="test_all_gar_urls_use_same_region">
+          Collect all GAR URLs across all config files.
+          Assert all extracted regions are identical.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestGarRegionConsistency -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <green-command>N/A — tests read existing configs, no implementation needed. If tests fail, the configs are inconsistent and must be fixed.</green-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestGarRegionConsistency -v --tb=short</verify-command>
+    </task>
+
+    <task id="T1.2" type="RED">
+      <title>GCS bucket references consistent across configs</title>
+      <description>
+        The three GCS bucket names (dvc-data, mlflow-artifacts, checkpoints) appear
+        in: scripts/preflight_gcp.py, dvc config files, .env.example, Pulumi outputs.
+        All references must use the same bucket names.
+      </description>
+      <tests>
+        <test name="test_preflight_gcs_bucket_matches_dvc_remote">
+          Read GCS_BUCKET from preflight_gcp.py source.
+          Read DVC remote URL from .dvc/config or dvc.yaml.
+          Assert they reference the same bucket.
+        </test>
+        <test name="test_checkpoint_bucket_referenced_consistently">
+          Read CHECKPOINT_BUCKET from preflight_gcp.py.
+          Verify this bucket name appears in relevant SkyPilot YAML setup scripts
+          (if any reference GCS checkpoints).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestGcsBucketConsistency -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestGcsBucketConsistency -v --tb=short</verify-command>
+    </task>
+
+    <task id="T1.3" type="RED">
+      <title>No stale europe-west4 references in active configs</title>
+      <description>
+        After migration to us-central1, zero active config files should reference
+        europe-west4 as the primary region. Allowed exceptions: archived docs,
+        metalearning files, comments documenting the migration history, and the
+        europe_a100_fallback.yaml (which explicitly targets europe-west4 as EU fallback).
+      </description>
+      <tests>
+        <test name="test_no_stale_europe_west4_in_skypilot_yamls">
+          For each deployment/skypilot/*.yaml:
+            Read file content as text.
+            Assert "europe-west4" does NOT appear in image_id or region fields.
+            (Comments are allowed — filter to YAML-parsed values only.)
+        </test>
+        <test name="test_no_stale_europe_west4_in_gcp_spot">
+          Parse configs/cloud/gcp_spot.yaml.
+          Assert region != "europe-west4".
+          Assert docker_image does not contain "europe-west4".
+        </test>
+        <test name="test_no_stale_europe_west4_in_preflight">
+          Read scripts/preflight_gcp.py as text.
+          Assert the GAR_IMAGE constant does NOT contain "europe-west4".
+        </test>
+        <test name="test_no_stale_europe_west4_in_pulumi_config">
+          Parse deployment/pulumi/gcp/Pulumi.dev.yaml.
+          Assert gcp:region is not "europe-west4".
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestNoStaleEuropeWest4 -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestNoStaleEuropeWest4 -v --tb=short</verify-command>
+    </task>
+
+    <task id="T1.4" type="RED">
+      <title>Region config regions match Pulumi-deployed region</title>
+      <description>
+        The active region config (referenced in debug.yaml's infrastructure.region_config)
+        must target the same region as the Pulumi stack.
+      </description>
+      <tests>
+        <test name="test_debug_region_config_matches_pulumi_region">
+          Read debug.yaml's infrastructure.region_config value (e.g., "us_central1").
+          Load configs/cloud/regions/{region_config}.yaml.
+          Extract all region values from the YAML.
+          Read Pulumi.dev.yaml's gcp:region.
+          Assert ALL region config entries target the Pulumi region.
+        </test>
+        <test name="test_gcp_spot_region_matches_pulumi_region">
+          Read gcp_spot.yaml's region field.
+          Read Pulumi.dev.yaml's gcp:region.
+          Assert they match.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestRegionConfigMatchesPulumi -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::TestRegionConfigMatchesPulumi -v --tb=short</verify-command>
+    </task>
+
+    <task id="T1.5" type="RED">
+      <title>GAR URL in preflight_gcp.py matches gcp_spot.yaml</title>
+      <description>
+        preflight_gcp.py has GAR_IMAGE as a hardcoded constant. It MUST match
+        gcp_spot.yaml's docker_image. This test prevents drift after migrations.
+      </description>
+      <tests>
+        <test name="test_preflight_gar_image_matches_gcp_spot_docker_image">
+          Import GAR_IMAGE from scripts/preflight_gcp.py (or parse from source using ast).
+          Load gcp_spot.yaml's docker_image field.
+          Assert they are identical.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::test_preflight_gar_image_matches_gcp_spot_docker_image -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::test_preflight_gar_image_matches_gcp_spot_docker_image -v --tb=short</verify-command>
+    </task>
+
+    <task id="T1.6" type="RED">
+      <title>Factorial YAML image_id matches gcp_spot docker_image</title>
+      <description>
+        train_factorial.yaml's resources.image_id must reference the same Docker
+        image as gcp_spot.yaml (the canonical cloud config).
+      </description>
+      <tests>
+        <test name="test_factorial_image_id_matches_gcp_spot">
+          Parse train_factorial.yaml's resources.image_id (strip "docker:" prefix).
+          Parse gcp_spot.yaml's docker_image.
+          Assert they are identical.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::test_factorial_image_id_matches_gcp_spot -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_region_consistency.py::test_factorial_image_id_matches_gcp_spot -v --tb=short</verify-command>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 2: GPU Fallback and Contract Tests (P0)                    -->
+  <!--                                                                     -->
+  <!-- RATIONALE: A100 fallback was added after 13h GPU exhaustion.        -->
+  <!-- Unauthorized A100 incident (2026-03-24) cost 5.5x. Contract must    -->
+  <!-- be tested rigorously: right GPUs allowed, right order, right cost.  -->
+  <!-- ================================================================== -->
+  <category id="2" name="GPU Fallback and Contract" priority="P0">
+    <file>tests/v2/unit/deployment/test_gpu_fallback_contract.py</file>
+    <tier>staging</tier>
+    <estimated-tests>15</estimated-tests>
+    <rationale>
+      The YAML contract system was created after the unauthorized A100 incident
+      (5.5x cost). The contract was updated to allow A100 as an ordered fallback.
+      Tests must verify: right GPUs, right order, right cost limits, right per-model
+      spot overrides.
+    </rationale>
+
+    <task id="T2.1" type="RED">
+      <title>YAML contract allows exactly L4, A100, A100-80GB for GCP</title>
+      <description>
+        The contract's allowed_accelerators.gcp list must contain exactly
+        [L4, A100, A100-80GB] — no more, no less.
+      </description>
+      <tests>
+        <test name="test_contract_gcp_allowed_accelerators_exact">
+          Load yaml_contract.yaml.
+          Assert allowed_accelerators.gcp == ["L4", "A100", "A100-80GB"].
+        </test>
+        <test name="test_contract_gcp_does_not_include_h100">
+          Load yaml_contract.yaml.
+          Assert "H100" not in allowed_accelerators.gcp.
+        </test>
+        <test name="test_contract_gcp_does_not_include_banned_gpus">
+          Load yaml_contract.yaml.
+          For each GPU in banned_accelerators (T4, V100, K80, P100, P4):
+            Assert GPU not in allowed_accelerators.gcp.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestContractAllowedGpus -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestContractAllowedGpus -v --tb=short</verify-command>
+    </task>
+
+    <task id="T2.2" type="RED">
+      <title>Factorial contract allows exactly L4, A100, A100-80GB</title>
+      <description>
+        The factorial section of the contract must also list L4, A100, A100-80GB.
+        This is the cost-sensitive section (34+ jobs per pass).
+      </description>
+      <tests>
+        <test name="test_factorial_contract_allowed_accelerators">
+          Load yaml_contract.yaml.
+          Assert factorial.allowed_accelerators == ["L4", "A100", "A100-80GB"].
+        </test>
+        <test name="test_factorial_contract_requires_gcp">
+          Assert factorial.required_cloud == "gcp".
+        </test>
+        <test name="test_factorial_contract_requires_docker">
+          Assert factorial.require_docker_image == True.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestFactorialContract -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestFactorialContract -v --tb=short</verify-command>
+    </task>
+
+    <task id="T2.3" type="RED">
+      <title>Region configs produce valid GPU ordering: L4 before A100</title>
+      <description>
+        In ALL region config files, L4 entries MUST appear before A100 entries,
+        which MUST appear before A100-80GB entries. SkyPilot's ordered: block
+        tries entries in order — wrong order = A100 as primary (5x cost).
+      </description>
+      <tests>
+        <test name="test_region_config_gpu_ordering_l4_before_a100">
+          For each configs/cloud/regions/*.yaml:
+            Parse the regions.gcp dict.
+            Collect GPU types in iteration order.
+            If L4 and A100 both present: assert L4 index &lt; A100 index.
+            If L4 and A100-80GB both present: assert L4 index &lt; A100-80GB index.
+            If A100 and A100-80GB both present: assert A100 index &lt; A100-80GB index.
+        </test>
+        <test name="test_us_central1_region_has_l4_first">
+          Load us_central1.yaml.
+          Assert first key in regions.gcp is "L4".
+        </test>
+        <test name="test_europe_a100_fallback_has_l4_first">
+          Load europe_a100_fallback.yaml.
+          Assert first key in regions.gcp is "L4".
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestGpuOrdering -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestGpuOrdering -v --tb=short</verify-command>
+    </task>
+
+    <task id="T2.4" type="RED">
+      <title>gcp_spot.yaml accelerators match contract GCP list</title>
+      <description>
+        gcp_spot.yaml's accelerators list must be a subset of the contract's
+        allowed_accelerators.gcp. No GPU in gcp_spot.yaml that isn't in the contract.
+      </description>
+      <tests>
+        <test name="test_gcp_spot_accelerators_subset_of_contract">
+          Load gcp_spot.yaml, extract accelerator names (strip ":1" suffix).
+          Load yaml_contract.yaml, get allowed_accelerators.gcp.
+          Assert every gcp_spot accelerator is in the contract list.
+        </test>
+        <test name="test_gcp_spot_accelerators_order_matches_contract">
+          Verify that the ordering in gcp_spot.yaml follows the same priority
+          as the contract (L4 first, then A100, then A100-80GB).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestGcpSpotMatchesContract -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestGcpSpotMatchesContract -v --tb=short</verify-command>
+    </task>
+
+    <task id="T2.5" type="RED">
+      <title>use_spot override works per-model in factorial config</title>
+      <description>
+        SAM3 models must have use_spot: false in model_overrides (80% preemption
+        rate on 25+ min jobs makes spot economically irrational). DynUNet and
+        MambaVesselNet should NOT have use_spot: false (they benefit from spot).
+      </description>
+      <tests>
+        <test name="test_sam3_hybrid_use_spot_false">
+          Load debug.yaml.
+          Assert model_overrides.sam3_hybrid.use_spot == False.
+        </test>
+        <test name="test_sam3_topolora_use_spot_false">
+          Load debug.yaml.
+          Assert model_overrides.sam3_topolora.use_spot == False.
+        </test>
+        <test name="test_dynunet_no_use_spot_override">
+          Load debug.yaml.
+          Assert model_overrides does NOT contain a "dynunet" key with use_spot,
+          OR if it does, use_spot is true/not set (allowing default spot behavior).
+        </test>
+        <test name="test_paper_full_sam3_use_spot_matches_debug">
+          Load paper_full.yaml and debug.yaml.
+          For each SAM3 model (sam3_hybrid, sam3_topolora):
+            Assert use_spot value is identical in both configs.
+          (Rule 27: debug = production for all factors.)
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestUseSpotOverride -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestUseSpotOverride -v --tb=short</verify-command>
+    </task>
+
+    <task id="T2.6" type="RED">
+      <title>Max hourly cost per GPU type is set in contract</title>
+      <description>
+        Every GPU type in the allowed list must have a max_hourly_cost_usd entry.
+        This is the cost guardrail that preflight uses to estimate experiment cost.
+      </description>
+      <tests>
+        <test name="test_every_allowed_gpu_has_max_hourly_cost">
+          Load yaml_contract.yaml.
+          For each GPU in allowed_accelerators.gcp + allowed_accelerators.runpod:
+            Assert GPU appears as a key in max_hourly_cost_usd.
+        </test>
+        <test name="test_l4_cheaper_than_a100_in_contract">
+          Assert max_hourly_cost_usd["L4"] &lt; max_hourly_cost_usd["A100"].
+        </test>
+        <test name="test_a100_cheaper_than_a100_80gb_in_contract">
+          Assert max_hourly_cost_usd["A100"] &lt; max_hourly_cost_usd["A100-80GB"].
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestMaxHourlyCost -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py::TestMaxHourlyCost -v --tb=short</verify-command>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 3: Monitoring Infrastructure Tests (P0)                    -->
+  <!--                                                                     -->
+  <!-- RATIONALE: 10th pass lost $23.30 to a 12h stuck job. 11th pass had  -->
+  <!-- 10h PENDING with zero intervention. Monitoring is the #1 gap.       -->
+  <!-- ================================================================== -->
+  <category id="3" name="Monitoring Infrastructure" priority="P0">
+    <file-extend>tests/v2/unit/monitoring/test_anomaly_detector.py</file-extend>
+    <file-new>tests/v2/unit/monitoring/test_monitor_integration.py</file-new>
+    <tier>staging</tier>
+    <estimated-tests>20</estimated-tests>
+    <rationale>
+      The monitoring infrastructure was implemented from scratch in this session.
+      The existing 40 tests cover basics. These additional tests cover:
+      - Historical failure scenario replay (passes 4, 10, 11)
+      - Alert deduplication
+      - Edge cases in duration parsing
+      - Budget alarm at both thresholds
+      - End-to-end manifest-to-detection flow
+    </rationale>
+
+    <task id="T3.1" type="RED">
+      <title>Replay pass 4 failure: 8 identical FAILED_SETUP triggers kill switch</title>
+      <description>
+        On pass 4, 8 identical FAILED_SETUP jobs went undetected for 2h 20m.
+        With the kill switch (threshold=3), the detector should fire KILL_SWITCH
+        after the 3rd FAILED_SETUP.
+      </description>
+      <tests>
+        <test name="test_pass4_scenario_8_failed_setup_triggers_kill_switch">
+          Create manifest with 8 jobs, all status=FAILED_SETUP,
+          all with same failure_category="DOCKER_PULL_FAILED".
+          Set kill_switch_threshold=3.
+          Run check_all().
+          Assert at least one alert with alert_type="KILL_SWITCH_IDENTICAL"
+          and severity="CRITICAL" and action="CANCEL_ALL".
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestHistoricalScenarios::test_pass4_scenario_8_failed_setup_triggers_kill_switch -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestHistoricalScenarios -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.2" type="RED">
+      <title>Replay pass 10 failure: job running 12h for 5-min task triggers cancel</title>
+      <description>
+        On pass 10, Job #154 ran 12+ hours for a 5-minute training task.
+        cancel_duration_minutes=50 should trigger DURATION_CANCEL.
+      </description>
+      <tests>
+        <test name="test_pass10_scenario_12h_stuck_job_triggers_cancel">
+          Create manifest with 1 job: status=RUNNING, launched_at=12 hours ago,
+          expected_duration_minutes=10, cancel_duration_minutes=50.
+          Run check_all().
+          Assert alert with alert_type="DURATION_CANCEL",
+          severity="CRITICAL", action="CANCEL_JOB".
+        </test>
+        <test name="test_pass10_scenario_also_triggers_duration_warn">
+          Same manifest as above.
+          Assert BOTH DURATION_WARN and DURATION_CANCEL alerts are present.
+          DURATION_WARN fires at warn_duration (30 min), CANCEL at cancel (50 min).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestHistoricalScenarios::test_pass10_scenario_12h_stuck_job_triggers_cancel -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestHistoricalScenarios -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.3" type="RED">
+      <title>Replay pass 11 failure: 3 jobs PENDING for 10h triggers timeout</title>
+      <description>
+        On pass 11, 3 jobs were PENDING for 10+ hours in europe-west4 with zero
+        intervention. pending_timeout_minutes=30 should trigger 3 PENDING_TIMEOUT alerts.
+      </description>
+      <tests>
+        <test name="test_pass11_scenario_3_pending_10h_triggers_timeout">
+          Create manifest with 3 jobs: all status=PENDING,
+          launched_at=10 hours ago, pending_timeout=30.
+          Run check_all().
+          Assert exactly 3 alerts with alert_type="PENDING_TIMEOUT".
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestHistoricalScenarios::test_pass11_scenario_3_pending_10h_triggers_timeout -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestHistoricalScenarios -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.4" type="RED">
+      <title>Alert deduplication: same alert not fired twice</title>
+      <description>
+        The _already_fired set prevents duplicate alerts. Calling check_all()
+        twice with the same manifest state should return zero alerts the second time.
+      </description>
+      <tests>
+        <test name="test_alert_deduplication_check_all_twice">
+          Create manifest with 1 PENDING job (launched 60 min ago, threshold 30).
+          Create AnomalyDetector.
+          Call check_all() — expect 1 PENDING_TIMEOUT alert.
+          Call check_all() again — expect 0 new alerts (deduplicated).
+        </test>
+        <test name="test_different_alert_types_not_deduplicated">
+          Create manifest with 1 RUNNING job (launched 60 min ago,
+          warn=30, cancel=50).
+          Call check_all() — expect DURATION_WARN and DURATION_CANCEL.
+          Both are different alert_types, so both should fire.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestAlertDeduplication -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestAlertDeduplication -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.5" type="RED">
+      <title>Budget alarm at warning AND cap thresholds</title>
+      <description>
+        Budget warning fires BUDGET_WARN. Budget cap fires BUDGET_CAP with
+        CANCEL_ALL action. Both must trigger when thresholds are crossed.
+      </description>
+      <tests>
+        <test name="test_budget_warning_threshold_fires">
+          Create manifest: budget_warning_usd=8.0, budget_cap_usd=15.0.
+          Add jobs with accumulated cost = $9.00 (above warning, below cap).
+          Assert BUDGET_WARN alert with severity=WARN.
+        </test>
+        <test name="test_budget_cap_threshold_fires_cancel_all">
+          Create manifest: budget_warning_usd=8.0, budget_cap_usd=15.0.
+          Add jobs with accumulated cost = $16.00 (above cap).
+          Assert BUDGET_CAP alert with severity=EMERGENCY, action=CANCEL_ALL.
+        </test>
+        <test name="test_budget_below_warning_no_alert">
+          Create manifest: budget_warning_usd=8.0.
+          Add jobs with accumulated cost = $5.00 (below warning).
+          Assert no budget-related alerts.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestBudgetAlarms -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestBudgetAlarms -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.6" type="RED">
+      <title>Kill switch triggers at 3+ identical failures</title>
+      <description>
+        The kill switch fires when 3+ jobs have the same failure_category
+        within the kill_switch_window_minutes window.
+      </description>
+      <tests>
+        <test name="test_kill_switch_3_identical_failures">
+          Create manifest with 5 FAILED jobs, 3 having
+          failure_category="OOM", 2 having "SPOT_PREEMPTION".
+          Set kill_switch_threshold=3.
+          Assert KILL_SWITCH_IDENTICAL alert fires (3 OOM).
+        </test>
+        <test name="test_kill_switch_does_not_fire_at_2_identical">
+          Create manifest with 2 FAILED jobs with same failure_category.
+          Set kill_switch_threshold=3.
+          Assert NO kill switch alert fires.
+        </test>
+        <test name="test_kill_switch_batch_failure_percentage">
+          Create manifest with 10 jobs, 6 FAILED (60%), 4 RUNNING.
+          Set batch_failure_pct=0.5.
+          Assert KILL_SWITCH_BATCH alert fires (60% > 50% threshold).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestKillSwitch -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_anomaly_detector.py::TestKillSwitch -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.7" type="RED">
+      <title>Sky queue parser handles RECOVERING and CANCELLING statuses</title>
+      <description>
+        RECOVERING (spot preemption recovery) and CANCELLING (auto-cancel in progress)
+        are valid SkyPilot statuses. The parser must handle them.
+      </description>
+      <tests>
+        <test name="test_parser_handles_recovering_status">
+          Provide sky jobs queue output with a RECOVERING job.
+          Assert parsed QueuedJob has status="RECOVERING".
+        </test>
+        <test name="test_parser_handles_cancelling_status">
+          Provide sky jobs queue output with a CANCELLING job.
+          Assert parsed QueuedJob has status="CANCELLING".
+        </test>
+        <test name="test_parser_handles_day_scale_duration">
+          Provide queue line with "1d 4h 55m 45s" total duration.
+          Assert parsed total_duration_minutes is approximately 1735.75.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_sky_queue_parser.py::TestAdditionalStatuses -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_sky_queue_parser.py::TestAdditionalStatuses -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.8" type="RED">
+      <title>Monitor integration: manifest + queue update + anomaly detection</title>
+      <description>
+        End-to-end test across all three monitoring modules:
+        1. Create a manifest with PENDING jobs
+        2. Simulate queue output showing jobs as RUNNING for too long
+        3. Update manifest from queue
+        4. Run anomaly detection
+        5. Verify correct alerts
+      </description>
+      <tests>
+        <test name="test_integration_manifest_queue_anomaly">
+          Create manifest JSON with 2 jobs (PENDING).
+          Load manifest from JSON.
+          Parse simulated sky jobs queue output (2 RUNNING, 1 exceeded warn).
+          Update manifest job statuses from parsed queue.
+          Create AnomalyDetector with updated manifest.
+          Assert DURATION_WARN alert for the overrun job.
+        </test>
+        <test name="test_integration_all_succeeded_fires_summary">
+          Create manifest with 3 jobs.
+          Update all to SUCCEEDED.
+          Assert ALL_TERMINAL alert with action=SUMMARY.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_monitor_integration.py -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_monitor_integration.py -v --tb=short</verify-command>
+    </task>
+
+    <task id="T3.9" type="RED">
+      <title>Job manifest round-trip with realistic 11th pass data</title>
+      <description>
+        Serialize a manifest with the exact 11th pass job configuration
+        (3 Phase 1 jobs: DynUNet spot, SAM3 Hybrid on-demand, SAM3 Vanilla spot)
+        to JSON and deserialize. Verify all fields survive round-trip.
+      </description>
+      <tests>
+        <test name="test_11th_pass_manifest_roundtrip">
+          Create manifest with 3 jobs matching 11th pass Phase 1:
+          - dynunet-dice_ce-calibfalse-f0 (spot=True, expected=10, hourly_rate=0.22)
+          - sam3_hybrid-cbdice_cldice-calibfalse-f0 (spot=False, expected=25, hourly_rate=0.74)
+          - sam3_vanilla-zeroshot-minivess-f0 (spot=True, expected=15, hourly_rate=0.22)
+          Write to JSON, read back. Assert all fields match.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/monitoring/test_job_manifest.py::test_11th_pass_manifest_roundtrip -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/monitoring/test_job_manifest.py -v --tb=short</verify-command>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 4: Data Pipeline Tests (P1)                                -->
+  <!--                                                                     -->
+  <!-- RATIONALE: DeepVess downloader was implemented this session.        -->
+  <!-- The acquisition registry was updated. DVC tracking must cover both  -->
+  <!-- datasets. These tests prevent silent regression.                    -->
+  <!-- ================================================================== -->
+  <category id="4" name="Data Pipeline" priority="P1">
+    <file-extend>tests/v2/unit/test_downloaders.py</file-extend>
+    <file-new>tests/v2/unit/config/test_acquisition_registry.py</file-new>
+    <tier>staging</tier>
+    <estimated-tests>12</estimated-tests>
+    <rationale>
+      DeepVess was treated as optional until this session. The user explicitly
+      stated it is required for the Analysis flow. The downloader was implemented
+      but needs comprehensive tests for ZIP extraction, skip-existing, and URL
+      format. The acquisition registry change from "manual" to "http_download"
+      must be tested to prevent silent regression.
+    </rationale>
+
+    <task id="T4.1" type="RED">
+      <title>DeepVess downloader: HTTP download from eCommons</title>
+      <description>
+        download_deepvess() uses httpx to download a ZIP from Cornell eCommons.
+        Test with mocked httpx to verify the URL, response handling, and ZIP extraction.
+      </description>
+      <tests>
+        <test name="test_deepvess_calls_httpx_stream">
+          Mock httpx.stream or httpx.Client.
+          Call download_deepvess(tmp_path / "deepvess").
+          Assert httpx was called with the correct eCommons URL.
+        </test>
+        <test name="test_deepvess_url_is_valid_dspace7_bitstream">
+          Import _DEEPVESS_ZIP_URL from downloaders.
+          Assert URL contains "ecommons.cornell.edu/server/api/core/bitstreams/".
+          Assert URL ends with "/content".
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/test_downloaders.py::TestDownloadDeepVess::test_deepvess_calls_httpx_stream -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/test_downloaders.py::TestDownloadDeepVess -v --tb=short</verify-command>
+    </task>
+
+    <task id="T4.2" type="RED">
+      <title>DeepVess downloader: skip if exists</title>
+      <description>
+        When target_dir/images/ exists and has files, skip_existing=True should
+        skip the download entirely.
+      </description>
+      <tests>
+        <test name="test_deepvess_skips_if_images_dir_exists">
+          Create tmp_path/deepvess/images/ with a dummy .tif file.
+          Call download_deepvess(tmp_path / "deepvess", skip_existing=True).
+          Assert httpx was NOT called.
+          Assert return value is the target_dir.
+        </test>
+        <test name="test_deepvess_downloads_if_images_dir_empty">
+          Create tmp_path/deepvess/images/ (empty directory).
+          Call download_deepvess(..., skip_existing=True) with mocked httpx.
+          Assert httpx WAS called (empty dir does not count as existing).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/test_downloaders.py::TestDownloadDeepVess::test_deepvess_skips_if_images_dir_exists -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/test_downloaders.py::TestDownloadDeepVess -v --tb=short</verify-command>
+    </task>
+
+    <task id="T4.3" type="RED">
+      <title>DeepVess in acquisition registry: download_method = "http_download"</title>
+      <description>
+        The acquisition registry must have DeepVess registered with
+        download_method="http_download" (not "manual"). This was changed in
+        this session. A regression to "manual" would break the acquisition flow.
+      </description>
+      <tests>
+        <test name="test_deepvess_acquisition_method_is_http_download">
+          Import ACQUISITION_REGISTRY or equivalent from acquisition_registry.py.
+          Assert deepvess entry has download_method == "http_download".
+        </test>
+        <test name="test_vesselnn_acquisition_method_is_git_clone">
+          Assert vesselnn entry has download_method == "git_clone".
+        </test>
+        <test name="test_minivess_acquisition_method_is_manual">
+          Assert minivess entry has download_method == "manual"
+          (EBRAINS requires login, cannot be automated).
+        </test>
+        <test name="test_all_datasets_have_download_method">
+          For every entry in the acquisition registry:
+            Assert "download_method" key exists.
+            Assert value is one of the known methods
+            ("http_download", "git_clone", "manual").
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/config/test_acquisition_registry.py -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/config/test_acquisition_registry.py -v --tb=short</verify-command>
+    </task>
+
+    <task id="T4.4" type="RED">
+      <title>DVC tracks both MiniVess and DeepVess datasets</title>
+      <description>
+        The DVC lock file must track both MiniVess (210+ files) and DeepVess
+        (26+ files). Verify that both dataset paths appear in dvc.lock outputs.
+      </description>
+      <tests>
+        <test name="test_dvc_lock_tracks_minivess">
+          Parse dvc.lock.
+          Assert at least one output path contains "minivess".
+        </test>
+        <test name="test_dvc_lock_tracks_deepvess">
+          Parse dvc.lock.
+          Assert at least one output path contains "deepvess".
+        </test>
+        <test name="test_dvc_minivess_file_count_above_threshold">
+          If MiniVess is tracked as a directory output in dvc.lock:
+            Read the nfiles field.
+            Assert nfiles >= 200 (210 files expected).
+        </test>
+        <test name="test_dvc_deepvess_file_count_above_threshold">
+          If DeepVess is tracked as a directory output in dvc.lock:
+            Read the nfiles field.
+            Assert nfiles >= 20 (26 files expected).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/test_dvc_remote_sync.py::TestDvcDatasetTracking -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/test_dvc_remote_sync.py -v --tb=short</verify-command>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 5: Infrastructure Resilience Tests (P1)                    -->
+  <!--                                                                     -->
+  <!-- RATIONALE: The preflight checker is the last line of defense before -->
+  <!-- spending cloud credits. It must catch stale images, empty buckets,  -->
+  <!-- stopped controllers, and missing quotas.                            -->
+  <!-- ================================================================== -->
+  <category id="5" name="Infrastructure Resilience" priority="P1">
+    <file-new>tests/v2/unit/deployment/test_preflight_consistency.py</file-new>
+    <tier>staging</tier>
+    <estimated-tests>10</estimated-tests>
+    <rationale>
+      The preflight script is the gate between "ready to launch" and "spending
+      money on GPU instances." Every observed FAILED_SETUP root cause should
+      have a corresponding preflight check test. These tests use mocked
+      subprocess calls — no cloud resources needed.
+    </rationale>
+
+    <task id="T5.1" type="RED">
+      <title>Preflight detects stale Docker image (git commit mismatch)</title>
+      <description>
+        When Docker image OCI label revision differs from git HEAD and src/ files
+        changed, preflight should return FAIL.
+      </description>
+      <tests>
+        <test name="test_preflight_stale_image_with_src_changes_fails">
+          Mock subprocess to return a Docker manifest with revision="abc123".
+          Mock git HEAD as "def456".
+          Mock git diff showing src/ changes between abc123 and def456.
+          Call check_docker_image_freshness() (or equivalent).
+          Assert result is (False, message_containing "stale").
+        </test>
+        <test name="test_preflight_stale_image_doc_only_changes_passes">
+          Mock subprocess to return revision="abc123", HEAD="def456".
+          Mock git diff showing ONLY docs/ and tests/ changes.
+          Assert result is (True, message_containing "no Docker-relevant").
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestPreflightDockerImage -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestPreflightDockerImage -v --tb=short</verify-command>
+    </task>
+
+    <task id="T5.2" type="RED">
+      <title>Preflight config references match across files</title>
+      <description>
+        The preflight script's hardcoded constants (GAR_IMAGE, GCS_BUCKET,
+        CHECKPOINT_BUCKET, SKYPILOT_YAML) must match the canonical config
+        sources. This prevents the preflight from checking the wrong resources.
+      </description>
+      <tests>
+        <test name="test_preflight_gar_image_matches_config">
+          Read GAR_IMAGE from preflight_gcp.py source (using ast.parse).
+          Read docker_image from gcp_spot.yaml.
+          Assert they are identical.
+        </test>
+        <test name="test_preflight_skypilot_yaml_path_exists">
+          Read SKYPILOT_YAML path from preflight_gcp.py source.
+          Assert the file exists on disk.
+        </test>
+        <test name="test_preflight_required_env_vars_complete">
+          Read REQUIRED_ENV_VARS from preflight_gcp.py source.
+          Assert "HF_TOKEN" is in the list.
+          Assert "MLFLOW_TRACKING_URI" is in the list.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestPreflightConfig -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestPreflightConfig -v --tb=short</verify-command>
+    </task>
+
+    <task id="T5.3" type="RED">
+      <title>YAML contract validator catches unauthorized GPU types</title>
+      <description>
+        Test the validation logic that catches unauthorized GPUs in SkyPilot YAMLs.
+        This is already partially tested in test_yaml_contract_enforcement.py but
+        we need explicit tests for the NEW fallback GPUs.
+      </description>
+      <tests>
+        <test name="test_contract_rejects_h100_in_skypilot_yaml">
+          Create a temporary SkyPilot YAML with accelerators: H100:1.
+          Run the contract validation function.
+          Assert validation FAILS with message about unauthorized GPU.
+        </test>
+        <test name="test_contract_accepts_l4_a100_ordered_block">
+          Create a temporary SkyPilot YAML with ordered: block containing
+          L4 and A100 entries (both in contract).
+          Run contract validation.
+          Assert validation PASSES.
+        </test>
+        <test name="test_contract_rejects_t4_in_any_position">
+          Create a temporary SkyPilot YAML with T4 in an ordered: block.
+          Assert validation FAILS (T4 is globally banned).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestContractValidation -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestContractValidation -v --tb=short</verify-command>
+    </task>
+
+    <task id="T5.4" type="RED">
+      <title>Region config files parse correctly and have required fields</title>
+      <description>
+        Every YAML file in configs/cloud/regions/ must parse without error and
+        contain the required structure: description, regions.gcp.{GPU}.[{region, zones}].
+      </description>
+      <tests>
+        <test name="test_all_region_configs_parse_without_error">
+          For each configs/cloud/regions/*.yaml:
+            yaml.safe_load succeeds.
+            No exceptions raised.
+        </test>
+        <test name="test_all_region_configs_have_description">
+          For each region config:
+            Assert "description" key exists.
+        </test>
+        <test name="test_all_region_configs_have_regions_gcp">
+          For each region config:
+            Assert "regions" key exists.
+            Assert "gcp" key exists under "regions".
+        </test>
+        <test name="test_region_entries_have_region_and_zones">
+          For each region config, for each GPU type, for each entry:
+            Assert entry has "region" (string) and "zones" (int > 0).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestRegionConfigSchema -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py::TestRegionConfigSchema -v --tb=short</verify-command>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- CATEGORY 6: Cost Guard Rail Tests (P1)                              -->
+  <!--                                                                     -->
+  <!-- RATIONALE: Unauthorized A100 = 5.5x cost. 12h stuck job = $23.30.  -->
+  <!-- Cost guardrails are the financial safety net.                        -->
+  <!-- ================================================================== -->
+  <category id="6" name="Cost Guard Rails" priority="P1">
+    <file-new>tests/v2/unit/finops/test_cost_guardrails.py</file-new>
+    <tier>staging</tier>
+    <estimated-tests>10</estimated-tests>
+    <rationale>
+      The FinOps report (gpu-instances-finops-report.md) established cost models
+      for each GPU type. The YAML contract has max_hourly_cost_usd entries.
+      These tests verify the cost estimation logic and guard rails.
+    </rationale>
+
+    <task id="T6.1" type="RED">
+      <title>Cost estimate calculation correct for L4, A100, A100-80GB</title>
+      <description>
+        Verify the per-job and per-pass cost calculations match the FinOps report.
+        Formula: cost_per_job = (setup_minutes + training_minutes) / 60 * hourly_rate
+        Formula: cost_per_pass = cost_per_job * n_jobs
+      </description>
+      <tests>
+        <test name="test_l4_cost_per_job">
+          hourly_rate = 0.22 (L4 spot).
+          total_minutes = 55 (10 setup + 45 training).
+          Expected cost = 55/60 * 0.22 = ~$0.20.
+          Assert abs(cost - 0.2017) &lt; 0.01.
+        </test>
+        <test name="test_a100_cost_per_job">
+          hourly_rate = 1.10 (A100-40GB spot).
+          total_minutes = 30 (10 setup + 20 training at 2.2x speedup).
+          Expected cost = 30/60 * 1.10 = $0.55.
+          Assert abs(cost - 0.55) &lt; 0.01.
+        </test>
+        <test name="test_a100_80gb_cost_per_job">
+          hourly_rate = 1.38 (A100-80GB spot).
+          total_minutes = 30.
+          Expected cost = 30/60 * 1.38 = $0.69.
+          Assert abs(cost - 0.69) &lt; 0.01.
+        </test>
+        <test name="test_l4_cost_per_debug_pass_34_jobs">
+          34 jobs * $0.20/job = ~$6.85.
+          Assert abs(total - 6.86) &lt; 0.5.
+        </test>
+        <test name="test_a100_cost_per_debug_pass_34_jobs">
+          34 jobs * $0.55/job = ~$18.70.
+          Assert abs(total - 18.70) &lt; 1.0.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestCostEstimation -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestCostEstimation -v --tb=short</verify-command>
+    </task>
+
+    <task id="T6.2" type="RED">
+      <title>JobRecord cost_usd property calculates correctly</title>
+      <description>
+        JobRecord.cost_usd must compute elapsed_hours * hourly_rate.
+        Test with known durations and rates.
+      </description>
+      <tests>
+        <test name="test_job_record_cost_15_min_l4">
+          Create JobRecord with launched_at 15 min ago, hourly_rate=0.22.
+          Assert cost_usd is approximately 0.22 * 15/60 = $0.055.
+        </test>
+        <test name="test_job_record_cost_2_hours_a100">
+          Create JobRecord with ended_at 2 hours after launched_at,
+          hourly_rate=1.10.
+          Assert cost_usd is approximately $2.20.
+        </test>
+        <test name="test_job_record_cost_zero_when_not_launched">
+          Create JobRecord with launched_at=None.
+          Assert cost_usd == 0.0.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestJobRecordCost -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestJobRecordCost -v --tb=short</verify-command>
+    </task>
+
+    <task id="T6.3" type="RED">
+      <title>Manifest total_cost sums all job costs correctly</title>
+      <description>
+        JobManifest.total_cost must sum cost_usd across all jobs.
+      </description>
+      <tests>
+        <test name="test_manifest_total_cost_sums_correctly">
+          Create manifest with 3 jobs:
+          - Job 1: 30 min at $0.22/hr = $0.11
+          - Job 2: 60 min at $1.10/hr = $1.10
+          - Job 3: 15 min at $0.22/hr = $0.055
+          Assert total_cost is approximately $1.265.
+        </test>
+        <test name="test_manifest_total_cost_zero_for_pending_jobs">
+          Create manifest with 3 PENDING jobs (launched_at = just now).
+          Assert total_cost is approximately $0.00.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestManifestTotalCost -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestManifestTotalCost -v --tb=short</verify-command>
+    </task>
+
+    <task id="T6.4" type="RED">
+      <title>Contract max_hourly_cost values are sane</title>
+      <description>
+        The max_hourly_cost_usd values in yaml_contract.yaml must be within
+        reasonable bounds and maintain the correct ordering (L4 cheapest).
+      </description>
+      <tests>
+        <test name="test_max_hourly_cost_l4_under_1_dollar">
+          Load yaml_contract.yaml.
+          Assert max_hourly_cost_usd["L4"] &lt; 1.0.
+        </test>
+        <test name="test_max_hourly_cost_a100_under_2_dollars">
+          Assert max_hourly_cost_usd["A100"] &lt; 2.0.
+        </test>
+        <test name="test_max_hourly_cost_ordering">
+          Assert L4 &lt; RTX4090 &lt; A100 &lt; A100-80GB &lt; H100.
+        </test>
+        <test name="test_max_hourly_cost_all_positive">
+          For every GPU in max_hourly_cost_usd:
+            Assert value > 0.
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestContractCostLimits -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestContractCostLimits -v --tb=short</verify-command>
+    </task>
+
+    <task id="T6.5" type="RED">
+      <title>Factorial configs have budget warning and cap thresholds</title>
+      <description>
+        Both debug.yaml and paper_full.yaml should reference budget thresholds
+        either directly or through the monitoring manifest config. At minimum,
+        verify the existence of budget alarm fields in the report template.
+      </description>
+      <tests>
+        <test name="test_debug_config_has_budget_metadata">
+          Load debug.yaml.
+          Assert the estimated cost section or the report template references
+          budget_warning and budget_cap values.
+          (This may read from the 11th pass report template fields.)
+        </test>
+        <test name="test_total_experiment_cost_within_academic_budget">
+          Compute: 34 jobs * max A100-80GB rate ($1.38/hr) * 1 hour max.
+          Assert total &lt; $50 (academic budget floor).
+        </test>
+      </tests>
+      <red-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestBudgetConfig -v --tb=short 2>&amp;1 | tail -20</red-command>
+      <verify-command>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py::TestBudgetConfig -v --tb=short</verify-command>
+    </task>
+  </category>
+
+  <!-- ================================================================== -->
+  <!-- EXECUTION ORDER                                                     -->
+  <!--                                                                     -->
+  <!-- Execute categories in priority order. Within each category, execute -->
+  <!-- tasks sequentially (each task's RED phase must fail before GREEN).  -->
+  <!-- ================================================================== -->
+  <execution-order>
+    <step order="1" category="1" reason="P0: Region drift is the #1 recurrence risk">
+      <tasks>T1.1, T1.2, T1.3, T1.4, T1.5, T1.6</tasks>
+      <verify>uv run pytest tests/v2/unit/deployment/test_region_consistency.py -v --tb=short</verify>
+    </step>
+    <step order="2" category="2" reason="P0: GPU contract prevents 5.5x cost escalation">
+      <tasks>T2.1, T2.2, T2.3, T2.4, T2.5, T2.6</tasks>
+      <verify>uv run pytest tests/v2/unit/deployment/test_gpu_fallback_contract.py -v --tb=short</verify>
+    </step>
+    <step order="3" category="3" reason="P0: Monitoring prevents 10h+ undetected failures">
+      <tasks>T3.1, T3.2, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T3.9</tasks>
+      <verify>uv run pytest tests/v2/unit/monitoring/ -v --tb=short</verify>
+    </step>
+    <step order="4" category="4" reason="P1: Data pipeline regression prevention">
+      <tasks>T4.1, T4.2, T4.3, T4.4</tasks>
+      <verify>uv run pytest tests/v2/unit/test_downloaders.py tests/v2/unit/config/test_acquisition_registry.py tests/v2/unit/test_dvc_remote_sync.py -v --tb=short</verify>
+    </step>
+    <step order="5" category="5" reason="P1: Preflight gate resilience">
+      <tasks>T5.1, T5.2, T5.3, T5.4</tasks>
+      <verify>uv run pytest tests/v2/unit/deployment/test_preflight_consistency.py -v --tb=short</verify>
+    </step>
+    <step order="6" category="6" reason="P1: Financial safety net">
+      <tasks>T6.1, T6.2, T6.3, T6.4, T6.5</tasks>
+      <verify>uv run pytest tests/v2/unit/finops/test_cost_guardrails.py -v --tb=short</verify>
+    </step>
+  </execution-order>
+
+  <!-- ================================================================== -->
+  <!-- FINAL VERIFICATION                                                  -->
+  <!-- ================================================================== -->
+  <final-verification>
+    <command>make test-staging</command>
+    <expected>ALL tests pass (existing + new), 0 failures, 0 skipped</expected>
+    <notes>
+      New test count should increase the staging total by ~80-100 tests.
+      If any existing test breaks due to config changes, fix it as part of this plan.
+      Report final test count: before and after.
+    </notes>
+  </final-verification>
+
+  <!-- ================================================================== -->
+  <!-- CROSS-REFERENCES                                                    -->
+  <!-- ================================================================== -->
+  <cross-references>
+    <ref type="metalearning" path=".claude/metalearning/2026-03-28-context-amnesia-deferred-deepvess-whac-a-mole.md">
+      Prevention: Test that DeepVess is NOT optional — it must be in DVC and acquisition registry.
+      Covered by: T4.3, T4.4
+    </ref>
+    <ref type="metalearning" path=".claude/metalearning/2026-03-28-shortcut-taking-skip-production-quality.md">
+      Prevention: Test that DeepVess has automated download_method, not "manual".
+      Covered by: T4.3
+    </ref>
+    <ref type="metalearning" path=".claude/metalearning/2026-03-28-10hr-pending-no-monitoring-intervention.md">
+      Prevention: Test that anomaly detector fires PENDING_TIMEOUT after threshold.
+      Covered by: T3.3, T3.4
+    </ref>
+    <ref type="metalearning" path=".claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md">
+      Prevention: Test that contract allows ONLY authorized GPUs, in correct order.
+      Covered by: T2.1, T2.2, T2.3, T2.6
+    </ref>
+    <ref type="metalearning" path=".claude/metalearning/2026-03-24-yaml-is-the-contract-zero-improvisation.md">
+      Prevention: Contract golden reference is the single source of truth.
+      Covered by: T2.4, T5.3
+    </ref>
+    <ref type="report" path="docs/planning/v0-2_archive/original_docs/gpu-instances-finops-report.md">
+      Cost models and GPU pricing verified by: T6.1, T6.4
+    </ref>
+    <ref type="report" path="docs/planning/v0-2_archive/original_docs/experiment-harness-improvement-plan.xml">
+      Monitoring architecture tested by: T3.1-T3.9
+    </ref>
+    <ref type="report" path="docs/planning/v0-2_archive/original_docs/gcs-region-migration-to-us-central1.xml">
+      Region migration consistency tested by: T1.1-T1.6
+    </ref>
+  </cross-references>
+
+</execution-plan>
