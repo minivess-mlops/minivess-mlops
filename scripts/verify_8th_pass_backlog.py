@@ -55,21 +55,34 @@ def _find_default_violations(
                 pos_defaults = args.defaults
                 offset = len(pos_args) - len(pos_defaults)
                 for i, default in enumerate(pos_defaults):
-                    if isinstance(default, ast.Constant) and default.value == target_value:
+                    if (
+                        isinstance(default, ast.Constant)
+                        and default.value == target_value
+                    ):
                         param_name = pos_args[offset + i].arg
                         if param_name in param_names:
                             rel = py_file.relative_to(REPO_ROOT)
                             if "config" in str(rel).lower():
                                 continue
-                            violations.append(f"{rel}:{node.lineno} {node.name}({param_name})")
+                            violations.append(
+                                f"{rel}:{node.lineno} {node.name}({param_name})"
+                            )
                 # Keyword defaults
-                for kwarg, default in zip(args.kwonlyargs, args.kw_defaults, strict=False):
-                    if default is not None and isinstance(default, ast.Constant):
-                        if default.value == target_value and kwarg.arg in param_names:
-                            rel = py_file.relative_to(REPO_ROOT)
-                            if "config" in str(rel).lower():
-                                continue
-                            violations.append(f"{rel}:{node.lineno} {node.name}({kwarg.arg})")
+                for kwarg, default in zip(
+                    args.kwonlyargs, args.kw_defaults, strict=False
+                ):
+                    if (
+                        default is not None
+                        and isinstance(default, ast.Constant)
+                        and default.value == target_value
+                        and kwarg.arg in param_names
+                    ):
+                        rel = py_file.relative_to(REPO_ROOT)
+                        if "config" in str(rel).lower():
+                            continue
+                        violations.append(
+                            f"{rel}:{node.lineno} {node.name}({kwarg.arg})"
+                        )
     return violations
 
 
@@ -120,15 +133,18 @@ def check_no_mlflow_tracking_username_in_skypilot() -> None:
     """No MLFLOW_TRACKING_USERNAME in SkyPilot YAMLs."""
     print("\n[4] No MLFLOW_TRACKING_USERNAME in SkyPilot YAMLs")
     found = []
-    for yaml_dir in [REPO_ROOT / "configs" / "cloud", REPO_ROOT / "deployment" / "skypilot"]:
-      for yaml_file in yaml_dir.rglob("*.yaml"):
-        for line in yaml_file.read_text(encoding="utf-8").splitlines():
-            stripped = line.strip()
-            # Skip comments (lines starting with #)
-            if stripped.startswith("#"):
-                continue
-            if "MLFLOW_TRACKING_USERNAME" in stripped:
-                found.append(str(yaml_file.relative_to(REPO_ROOT)))
+    for yaml_dir in [
+        REPO_ROOT / "configs" / "cloud",
+        REPO_ROOT / "deployment" / "skypilot",
+    ]:
+        for yaml_file in yaml_dir.rglob("*.yaml"):
+            for line in yaml_file.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                # Skip comments (lines starting with #)
+                if stripped.startswith("#"):
+                    continue
+                if "MLFLOW_TRACKING_USERNAME" in stripped:
+                    found.append(str(yaml_file.relative_to(REPO_ROOT)))
     _check(
         "MLFLOW_TRACKING_USERNAME removed",
         len(found) == 0,
@@ -145,7 +161,7 @@ def check_production_yaml_uses_gar() -> None:
             _check(f"{name} exists", False, "file not found")
             continue
         content = yaml_path.read_text(encoding="utf-8")
-        has_gar = "europe-north1-docker.pkg.dev" in content
+        has_gar = "europe-west4-docker.pkg.dev" in content
         no_ghcr = "ghcr.io" not in content
         _check(f"{name} uses GAR", has_gar, "GAR registry not found")
         _check(f"{name} no GHCR", no_ghcr, "GHCR registry still present")
@@ -156,7 +172,10 @@ def check_metric_keys_in_train_flow() -> None:
     print("\n[6] train_flow.py uses MetricKeys constants")
     tf = SRC_DIR / "orchestration" / "flows" / "train_flow.py"
     source = tf.read_text(encoding="utf-8")
-    _check("MetricKeys imported", "from minivess.observability.metric_keys import MetricKeys" in source)
+    _check(
+        "MetricKeys imported",
+        "from minivess.observability.metric_keys import MetricKeys" in source,
+    )
     _check("MetricKeys.VAL_LOSS used", "MetricKeys.VAL_LOSS" in source)
     _check("MetricKeys.VRAM_PEAK_MB used", "MetricKeys.VRAM_PEAK_MB" in source)
     _check("MetricKeys.FOLD_N_COMPLETED used", "MetricKeys.FOLD_N_COMPLETED" in source)
@@ -167,7 +186,10 @@ def check_builder_uses_metric_keys() -> None:
     print("\n[7] builder.py uses MetricKeys constants")
     bf = SRC_DIR / "ensemble" / "builder.py"
     source = bf.read_text(encoding="utf-8")
-    _check("MetricKeys.VAL_LOSS in _DEFAULT_TRACKED_METRICS", "MetricKeys.VAL_LOSS" in source)
+    _check(
+        "MetricKeys.VAL_LOSS in _DEFAULT_TRACKED_METRICS",
+        "MetricKeys.VAL_LOSS" in source,
+    )
     _check("No hardcoded val_loss in tracked metrics", '"val_loss"' not in source)
 
 

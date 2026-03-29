@@ -10,6 +10,6 @@ stages:
     outs:
     - path: data/raw/minivess/
       hash: md5
-      md5: e712f8b23f377a4990b91bef0b1aef76.dir
-      size: 2749883382
-      nfiles: 350
+      md5: be49b3c0c462446c4336cdc5f2781e36.dir
+      size: 984532972
+      nfiles: 210

@@ -25,11 +25,11 @@
 name: minivess-factorial
 
 resources:
-  # GAR image — Docker registry in europe-north1.
-  # Cross-region GAR pull adds ~5-10 min but is acceptable vs 12+ hr PENDING.
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # GAR image — Docker registry in us-central1 (migrated from europe-west4 2026-03-28).
+  # Same-region as GCS/CloudSQL/CloudRun for zero egress.
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. T4 BANNED. A100 requires explicit user authorization.
-  # EU-preferred, US-fallback: europe-north1 has NO L4 GPUs (root cause of 12+ hr PENDING).
+  # EU-preferred, US-fallback: europe-west4 has NO L4 GPUs (root cause of 12+ hr PENDING).
   # Verified with sky.Task.from_yaml() — ordered: parses correctly.
   cloud: gcp
   use_spot: true
@@ -51,14 +51,10 @@ resources:
     strategy: EAGER_NEXT_REGION
     recover_on_exit_codes: [33, 34]
 
-# Checkpoint persistence via GCS bucket mount (#878).
-# MOUNT_CACHED: async upload (non-blocking writes). Previous checkpoint survives
-# preemption even if last write is interrupted. Our check_resume_state_task()
-# detects the latest valid checkpoint on recovery.
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT_CACHED
+# Checkpoint persistence: MLflow GCS artifact store (gs://minivess-mlops-mlflow-artifacts).
+# file_mounts to gs://minivess-mlops-checkpoints REMOVED — was a competing persistence
+# mechanism that violated the mlflow_only_artifact_contract KG invariant.
+# See: .claude/metalearning/2026-03-27-mlflow-413-10-passes-never-fixed-self-reflection.md
 
 envs:
   # Per-condition parameters — set by run_factorial.sh
@@ -176,7 +172,7 @@ setup: |
       echo "Pre-caching SAM3 weights..."
       hf_dl_ok=false
       for attempt in 1 2 3; do
-        if timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3-hiera-large', 'sam3_hiera_large.pt')"; then
+        if timeout 600 python -c "from huggingface_hub import hf_hub_download; hf_hub_download('facebook/sam3', 'sam3.pt')"; then
           hf_dl_ok=true
           break
         else

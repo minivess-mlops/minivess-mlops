@@ -23,10 +23,10 @@ from minivess.config.evaluation_config import (
     EvaluationConfig,
 )
 from minivess.ensemble.builder import (
+    _DEFAULT_TRACKED_METRICS,
     EnsembleBuilder,
     EnsembleMember,
     EnsembleSpec,
-    _DEFAULT_TRACKED_METRICS,
     expand_runs_to_per_fold,
 )
 from minivess.observability.metric_keys import MetricKeys

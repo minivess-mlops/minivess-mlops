@@ -15,7 +15,7 @@ resolution_evidence:
     finding: "Pulumi Python SDK provisions GCP resources: GCS buckets, Cloud SQL, GAR, service accounts"
   - type: discussion
     source: "docs/planning/pulumi-iac-implementation-guide.md"
-    finding: "Pulumi chosen for Python-native IaC; GCP project=minivess-mlops, region=europe-north1"
+    finding: "Pulumi chosen for Python-native IaC; GCP project=minivess-mlops, region=europe-west4"
 implementation:
   files:
     - deployment/pulumi/gcp/__main__.py

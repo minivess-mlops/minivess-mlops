@@ -13,11 +13,9 @@ Plan: docs/planning/prefect-flow-connectivity-execution-plan.xml Phase 0 (T0.4)
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import patch
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 
 class TestResolveCheckpointPathsFromContract:
@@ -35,9 +33,10 @@ class TestResolveCheckpointPathsFromContract:
         )
         assert paths == []
 
-    def test_returns_empty_when_find_fold_checkpoints_returns_empty(
+    def test_raises_when_find_fold_checkpoints_returns_empty(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Empty checkpoints with parent_run_id must raise ValueError (Rule 25)."""
         monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         from minivess.orchestration.flows.post_training_flow import (
             resolve_checkpoint_paths_from_contract,
@@ -47,12 +46,12 @@ class TestResolveCheckpointPathsFromContract:
             "minivess.orchestration.flow_contract.FlowContract.find_fold_checkpoints"
         ) as mock_find:
             mock_find.return_value = []
-            paths = resolve_checkpoint_paths_from_contract(
-                parent_run_id="fake_parent",
-                tracking_uri=str(tmp_path / "mlruns"),
-            )
+            with pytest.raises(ValueError, match="0 checkpoints"):
+                resolve_checkpoint_paths_from_contract(
+                    parent_run_id="fake_parent",
+                    tracking_uri=str(tmp_path / "mlruns"),
+                )
 
-        assert paths == []
         mock_find.assert_called_once_with(parent_run_id="fake_parent")
 
     def test_prefers_best_ckpt_over_epoch_ckpt(
@@ -109,9 +108,10 @@ class TestResolveCheckpointPathsFromContract:
         assert len(paths) == 1
         assert "epoch_010" in paths[0].name
 
-    def test_skips_missing_checkpoint_dirs(
+    def test_raises_when_all_checkpoint_dirs_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """All dirs missing with parent_run_id raises ValueError (Rule 25)."""
         monkeypatch.setenv("MINIVESS_ALLOW_HOST", "1")
         from minivess.orchestration.flows.post_training_flow import (
             resolve_checkpoint_paths_from_contract,
@@ -126,12 +126,11 @@ class TestResolveCheckpointPathsFromContract:
             mock_find.return_value = [
                 {"fold_id": 0, "run_id": "r0", "checkpoint_dir": missing_dir}
             ]
-            paths = resolve_checkpoint_paths_from_contract(
-                parent_run_id="fake",
-                tracking_uri=str(tmp_path / "mlruns"),
-            )
-
-        assert paths == []
+            with pytest.raises(ValueError, match="0 checkpoints"):
+                resolve_checkpoint_paths_from_contract(
+                    parent_run_id="fake",
+                    tracking_uri=str(tmp_path / "mlruns"),
+                )
 
     def test_resolves_multiple_folds(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

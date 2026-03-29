@@ -487,14 +487,15 @@ class TestContractFileIntegrity:
         banned = contract.get("banned_accelerators", [])
         assert "T4" in banned, "T4 MUST be in banned_accelerators — Turing, no BF16."
 
-    def test_contract_gcp_does_not_include_a100(self, contract: dict) -> None:
-        """A100 must NOT be in GCP allowed list (requires explicit authorization)."""
+    def test_contract_gcp_includes_a100_fallback_tiers(self, contract: dict) -> None:
+        """A100 + A100-80GB authorized as spot fallback tiers (2026-03-28)."""
         gcp_allowed = contract.get("allowed_accelerators", {}).get("gcp", [])
-        assert "A100" not in gcp_allowed, (
-            "A100 must NOT be in GCP allowed accelerators. "
-            "It was never authorized by the user. "
-            "See: .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md"
+        assert "A100" in gcp_allowed, (
+            "A100 (40GB) must be in GCP allowed accelerators as L4 fallback tier 1."
         )
-        assert "A100-80GB" not in gcp_allowed, (
-            "A100-80GB must NOT be in GCP allowed accelerators."
+        assert "A100-80GB" in gcp_allowed, (
+            "A100-80GB must be in GCP allowed accelerators as L4 fallback tier 2."
+        )
+        assert "H100" not in gcp_allowed, (
+            "H100 must NOT be in GCP allowed accelerators — not authorized."
         )

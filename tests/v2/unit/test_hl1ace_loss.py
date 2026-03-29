@@ -152,6 +152,40 @@ class TestHL1ACELossBatchIndependence:
         assert torch.isfinite(result_2)
 
 
+class TestHL1ACELossAllEmptyBins:
+    """T2 double-check: HL1ACE must not return NaN on extreme logits (all bins empty)."""
+
+    def test_hl1ace_extreme_logits_one_channel_all_empty_bins(self) -> None:
+        from minivess.pipeline.calibration_losses import HL1ACELoss
+
+        # Channel 0 logits very high → softmax channel 1 ≈ 0.0
+        # All channel-1 voxels land in bin 0 → other bins are NaN
+        # Target has NO foreground (all-zero) → non_empty for channel 1 is False
+        # ace_per_bc[b,1] is NaN (from nanmean) × 0.0 (non_empty) = NaN (IEEE 754)
+        # This NaN poisons .mean() at line 100
+        logits = torch.zeros(1, 2, 8, 8, 8, requires_grad=True)
+        logits_data = logits.detach().clone()
+        logits_data[:, 0, :, :, :] = 100.0  # Channel 0 dominates
+        logits = logits_data.requires_grad_(True)
+        labels = torch.zeros(1, 1, 8, 8, 8)  # All background
+        loss_fn = HL1ACELoss()
+        result = loss_fn(logits, labels)
+        assert torch.isfinite(result), (
+            f"HL1ACE should not return NaN on extreme logits, got {result.item()}"
+        )
+
+    def test_hl1ace_all_same_prediction_finite(self) -> None:
+        from minivess.pipeline.calibration_losses import HL1ACELoss
+
+        # Uniform softmax (0.5) — some bins may be empty
+        logits = torch.zeros(1, 2, 8, 8, 8, requires_grad=True)
+        labels = torch.zeros(1, 1, 8, 8, 8)
+        result = HL1ACELoss()(logits, labels)
+        assert torch.isfinite(result), (
+            f"HL1ACE should be finite for uniform predictions, got {result.item()}"
+        )
+
+
 class TestHL1ACELossBinarySegmentation:
     """T1: Works correctly with binary segmentation (C=2 channels)."""
 

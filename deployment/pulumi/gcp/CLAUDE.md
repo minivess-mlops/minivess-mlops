@@ -10,7 +10,7 @@ RunPod is the separate "env" (dev) environment — it does NOT depend on GCP.
 | Setting | Value | Source |
 |---------|-------|--------|
 | **Project ID** | `minivess-mlops` | `.env.example` line 395 |
-| **Region** | `europe-north1` (Finland) | `.env.example` line 396 |
+| **Region** | `europe-west4` (Netherlands) | `.env.example` line 396 |
 | **MLflow Version** | `3.10.0` (pinned) | `.env.example` line 379 |
 
 ## Resources Created by `pulumi up`
@@ -55,7 +55,7 @@ pulumi stack output dvc_data_bucket  # → GCS_DVC_BUCKET
 
 1. `gcloud auth application-default login`
 2. Enable APIs: compute, storage, iam, run, sqladmin, artifactregistry
-3. GPU quota: `GPUS_ALL_REGIONS >= 1` in `europe-north1`
+3. GPU quota: `GPUS_ALL_REGIONS >= 1` in `europe-west4`
 4. See: `docs/planning/gcp-setup-tutorial.md` for full walkthrough
 
 ## SkyPilot Integration
@@ -63,7 +63,7 @@ pulumi stack output dvc_data_bucket  # → GCS_DVC_BUCKET
 GCP SkyPilot config: `configs/cloud/gcp_spot.yaml`
 - GPU: L4 preferred (BF16, 24 GB), A100 fallback
 - T4 **BANNED** (Turing, no BF16 → FP16 overflow → NaN)
-- Docker: `europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest`
+- Docker: `europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest`
 - Spot: enabled (60-91% cheaper)
 
 ## Two-Provider Architecture

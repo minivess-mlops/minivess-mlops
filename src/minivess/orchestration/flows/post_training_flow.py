@@ -110,6 +110,21 @@ def resolve_checkpoint_paths_from_contract(
                 "No checkpoint files found in %s for fold %d", ckpt_dir, info["fold_id"]
             )
 
+    if parent_run_id is not None and not checkpoint_paths:
+        logger.error(
+            "No checkpoint files found for parent run %s. "
+            "Check that training completed and checkpoints are volume-mounted. "
+            "Fold dirs checked: %s",
+            parent_run_id,
+            [info["checkpoint_dir"] for info in fold_infos],
+        )
+        msg = (
+            f"resolve_checkpoint_paths_from_contract found 0 checkpoints "
+            f"for parent_run_id={parent_run_id}. "
+            "Post-training cannot proceed without checkpoints."
+        )
+        raise ValueError(msg)
+
     return checkpoint_paths
 
 
@@ -401,7 +416,7 @@ def post_training_flow(
         k in plugin_results for k in ("checkpoint_averaging", "subsampled_ensemble")
     )
     calibration_ran = "calibration" in plugin_results
-    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp"))
+    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp_control"))
     return PostTrainingFlowResult(
         status="completed",
         mlflow_run_id=mlflow_run_id,
@@ -656,19 +671,56 @@ def _average_checkpoints(checkpoint_paths: list[Path], output_path: Path) -> Non
     import torch
 
     if not checkpoint_paths:
-        return
+        msg = "Cannot average 0 checkpoints — checkpoint_paths is empty."
+        raise ValueError(msg)
 
     # Load first checkpoint as base
-    avg_state = torch.load(checkpoint_paths[0], weights_only=True)
+    try:
+        avg_state = torch.load(checkpoint_paths[0], weights_only=True)
+    except Exception as exc:  # RuntimeError, EOFError, UnpicklingError, etc.
+        msg = (
+            f"Failed to load checkpoint {checkpoint_paths[0]}: {exc}. "
+            "The file may be corrupt (truncated write during preemption)."
+        )
+        raise RuntimeError(msg) from exc
     state_dict = avg_state.get("model_state_dict", avg_state)
+
+    # Key mismatch detection across all checkpoints
+    all_keys = [set(state_dict.keys())]
 
     # Accumulate remaining checkpoints
     for ckpt_path in checkpoint_paths[1:]:
-        loaded = torch.load(ckpt_path, weights_only=True)
+        try:
+            loaded = torch.load(ckpt_path, weights_only=True)
+        except Exception as exc:  # RuntimeError, EOFError, UnpicklingError, etc.
+            msg = (
+                f"Failed to load checkpoint {ckpt_path}: {exc}. "
+                "The file may be corrupt."
+            )
+            raise RuntimeError(msg) from exc
         other_state = loaded.get("model_state_dict", loaded)
+        all_keys.append(set(other_state.keys()))
         for key in state_dict:
             if key in other_state:
                 state_dict[key] = state_dict[key] + other_state[key]
+
+    # Warn on key mismatch between checkpoints
+    if len(all_keys) > 1:
+        union = set.union(*all_keys)
+        intersection = set.intersection(*all_keys)
+        if union != intersection:
+            missing = union - intersection
+            logger.warning(
+                "Checkpoint key mismatch: %d keys not in all folds: %s. "
+                "Only intersection keys will be averaged.",
+                len(missing),
+                list(missing)[:5],
+            )
+            # Only keep intersection keys — keys not in all checkpoints
+            # would be divided by n but only accumulated from a subset,
+            # producing incorrect weights.
+            for dropped_key in (set(state_dict.keys()) - intersection):
+                del state_dict[dropped_key]
 
     # Average
     n = len(checkpoint_paths)

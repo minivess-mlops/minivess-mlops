@@ -21,8 +21,8 @@ regions:
     IN_USE_ADDRESSES: 8
     PERSISTENT_DISK_GB: 500
 
-  europe-north1:
-    # Default region (Finland, closest to Helsinki)
+  europe-west4:
+    # Primary region (Netherlands, co-located with GAR/GCS/Cloud SQL)
     # GPU quotas need to be requested per-region
     # Request at: https://console.cloud.google.com/iam-admin/quotas?project=minivess-mlops
     NVIDIA_L4_GPUS: 1

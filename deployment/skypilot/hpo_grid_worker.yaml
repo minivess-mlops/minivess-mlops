@@ -21,10 +21,10 @@
 name: minivess-grid-worker
 
 resources:
-  # GAR image — same-region as training VMs (europe-north1).
+  # GAR image — same-region as training VMs (us-central1, migrated 2026-03-28).
   # Falls back to Docker Hub if GAR is not configured.
   # Override via: --env DOCKER_IMAGE=your-registry/minivess-base:latest
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. A100 removed — unauthorized (5.5x cost, never approved).
   # T4 BANNED (Turing, no BF16 → FP16 overflow → NaN).
   accelerators: L4:1
@@ -32,7 +32,7 @@ resources:
   # Spot: 60-91% cheaper. SkyPilot handles preemption recovery.
   use_spot: true
   disk_size: 100
-  region: europe-north1
+  region: us-central1
   job_recovery:
     max_restarts_on_errors: 3
 

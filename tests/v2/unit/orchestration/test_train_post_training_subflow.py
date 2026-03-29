@@ -11,7 +11,6 @@ from __future__ import annotations
 import ast
 import inspect
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -110,9 +109,9 @@ class TestParentFlowDelegatesToSubflow:
 
     def test_parent_flow_still_returns_training_flow_result(self) -> None:
         """training_flow() return type must still be TrainingFlowResult."""
-        from minivess.orchestration.flows.train_flow import training_flow
-
         import inspect
+
+        from minivess.orchestration.flows.train_flow import training_flow
 
         sig = inspect.signature(training_flow.fn)
         # from __future__ import annotations makes return_annotation a string

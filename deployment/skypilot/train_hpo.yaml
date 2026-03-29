@@ -18,8 +18,8 @@
 name: minivess-hpo
 
 resources:
-  # GAR image — Docker registry in europe-north1.
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # GAR image — Docker registry in us-central1 (migrated from europe-west4 2026-03-28).
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   cloud: gcp
   use_spot: true
   disk_size: 100
@@ -28,11 +28,8 @@ resources:
   job_recovery:
     max_restarts_on_errors: 3
 
-# Checkpoint persistence via GCS bucket mount (#878).
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT_CACHED
+# Checkpoint persistence: MLflow GCS artifact store.
+# file_mounts removed — MLflow is the only persistence mechanism.
 
 envs:
   MODEL_FAMILY: dynunet

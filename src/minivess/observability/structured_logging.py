@@ -20,6 +20,7 @@ import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("minivess.structured")
@@ -96,6 +97,54 @@ class FlowEvent:
             status=status,
             duration_ms=duration_ms,
             **kwargs,
+        )
+
+
+class StructuredEventLogger:
+    """Disk-based JSONL event logger for training monitoring.
+
+    Writes training events (epoch_start, epoch_end, checkpoint_saved) to
+    events.jsonl and a heartbeat.json file for quick status checks.
+
+    This SUPPLEMENTS MLflow tracking — it does NOT replace it. The JSONL
+    output is for LLM-parseable monitoring of cloud GPU jobs where
+    ``sky jobs logs`` is slow/blocking/unstructured.
+
+    Parameters
+    ----------
+    output_dir:
+        Directory to write events.jsonl and heartbeat.json.
+        If None, all operations are no-ops (graceful degradation).
+    """
+
+    def __init__(self, output_dir: Path | None) -> None:
+        self._output_dir = output_dir
+        self._events_path = Path(output_dir) / "events.jsonl" if output_dir else None
+        self._heartbeat_path = Path(output_dir) / "heartbeat.json" if output_dir else None
+
+    def log_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Append a structured event to events.jsonl."""
+        if not self._events_path:
+            return
+        entry = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "event_type": event_type,
+            **payload,
+        }
+        with self._events_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+
+    def update_heartbeat(self, **kwargs: Any) -> None:
+        """Write a heartbeat.json file for quick status checks."""
+        if not self._heartbeat_path:
+            return
+        data = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "status": "training",
+            **kwargs,
+        }
+        self._heartbeat_path.write_text(
+            json.dumps(data, separators=(",", ":")), encoding="utf-8"
         )
 
 

@@ -14,7 +14,7 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+import yaml
 
 PREFLIGHT = Path("scripts/preflight_gcp.py")
 
@@ -75,19 +75,23 @@ class TestCheckSkypilotGcpMocked:
     def test_skypilot_gcp_passes(self) -> None:
         mod = _import_preflight()
         mock = MagicMock(returncode=0, stdout="GCP: enabled")
-        with patch.object(mod, "_run", return_value=mock):
+        with (
+            patch.object(mod, "_run", return_value=mock),
             # Also need to mock the sky binary existence check
-            with patch.object(Path, "exists", return_value=True):
-                ok, msg = mod.check_skypilot_gcp()
+            patch.object(Path, "exists", return_value=True),
+        ):
+            ok, msg = mod.check_skypilot_gcp()
         assert ok is True
         assert "enabled" in msg.lower()
 
     def test_skypilot_gcp_fails(self) -> None:
         mod = _import_preflight()
         mock = MagicMock(returncode=1, stdout="")
-        with patch.object(mod, "_run", return_value=mock):
-            with patch.object(Path, "exists", return_value=True):
-                ok, msg = mod.check_skypilot_gcp()
+        with (
+            patch.object(mod, "_run", return_value=mock),
+            patch.object(Path, "exists", return_value=True),
+        ):
+            ok, msg = mod.check_skypilot_gcp()
         assert ok is False
         assert "not enabled" in msg.lower() or "check gcp" in msg.lower()
 
@@ -137,8 +141,12 @@ class TestCheckDockerImageMocked:
         with patch.object(mod, "_run", return_value=mock):
             ok, msg = mod.check_docker_image()
         assert ok is True
-        # Verify the message references the actual GAR image
-        assert "europe-north1-docker.pkg.dev" in msg
+        # Verify the message references the actual GAR image (read from config)
+        gar_config = yaml.safe_load(
+            Path("configs/registry/gar.yaml").read_text(encoding="utf-8")
+        )
+        expected_server = gar_config["server"]
+        assert expected_server in msg
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +204,7 @@ class TestCheckControllerHealthMocked:
         mod = _import_preflight()
         mock = MagicMock(
             returncode=0,
-            stdout="sky-jobs-controller-abc123  UP  gcp  n2-standard-4  europe-north1\n",
+            stdout="sky-jobs-controller-abc123  UP  gcp  n2-standard-4  europe-west4\n",
         )
         with patch.object(mod, "_run", return_value=mock):
             ok, msg = mod.check_controller_health()
@@ -278,11 +286,15 @@ class TestCheckGcpGpuQuotaMocked:
         """Build a JSON quota response."""
         import json
 
-        return json.dumps({"quotas": [{"metric": metric, "limit": limit, "usage": usage}]})
+        return json.dumps(
+            {"quotas": [{"metric": metric, "limit": limit, "usage": usage}]}
+        )
 
     def test_gpu_quota_passes(self) -> None:
         mod = _import_preflight()
-        mock = MagicMock(returncode=0, stdout=self._make_quota_response(limit=4, usage=0))
+        mock = MagicMock(
+            returncode=0, stdout=self._make_quota_response(limit=4, usage=0)
+        )
         with patch.object(mod, "_run", return_value=mock):
             ok, msg = mod.check_gcp_gpu_quota()
         assert ok is True
@@ -290,7 +302,9 @@ class TestCheckGcpGpuQuotaMocked:
 
     def test_gpu_quota_zero_fails(self) -> None:
         mod = _import_preflight()
-        mock = MagicMock(returncode=0, stdout=self._make_quota_response(limit=0, usage=0))
+        mock = MagicMock(
+            returncode=0, stdout=self._make_quota_response(limit=0, usage=0)
+        )
         with patch.object(mod, "_run", return_value=mock):
             ok, msg = mod.check_gcp_gpu_quota()
         assert ok is False

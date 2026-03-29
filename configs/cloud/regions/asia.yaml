@@ -1,5 +1,5 @@
 # Asia-Pacific regions — for labs in Asia.
-# Higher GCS egress from europe-north1 but necessary for latency.
+# Higher GCS egress from europe-west4 but necessary for latency.
 
 description: "Asia-Pacific regions for L4 spot instances"
 

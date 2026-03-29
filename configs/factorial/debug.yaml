@@ -79,10 +79,12 @@ model_overrides:
     batch_size: 1
     gradient_accumulation_steps: 4
     gradient_checkpointing: true
+    use_spot: false  # 80% preemption rate on 25+ min jobs — on-demand is cheaper AND faster
   sam3_hybrid:
     batch_size: 1
     gradient_accumulation_steps: 4
     gradient_checkpointing: true
+    use_spot: false  # 80% preemption rate on 25+ min jobs — on-demand is cheaper AND faster
   sam3_vanilla:
     batch_size: 1
     gradient_accumulation_steps: 1
@@ -130,7 +132,7 @@ post_training:
 infrastructure:
   cloud_config: gcp_spot
   skypilot_yaml: deployment/skypilot/train_factorial.yaml
-  region_config: europe_us  # configs/cloud/regions/europe_us.yaml
+  region_config: us_central1  # Migrated from europe-west4 due to 13h GPU exhaustion (2026-03-28)
   # Fire-and-forget resilience (read by run_factorial_resilient.sh)
   max_wait_hours: 168  # 1 week — keep retrying until spots are available
   retry_interval_seconds: 300  # 5 minutes between --resume attempts

@@ -1,0 +1,1170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>10th Pass Double-Check: 15 Verified Gaps from 4-Agent Deep Exploration</title>
+    <branch>fix/10th-pass-double-check</branch>
+    <date>2026-03-27</date>
+    <status>ready-for-execution</status>
+    <priority>P0+P1 — guards factorial launch against FP16 crashes, NaN corruption, silent empty returns</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <approach>TDD: RED → GREEN → VERIFY → FIX → CHECKPOINT → CONVERGE</approach>
+    <estimated-time>3-5 hours across 3 phases</estimated-time>
+    <phasing>Phase 1 (P0 blockers) → Phase 2 (P1 credit waste prevention) → Phase 3 (P1 scientific integrity)</phasing>
+    <verification>make test-staging (must pass 6590+ tests, 0 skips, 0 failures)</verification>
+    <prior-plan>
+      The 10th-pass-improvement.xml (12 tasks) was FULLY IMPLEMENTED:
+      T1 NaN loss guard, T2 MLflow resume retry, T3 empty folds guard,
+      T4 load_checkpoint mismatch, T5 calibration edge cases, T6 skeleton
+      recall warning, T7 checkpoint averaging, T8 structured logging,
+      T9 GAR image consistency, T10 GCS bucket consistency, T11 legacy
+      env var removal, T12 topology edge cases. ALL verified in source.
+
+      This double-check plan addresses 15 GENUINELY NEW gaps found by
+      4 wave-1 exploration agents that the prior plan did NOT cover.
+    </prior-plan>
+  </metadata>
+
+  <context>
+    <summary>
+      Four wave-1 agents (Loss/Pipeline, Flows/Orchestration, Data/Model/Ensemble,
+      Observability/Compliance) identified 173 total gaps across the codebase.
+      After filtering: P2 tech debt dropped, confabulated gaps dropped (verified
+      against actual source code), duplicates merged, and already-fixed issues
+      from the prior plan excluded.
+
+      Remaining: 15 verified, actionable gaps in 3 phases.
+
+      Key finding: The prior 12-task plan fixed the TOP blockers but missed several
+      dtype/NaN edge cases in compound losses, silent empty-return paths in flow
+      helpers, and missing test coverage for FP16 mixed-precision training paths.
+    </summary>
+
+    <filtering-log>
+      <!-- DROPPED: confabulated or already fixed -->
+      <dropped reason="ALREADY_FIXED">NaN loss at init (T1) — VesselCompoundLoss:120-125</dropped>
+      <dropped reason="ALREADY_FIXED">MLflow resume retry (T2) — check_resume_state_task:322-358</dropped>
+      <dropped reason="ALREADY_FIXED">Empty folds guard (T3) — train_flow:850-852</dropped>
+      <dropped reason="ALREADY_FIXED">load_checkpoint mismatch (T4) — builder.py:497-507</dropped>
+      <dropped reason="ALREADY_FIXED">Calibration all-zero (T5) — calibration_metrics.py:83-90</dropped>
+      <dropped reason="ALREADY_FIXED">Skeleton recall warning (T6) — skeleton_recall.py:106-112</dropped>
+      <dropped reason="ALREADY_FIXED">Checkpoint averaging (T7) — post_training_flow.py:658-688</dropped>
+      <dropped reason="ALREADY_FIXED">Structured logging (T8) — structured_logging.py:103</dropped>
+      <dropped reason="ALREADY_FIXED">GAR/GCS consistency (T9/T10) — test files exist</dropped>
+      <dropped reason="ALREADY_FIXED">Legacy POST_TRAINING_METHOD (T11) — only plural at line 1701</dropped>
+      <dropped reason="ALREADY_FIXED">Topology edge cases (T12) — test file exists</dropped>
+      <dropped reason="P2_TECH_DEBT">52 Agent-4 observability/compliance P2 items</dropped>
+      <dropped reason="P2_TECH_DEBT">31 Agent-3 config validation P2 items</dropped>
+      <dropped reason="P2_TECH_DEBT">20 Agent-1 various P2 edge cases</dropped>
+      <dropped reason="CONFABULATED">Agent-2 "check_controller_cloud untested" — tests exist at test_preflight_mocked.py</dropped>
+      <dropped reason="CONFABULATED">Agent-2 "check_yaml_contract untested" — tests exist at test_yaml_contract_enforcement.py</dropped>
+      <dropped reason="CONFABULATED">Agent-2 "check_gcp_gpu_quota untested" — tests exist at test_preflight_quota.py</dropped>
+    </filtering-log>
+
+    <key-files>
+      <!-- Loss functions -->
+      <file>src/minivess/pipeline/loss_functions.py</file>
+      <file>src/minivess/pipeline/calibration_losses.py</file>
+      <file>src/minivess/pipeline/vendored_losses/cape.py</file>
+      <!-- Training flow -->
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <file>src/minivess/pipeline/trainer.py</file>
+      <!-- Post-training / analysis -->
+      <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+      <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      <file>src/minivess/ensemble/builder.py</file>
+      <!-- Observability -->
+      <file>src/minivess/observability/infrastructure_timing.py</file>
+      <file>src/minivess/observability/tracking.py</file>
+      <!-- Existing test patterns -->
+      <file>tests/v2/unit/test_loss_nan_check.py</file>
+      <file>tests/v2/unit/test_graph_topology_loss.py</file>
+      <file>tests/v2/unit/test_hl1ace_loss.py</file>
+      <file>tests/v2/unit/test_compound_loss_aux_calib.py</file>
+      <file>tests/v2/unit/test_spot_resume.py</file>
+    </key-files>
+
+    <constraints>
+      <constraint>CLAUDE.md Rule 3: Library-first — use MONAI/PyTorch, never rewrite</constraint>
+      <constraint>CLAUDE.md Rule 16: No regex for structured data — use ast/yaml/json parsers</constraint>
+      <constraint>CLAUDE.md Rule 25: Loud failures, never silent discards</constraint>
+      <constraint>CLAUDE.md Rule 26: Greenfield — delete old conventions, no backward compat</constraint>
+      <constraint>CLAUDE.md Rule 29: Zero hardcoded parameters — read from config</constraint>
+      <constraint>Do NOT modify SkyPilot YAML env vars or accelerators without explicit instruction</constraint>
+      <constraint>All tests must pass: make test-staging (6590+ passed, 0 skipped, 0 failed)</constraint>
+      <constraint>Prior plan tasks T1-T12 are ALREADY IMPLEMENTED — do NOT re-implement</constraint>
+    </constraints>
+
+    <cold-start-instructions>
+      To execute this plan from a fresh session with zero context:
+
+      1. Read THIS file completely
+      2. Read CLAUDE.md (project rules)
+      3. Read the prior plan: docs/planning/v0-2_archive/original_docs/run-debug-factorial-experiment-report-10th-pass-improvement.xml
+         (understand what was ALREADY fixed — do not duplicate)
+      4. Invoke /self-learning-iterative-coder
+      5. The skill will execute tasks in order, TDD style
+
+      Key context: The prior plan fixed 12 blockers including NaN guards, MLflow retry,
+      empty folds, checkpoint safety, and cross-file consistency. This plan addresses
+      15 NEW gaps: FP16 dtype mismatch in compound losses, NaN propagation through
+      AuxCalibCompoundLoss, silent empty returns from flow helpers, and missing test
+      coverage for mixed-precision training paths.
+    </cold-start-instructions>
+  </context>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: P0 BLOCKERS (would crash factorial training jobs)          -->
+  <!-- ================================================================== -->
+  <phase id="1" name="P0 Blockers — Crash Prevention">
+    <description>Fix 5 issues that would crash or corrupt a factorial training job</description>
+
+    <task id="T1" status="NOT_STARTED" priority="P0">
+      <title>GraphTopologyLoss FP16 dtype mismatch under autocast</title>
+      <description>
+        GraphTopologyLoss.forward() (loss_functions.py:540) initializes the accumulator as:
+          loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+
+        Under torch.amp.autocast (mixed_precision=True in trainer.py:415-418), logits.dtype
+        is float16. But sub-losses (cbdice_cldice, skeleton_recall, cape) internally use
+        softmax/operations that promote to float32. The weighted sum at lines 542-546 then
+        adds float32 sub-loss values to a float16 accumulator, causing precision loss or
+        overflow (FP16 max = 65504).
+
+        Fix: Force the accumulator to float32 regardless of input dtype.
+        This matches how VesselCompoundLoss and TopologyCompoundLoss work — they never
+        specify dtype on the accumulator, so it defaults to float32.
+      </description>
+      <root-cause>FP16 accumulator overflow in compound loss under autocast</root-cause>
+      <files>
+        <file action="modify">src/minivess/pipeline/loss_functions.py</file>
+        <file action="create">tests/v2/unit/losses/test_compound_loss_fp16.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/losses/test_compound_loss_fp16.py:
+
+          test_graph_topology_loss_fp16_input_finite():
+          - logits = torch.randn(1, 2, 16, 16, 8, dtype=torch.float16, requires_grad=True)
+          - labels = torch.randint(0, 2, (1, 1, 16, 16, 8)).float()
+          - loss_fn = GraphTopologyLoss()
+          - loss = loss_fn(logits.float(), labels)  # sub-losses expect float32
+          - Also test: loss_fn(logits, labels) with float16 input directly
+          - Assert loss.dtype == torch.float32 (accumulator must be float32)
+          - Assert torch.isfinite(loss)
+
+          test_graph_topology_loss_fp16_gradient_finite():
+          - Same setup, call loss.backward()
+          - Assert logits.grad is not None and torch.isfinite(logits.grad).all()
+
+          test_all_compound_losses_accumulator_dtype():
+          - Parametrize over [VesselCompoundLoss, TopologyCompoundLoss, GraphTopologyLoss,
+            CbDiceClDiceLoss, BceDiceClDiceLoss]
+          - For each: create float16 logits, compute loss
+          - Assert loss.dtype is torch.float32 (never float16)
+        </red>
+        <green>
+          In loss_functions.py:540, change:
+            loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
+          to:
+            loss = torch.tensor(0.0, device=logits.device, dtype=torch.float32)
+
+          This matches the implicit behavior of all other compound losses (VesselCompoundLoss
+          at line 127-130, TopologyCompoundLoss at line 349-353) which never specify dtype
+          on intermediate tensors, so they default to float32.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_compound_loss_fp16.py -v
+          uv run pytest tests/v2/unit/test_graph_topology_loss.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>GraphTopologyLoss accumulator is always float32 regardless of input dtype</criterion>
+        <criterion>All compound losses produce float32 output even with float16 input</criterion>
+        <criterion>All existing graph topology loss tests still pass</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T2" status="NOT_STARTED" priority="P0">
+      <title>HL1ACELoss NaN when ALL bins are empty (extreme probabilities)</title>
+      <description>
+        calibration_losses.py:85-100 — HL1ACELoss._hard_binned_calibration() sets empty bins
+        to NaN (line 188) and then uses torch.nanmean (line 90). If ALL bins are empty
+        (e.g., extreme logits producing all-0 or all-1 probabilities after softmax), every
+        bin is NaN, and torch.nanmean of all-NaN returns NaN.
+
+        This NaN propagates through AuxCalibCompoundLoss.forward() (line 583:
+        result = seg_val + self.aux_calib_weight * calib_val), corrupting the total loss
+        and poisoning optimizer state.
+
+        Fix: In HL1ACELoss.forward(), guard the nanmean result. If all bins are empty
+        (which means the model is extremely overconfident), return 0.0 with a warning.
+      </description>
+      <root-cause>torch.nanmean of all-NaN tensor returns NaN, propagates through loss chain</root-cause>
+      <files>
+        <file action="modify">src/minivess/pipeline/calibration_losses.py</file>
+        <file action="modify">tests/v2/unit/test_hl1ace_loss.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Add to tests/v2/unit/test_hl1ace_loss.py:
+
+          class TestHL1ACELossAllEmptyBins:
+              def test_hl1ace_extreme_logits_all_bins_empty():
+              - logits = torch.full((2, 2, 8, 8, 8), 100.0, requires_grad=True)
+                # softmax → near 1.0 or near 0.0 → all voxels in one bin → other bins empty
+              - labels = torch.randint(0, 2, (2, 1, 8, 8, 8))
+              - loss_fn = HL1ACELoss()
+              - result = loss_fn(logits, labels)
+              - Assert torch.isfinite(result), "HL1ACE should not return NaN on extreme logits"
+              - Assert result.requires_grad  # must have gradient path
+
+              def test_hl1ace_all_same_prediction_finite():
+              - logits = torch.zeros(1, 2, 8, 8, 8, requires_grad=True)  # uniform softmax 0.5
+              - labels = torch.zeros(1, 1, 8, 8, 8)
+              - result = HL1ACELoss()(logits, labels)
+              - Assert torch.isfinite(result)
+        </red>
+        <green>
+          In calibration_losses.py HL1ACELoss.forward(), after line 92:
+            ace_per_bc = torch.nanmean(
+                torch.abs(mean_p_per_bin - mean_gt_per_bin), dim=-1
+            )  # (B, C)
+
+          Add NaN guard (before line 95):
+            # Guard: if all bins were empty for a (batch, channel) pair, nanmean returns NaN.
+            # Replace NaN with 0.0 — if all bins are empty, calibration is undefined.
+            ace_per_bc = torch.where(
+                torch.isnan(ace_per_bc),
+                torch.zeros_like(ace_per_bc),
+                ace_per_bc,
+            )
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/test_hl1ace_loss.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>HL1ACELoss returns finite loss for extreme logits (all bins in one bucket)</criterion>
+        <criterion>HL1ACELoss returns finite loss for uniform predictions</criterion>
+        <criterion>All existing HL1ACE tests still pass</criterion>
+        <criterion>NaN bins are replaced with 0.0, not silently ignored</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T3" status="NOT_STARTED" priority="P0">
+      <title>AuxCalibCompoundLoss NaN isolation — seg_loss NaN poisons total</title>
+      <description>
+        AuxCalibCompoundLoss.forward() (loss_functions.py:579-584):
+          seg_val = self.seg_loss(logits, labels)
+          calib_val = self.aux_calib(logits, labels)
+          result = seg_val + self.aux_calib_weight * calib_val
+
+        If seg_loss produces NaN (e.g., clDice degeneration in VesselCompoundLoss before
+        the NaN guard catches it at a different compound level), the sum is NaN regardless
+        of calib_val. The NaN guard in VesselCompoundLoss (line 120-125) only fires when
+        VesselCompoundLoss is the TOP-LEVEL loss. When wrapped in AuxCalibCompoundLoss,
+        the guard fires but the NaN has already been replaced with 0.0, so this specific
+        path is safe. HOWEVER: if seg_loss is a different loss type that does NOT have
+        a NaN guard (e.g., HausdorffDTLoss with degenerate inputs), NaN propagates.
+
+        Fix: Add NaN guard on seg_val in AuxCalibCompoundLoss.forward(). Log warning
+        and substitute 0.0 for the NaN component, letting the other component provide
+        gradient signal.
+      </description>
+      <root-cause>No NaN isolation in AuxCalibCompoundLoss wrapper</root-cause>
+      <files>
+        <file action="modify">src/minivess/pipeline/loss_functions.py</file>
+        <file action="create">tests/v2/unit/losses/test_aux_calib_nan_isolation.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/losses/test_aux_calib_nan_isolation.py:
+
+          test_aux_calib_seg_nan_returns_finite():
+          - Create a mock seg_loss that returns torch.tensor(float('nan'))
+          - Wrap it in AuxCalibCompoundLoss(seg_loss=mock_seg_loss)
+          - Call forward(logits, labels)
+          - Assert result is finite (calib_val provides gradient signal)
+          - Assert warning logged about NaN from seg_loss
+
+          test_aux_calib_calib_nan_returns_finite():
+          - Use real seg_loss (dice_ce), mock HL1ACE to return NaN
+          - Assert result is finite (seg_val provides gradient signal)
+
+          test_aux_calib_both_nan_raises():
+          - Both components NaN → loss should raise ValueError (Rule 25)
+          - No silent zero return when both components are NaN
+
+          test_aux_calib_normal_case_unchanged():
+          - Normal logits/labels → result equals seg + weight * calib (unchanged)
+        </red>
+        <green>
+          In loss_functions.py AuxCalibCompoundLoss.forward() (lines 579-584):
+          Replace:
+            seg_val = self.seg_loss(logits, labels)
+            calib_val = self.aux_calib(logits, labels)
+            result = seg_val + self.aux_calib_weight * calib_val
+          With:
+            seg_val = self.seg_loss(logits, labels)
+            calib_val = self.aux_calib(logits, labels)
+
+            seg_nan = not torch.isfinite(seg_val)
+            calib_nan = not torch.isfinite(calib_val)
+
+            if seg_nan and calib_nan:
+                msg = "Both seg_loss and aux_calib produced NaN — cannot recover"
+                raise ValueError(msg)
+
+            if seg_nan:
+                logger.warning("seg_loss produced %s — using calib_val only", seg_val.item())
+                seg_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
+            if calib_nan:
+                logger.warning("aux_calib produced %s — using seg_val only", calib_val.item())
+                calib_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+
+            result = seg_val + self.aux_calib_weight * calib_val
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_aux_calib_nan_isolation.py -v
+          uv run pytest tests/v2/unit/test_compound_loss_aux_calib.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>NaN from seg_loss does not poison total loss</criterion>
+        <criterion>NaN from aux_calib does not poison total loss</criterion>
+        <criterion>Both NaN raises ValueError (Rule 25)</criterion>
+        <criterion>Normal case behavior unchanged</criterion>
+        <criterion>Warning logged when NaN component is substituted</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T4" status="NOT_STARTED" priority="P0">
+      <title>train_one_fold_task CUDA OOM: verify diagnostic logging + re-raise</title>
+      <description>
+        train_flow.py:465-470 and trainer.py:465-470 — the OOM handling catches
+        torch.cuda.OutOfMemoryError, logs diagnostics via _log_oom_diagnostics(),
+        then re-raises. This is CORRECT behavior (Rule 25), but there are NO tests
+        verifying the OOM diagnostic path. The existing test_oom_detection.py tests
+        the _is_oom_error() helper but not the full _log_oom_diagnostics() flow
+        including VRAM info extraction.
+
+        This is P0 because: if the diagnostics code itself crashes (e.g., accessing
+        torch.cuda.memory_allocated on a CPU device), the OOM exception is swallowed
+        and training hangs silently.
+      </description>
+      <root-cause>OOM diagnostic path untested — could swallow the real OOM exception</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py:
+
+          test_log_oom_diagnostics_cpu_device_no_crash():
+          - Create minimal SegmentationTrainer with device="cpu"
+          - Manually call _log_oom_diagnostics(RuntimeError("CUDA out of memory"))
+          - Assert it does NOT crash (VRAM section should say "unavailable")
+          - Assert logger.error was called with OOM diagnostic info
+
+          test_is_oom_error_detects_pytorch2_error():
+          - SegmentationTrainer._is_oom_error(torch.cuda.OutOfMemoryError()) → True
+          - (only if CUDA available; otherwise test RuntimeError variant)
+
+          test_is_oom_error_detects_legacy_runtime_error():
+          - _is_oom_error(RuntimeError("CUDA out of memory in ...")) → True
+
+          test_is_oom_error_rejects_unrelated_runtime_error():
+          - _is_oom_error(RuntimeError("something else")) → False
+
+          test_train_epoch_reraises_oom():
+          - Mock model.forward to raise RuntimeError("CUDA out of memory")
+          - Call trainer.train_epoch(mock_loader)
+          - Assert RuntimeError is re-raised (NOT swallowed)
+          - Assert _log_oom_diagnostics was called
+        </red>
+        <green>
+          Pure test file — the implementation already handles OOM correctly at
+          trainer.py:465-470. These tests VERIFY it works as designed and guard
+          against regressions where diagnostic code might swallow the exception.
+
+          Key: _log_oom_diagnostics (trainer.py:322-356) accesses torch.cuda.*
+          only when self.device.type == "cuda" (line 340). Verify this guard works.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/pipeline/test_trainer_oom_diagnostics.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>OOM diagnostics do not crash on CPU device</criterion>
+        <criterion>OOM is always re-raised after diagnostics (never swallowed)</criterion>
+        <criterion>_is_oom_error correctly classifies both PyTorch 2.x and legacy OOM</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T5" status="NOT_STARTED" priority="P0">
+      <title>ClassBalancedDiceLoss: all-background or single-class inputs</title>
+      <description>
+        ClassBalancedDiceLoss.forward() (loss_functions.py:202-237) computes
+        inverse-frequency weights at line 220-223:
+          weights = total_voxels / (class_counts * self.num_classes + self.smooth)
+          weights = weights / weights.sum(dim=1, keepdim=True)
+
+        With all-background labels: class_counts for foreground = 0, so
+        weights[foreground] = total_voxels / (0 + smooth) = very large number.
+        This doesn't crash (smooth prevents div-by-zero) but produces extreme
+        weight ratios (e.g., 1e5) that can destabilize early training.
+
+        With all-foreground labels: same issue for background class.
+
+        No test covers these extreme cases. The weights normalization at line 223
+        prevents infinity but the magnitude matters for gradient stability.
+      </description>
+      <root-cause>Extreme weight ratios with single-class batches, untested</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py:
+
+          test_cb_dice_all_background_finite():
+          - logits = torch.randn(1, 2, 8, 8, 8, requires_grad=True)
+          - labels = torch.zeros(1, 1, 8, 8, 8)  # all background
+          - loss_fn = ClassBalancedDiceLoss()
+          - loss = loss_fn(logits, labels)
+          - Assert torch.isfinite(loss)
+          - loss.backward()
+          - Assert torch.isfinite(logits.grad).all()
+
+          test_cb_dice_all_foreground_finite():
+          - labels = torch.ones(1, 1, 8, 8, 8)  # all foreground
+          - Same assertions
+
+          test_cb_dice_normal_case_differentiable():
+          - Mixed labels (random 0/1)
+          - Verify loss is finite, gradient is non-zero
+
+          test_cb_dice_weight_ratio_bounded():
+          - With all-background labels, verify weights normalization produces
+            values where max(weights) / min(weights) &lt; 1e6
+          - This is a sanity check, not a hard constraint
+        </red>
+        <green>
+          Pure test file — verifying existing behavior is safe. The smooth=1e-5
+          parameter (line 200) and the weights normalization (line 223) should
+          keep things finite. If any test reveals a bug, add a clamp:
+            weights = weights.clamp(max=1e4)  # Prevent extreme ratios
+          before the normalization at line 223.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_class_balanced_dice_edge_cases.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>ClassBalancedDiceLoss is finite with all-background labels</criterion>
+        <criterion>ClassBalancedDiceLoss is finite with all-foreground labels</criterion>
+        <criterion>Gradient is finite in all single-class cases</criterion>
+        <criterion>Weight ratios do not exceed 1e6 after normalization</criterion>
+      </acceptance-criteria>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: P1 CREDIT WASTE PREVENTION (silent failures at scale)     -->
+  <!-- ================================================================== -->
+  <phase id="2" name="P1 Credit Waste Prevention">
+    <description>Fix silent empty returns that waste cloud credits in production factorial runs</description>
+
+    <task id="T6" status="NOT_STARTED" priority="P1">
+      <title>resolve_checkpoint_paths_from_contract: loud failure on empty result</title>
+      <description>
+        post_training_flow.py:49-113 — resolve_checkpoint_paths_from_contract() returns
+        an empty list when: (a) parent_run_id is None (line 74), (b) no fold checkpoints
+        found (all dirs missing), (c) FlowContract.find_fold_checkpoints returns empty.
+
+        The caller at line 277 receives [] and post-training silently skips ALL
+        post-training methods (checkpoint averaging, SWAG, calibration). This wastes
+        the entire post-training GPU job cost with zero output.
+
+        Fix: When the result is empty AND parent_run_id was provided (meaning we EXPECTED
+        checkpoints), raise ValueError. When parent_run_id is None, log a warning and
+        return [] (that is the intended "no upstream" path).
+      </description>
+      <root-cause>Empty checkpoint list silently skips all post-training (Rule 25 violation)</root-cause>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file action="create">tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py:
+
+          test_resolve_checkpoint_none_parent_returns_empty():
+          - result = resolve_checkpoint_paths_from_contract(parent_run_id=None, tracking_uri="...")
+          - Assert result == []  # This is correct — no upstream
+
+          test_resolve_checkpoint_missing_dirs_raises():
+          - Mock FlowContract.find_fold_checkpoints to return infos with non-existent dirs
+          - result = resolve_checkpoint_paths_from_contract(parent_run_id="abc123", ...)
+          - Assert raises ValueError with message about missing checkpoints
+            (or returns empty and logs error — either way, NOT silent)
+
+          test_resolve_checkpoint_valid_paths():
+          - Mock FlowContract + create actual checkpoint files in tmp_path
+          - Assert result contains the correct paths
+        </red>
+        <green>
+          In post_training_flow.py resolve_checkpoint_paths_from_contract(),
+          after the for-loop (before return at line 113):
+
+            if parent_run_id is not None and not checkpoint_paths:
+                logger.error(
+                    "No checkpoint files found for parent run %s. "
+                    "Check that training completed and checkpoints are volume-mounted. "
+                    "Fold dirs checked: %s",
+                    parent_run_id,
+                    [info["checkpoint_dir"] for info in fold_infos],
+                )
+                raise ValueError(
+                    f"resolve_checkpoint_paths_from_contract found 0 checkpoints "
+                    f"for parent_run_id={parent_run_id}. "
+                    "Post-training cannot proceed without checkpoints."
+                )
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_resolve_checkpoint_paths.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Empty result with parent_run_id raises ValueError (not silent skip)</criterion>
+        <criterion>None parent_run_id still returns [] (intended no-upstream path)</criterion>
+        <criterion>Error message is actionable (mentions volume mounting)</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T7" status="NOT_STARTED" priority="P1">
+      <title>_discover_runs: empty experiment or zero matching runs must warn loudly</title>
+      <description>
+        analysis_flow.py:152-181 — _discover_runs() delegates to
+        EnsembleBuilder.discover_training_runs(). The builder at builder.py:210-218
+        returns [] when experiment doesn't exist (with a warning). But the analysis
+        flow at line 430-437 just logs the count and continues. If zero runs are found,
+        the entire analysis flow does no evaluation work — wasting the GPU job.
+
+        Fix: Add a loud failure in the analysis flow task (not in the builder, which
+        is correctly a query). The flow task should raise when zero runs found and
+        the user explicitly asked for analysis.
+      </description>
+      <root-cause>Zero training runs → silent no-op analysis flow (Rule 25 violation)</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py:
+
+          test_discover_runs_missing_experiment_returns_empty():
+          - Mock MlflowClient.get_experiment_by_name to return None
+          - result = _discover_runs(eval_config, model_config_dict)
+          - Assert result == [] and warning was logged
+
+          test_discover_runs_no_matching_runs_returns_empty():
+          - Mock client.search_runs to return []
+          - result = _discover_runs(eval_config, model_config_dict)
+          - Assert result == []
+
+          test_discover_runs_with_matching_runs():
+          - Mock client.search_runs to return runs with loss_function tag
+          - result = _discover_runs(eval_config, model_config_dict)
+          - Assert len(result) > 0
+
+          test_builder_experiment_not_found_warns(caplog):
+          - Set up EnsembleBuilder with non-existent experiment
+          - Mock MLflow client to return None for get_experiment_by_name
+          - Call discover_training_runs()
+          - Assert "not found" in caplog warning messages
+        </red>
+        <green>
+          Pure test file — the builder correctly returns [] with a warning.
+          The analysis flow already logs the count. These tests verify the
+          contract: empty result is a valid return (not a crash), but the
+          WARNING is logged so monitoring can detect it.
+
+          NOTE: The flow-level guard (raising when zero runs) should be
+          at the analysis_flow entry point, not in _discover_runs. If the
+          tests reveal the warning is missing, add it to builder.py:213-218.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_analysis_flow_empty_runs.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Missing experiment name produces a logged warning (not silent)</criterion>
+        <criterion>Zero matching runs produces a logged warning</criterion>
+        <criterion>Builder returns [] cleanly (not crash) for missing experiments</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T8" status="NOT_STARTED" priority="P1">
+      <title>Cost estimate edge cases: zero epochs, zero rate, negative time</title>
+      <description>
+        infrastructure_timing.py:240-282 — estimate_cost_from_first_epoch() and
+        train_flow.py:59-104 — log_epoch0_cost_estimate() have guards for
+        max_epochs &lt;= 1 and training_time_seconds &lt;= 0. But no tests verify:
+        (a) epoch_seconds=0 (instant epoch — possible with tiny debug data),
+        (b) hourly_rate_usd=0 (local runs — should produce $0 cost, not NaN),
+        (c) num_folds=0 (should not crash, produces $0).
+
+        These are tested implicitly by production runs but never explicitly in unit tests.
+        If any edge case produces NaN, mlflow.log_metrics() at train_flow.py:97 logs
+        NaN to MLflow, which corrupts the experiment tracking.
+      </description>
+      <root-cause>Cost estimate edge cases untested — NaN could corrupt MLflow metrics</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/observability/test_cost_estimate_edge_cases.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/observability/test_cost_estimate_edge_cases.py:
+
+          test_cost_estimate_zero_epoch_seconds():
+          - result = estimate_cost_from_first_epoch(epoch_seconds=0, max_epochs=100, num_folds=3, hourly_rate_usd=0.55)
+          - Assert all values are finite (should be $0)
+
+          test_cost_estimate_zero_hourly_rate():
+          - result = estimate_cost_from_first_epoch(epoch_seconds=120, max_epochs=100, num_folds=3, hourly_rate_usd=0.0)
+          - Assert est/total_cost == 0.0
+
+          test_cost_estimate_zero_folds():
+          - result = estimate_cost_from_first_epoch(epoch_seconds=120, max_epochs=100, num_folds=0, hourly_rate_usd=0.55)
+          - Assert all values are finite (0 folds * anything = setup cost only)
+
+          test_cost_estimate_normal_case():
+          - result = estimate_cost_from_first_epoch(epoch_seconds=60, max_epochs=100, num_folds=3, hourly_rate_usd=0.55)
+          - Assert est/total_cost > 0
+          - Assert est/total_hours > 0
+          - Assert all values are finite
+
+          test_log_epoch0_cost_skipped_single_epoch():
+          - Mock mlflow.log_metrics
+          - log_epoch0_cost_estimate(training_time_seconds=60, max_epochs=1, num_folds=3, hourly_rate_usd=0.55)
+          - Assert mlflow.log_metrics was NOT called (guard at line 82)
+
+          test_get_hourly_rate_invalid_env(monkeypatch):
+          - monkeypatch.setenv("INSTANCE_HOURLY_USD", "not-a-number")
+          - rate = get_hourly_rate_usd()
+          - Assert rate == 0.0 and warning was logged
+        </red>
+        <green>
+          Pure test file — verifying existing behavior.
+          The implementation at infrastructure_timing.py:240-282 should handle
+          all cases correctly via multiplication (0 * anything = 0).
+          If any test fails, add guards.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/observability/test_cost_estimate_edge_cases.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>All edge cases produce finite values (never NaN/Inf)</criterion>
+        <criterion>Zero hourly rate produces $0 cost</criterion>
+        <criterion>Single-epoch guard skips cost logging</criterion>
+        <criterion>Invalid INSTANCE_HOURLY_USD falls back to 0.0 with warning</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T9" status="NOT_STARTED" priority="P1">
+      <title>CAPELoss: all-background GT returns zero with gradient path</title>
+      <description>
+        cape.py:90-91 — when valid_count == 0 (all GT samples have empty skeleton),
+        CAPELoss returns torch.tensor(0.0, device=logits.device, requires_grad=True).
+        This is a new tensor NOT connected to logits, so backward() produces zero
+        gradient. This is CORRECT semantics (no path to enforce = no penalty), but
+        it means GraphTopologyLoss with all-background data gets 0 gradient from CAPE
+        AND from skeleton_recall (which has the same guard). Only cbdice_cldice provides
+        gradient signal.
+
+        The risk: if cbdice_cldice ALSO degenerates (NaN guard fires → 0.0), the
+        entire GraphTopologyLoss returns 0 with zero gradient, and training makes no
+        progress. No test covers this compound all-background-all-degenerate scenario.
+      </description>
+      <root-cause>Compound loss all-background: all sub-losses degenerate to zero gradient</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/losses/test_compound_loss_all_background.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/losses/test_compound_loss_all_background.py:
+
+          test_graph_topology_all_background_finite():
+          - logits = torch.randn(1, 2, 16, 16, 8, requires_grad=True)
+          - labels = torch.zeros(1, 1, 16, 16, 8)  # ALL background
+          - loss_fn = GraphTopologyLoss()
+          - loss = loss_fn(logits, labels)
+          - Assert torch.isfinite(loss)
+
+          test_graph_topology_all_background_gradient_exists():
+          - Same setup, call loss.backward()
+          - Assert logits.grad is not None
+          - NOTE: gradient may be all-zero if ALL sub-losses degenerate. That is
+            acceptable (it is semantically correct — no topology to preserve in
+            all-background data). The test verifies no CRASH, not non-zero gradient.
+
+          test_vessel_compound_all_background_finite():
+          - VesselCompoundLoss with all-background labels
+          - Assert finite loss (NaN guard should fire)
+
+          test_cbdice_cldice_all_background_finite():
+          - CbDiceClDiceLoss with all-background labels
+          - Assert finite loss
+
+          test_topology_compound_all_background_finite():
+          - TopologyCompoundLoss with all-background labels
+          - Assert finite loss
+
+          test_bce_dice_cldice_all_background_finite():
+          - BceDiceClDiceLoss with all-background labels
+          - Assert finite loss
+        </red>
+        <green>
+          Pure test file — verifying all compound losses survive all-background data.
+          The NaN guards in VesselCompoundLoss (line 120), TopologyCompoundLoss (line 341),
+          and _WrappedSoftclDiceLoss (line 165) should handle the clDice degeneration.
+          CAPE and SkeletonRecallLoss have their own guards (valid_count=0 → 0.0).
+
+          If any test fails: add the same NaN guard pattern to the failing loss.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_compound_loss_all_background.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>All 5 compound losses are finite with all-background labels</criterion>
+        <criterion>No crash in backward() for any compound loss</criterion>
+        <criterion>NaN guards fire where expected (cldice degeneration)</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T10" status="NOT_STARTED" priority="P1">
+      <title>_average_checkpoints: weights_only=True with non-standard state_dict</title>
+      <description>
+        post_training_flow.py:663-671 — _average_checkpoints() uses
+        torch.load(path, weights_only=True). If a checkpoint contains custom
+        objects beyond tensors (e.g., optimizer state with LR scheduler objects,
+        or non-standard keys), weights_only=True will raise UnpicklingError.
+
+        The existing guard (line 658-660) catches empty list, and the key mismatch
+        warning (lines 678-688) catches key drift. But there is NO guard for
+        the torch.load failure itself. If ANY fold checkpoint is corrupt,
+        _average_checkpoints crashes and the entire post-training flow fails.
+
+        Fix: Add try/except around torch.load with a clear error message.
+      </description>
+      <root-cause>Corrupt checkpoint crashes post-training with no diagnostic info</root-cause>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file action="modify">tests/v2/unit/orchestration/test_checkpoint_averaging.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Add to tests/v2/unit/orchestration/test_checkpoint_averaging.py:
+
+          test_average_checkpoints_corrupt_file_raises_clear_error():
+          - Create a corrupt checkpoint file (write random bytes)
+          - Call _average_checkpoints([corrupt_path], output_path)
+          - Assert raises RuntimeError (or ValueError) with message containing
+            the corrupt file path and "corrupt" or "load failed"
+
+          test_average_checkpoints_one_corrupt_one_valid():
+          - Create one valid and one corrupt checkpoint
+          - Call _average_checkpoints([valid, corrupt], output_path)
+          - Assert raises with message identifying WHICH checkpoint is corrupt
+        </red>
+        <green>
+          In post_training_flow.py _average_checkpoints(), wrap the torch.load calls
+          (lines 663, 671) with try/except:
+
+          try:
+              avg_state = torch.load(checkpoint_paths[0], weights_only=True)
+          except (RuntimeError, EOFError) as exc:
+              raise RuntimeError(
+                  f"Failed to load checkpoint {checkpoint_paths[0]}: {exc}. "
+                  "The file may be corrupt (truncated write during preemption)."
+              ) from exc
+
+          Similarly for the loop at line 671:
+          try:
+              loaded = torch.load(ckpt_path, weights_only=True)
+          except (RuntimeError, EOFError) as exc:
+              raise RuntimeError(
+                  f"Failed to load checkpoint {ckpt_path}: {exc}. "
+                  "The file may be corrupt."
+              ) from exc
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_checkpoint_averaging.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Corrupt checkpoint produces clear error with file path</criterion>
+        <criterion>Error message mentions "corrupt" for actionability</criterion>
+        <criterion>Valid checkpoints still average correctly</criterion>
+      </acceptance-criteria>
+    </task>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: P1 SCIENTIFIC INTEGRITY (result correctness)              -->
+  <!-- ================================================================== -->
+  <phase id="3" name="P1 Scientific Integrity">
+    <description>Ensure scientific result correctness through comprehensive edge case testing</description>
+
+    <task id="T11" status="NOT_STARTED" priority="P1">
+      <title>BettiLoss gradient masking: torch.diff on detached GT labels</title>
+      <description>
+        BettiLoss.forward() (loss_functions.py:265-297) computes spatial gradients
+        via torch.diff on BOTH fg_prob (prediction) and fg_label (ground truth).
+        fg_label is constructed from labels at line 277: fg_label = (labels_squeeze > 0).float().unsqueeze(1)
+
+        The issue: torch.diff(fg_label, dim=2) at line 288 computes gradients of a
+        DETACHED tensor (GT labels have no grad). The gt_frag (line 292-294) is therefore
+        a constant. The loss = |pred_frag - gt_frag| means gradient only flows through
+        pred_frag. This is CORRECT for a loss function (GT is fixed), but:
+
+        (a) If pred_frag == gt_frag exactly (random init), gradient is zero (saddle point)
+        (b) torch.diff reduces spatial dims by 1, so (B,1,D,H,W) → (B,1,D-1,H,W) etc.
+            This is fine for mean() but should be tested with minimum spatial dims.
+
+        No test covers: minimum spatial dims (D=2, H=2, W=2 → torch.diff yields size 1),
+        or the exact-match zero-gradient case.
+      </description>
+      <root-cause>Untested edge cases in BettiLoss spatial gradient computation</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py:
+
+          test_betti_loss_minimum_spatial_dims():
+          - logits = torch.randn(1, 2, 2, 2, 2, requires_grad=True)  # D=H=W=2
+          - labels = torch.randint(0, 2, (1, 1, 2, 2, 2)).float()
+          - loss_fn = BettiLoss()
+          - loss = loss_fn(logits, labels)
+          - Assert torch.isfinite(loss)
+          - loss.backward()
+          - Assert logits.grad is not None
+
+          test_betti_loss_gradient_direction():
+          - logits that produce fragmented prediction (alternating 0/1)
+          - labels = smooth (all 1s)
+          - loss should be positive (pred more fragmented than GT)
+          - Verify gradient pushes prediction toward less fragmentation
+
+          test_betti_loss_all_zero_predictions():
+          - logits = torch.full((1, 2, 8, 8, 8), -10.0, requires_grad=True)
+            # softmax → near 0 foreground
+          - labels = torch.ones(1, 1, 8, 8, 8)  # all foreground
+          - loss = BettiLoss()(logits, labels)
+          - Assert torch.isfinite(loss)
+          - loss.backward()
+          - Assert torch.isfinite(logits.grad).all()
+
+          test_betti_loss_perfect_match_near_zero():
+          - Create logits that closely match labels (pred_frag ≈ gt_frag)
+          - Assert loss is near zero (but not NaN)
+        </red>
+        <green>
+          Pure test file — verifying BettiLoss (loss_functions.py:240-297) handles
+          edge cases correctly. The implementation uses torch.diff + abs().mean()
+          which should be numerically stable. These tests guard against future
+          changes that might break the spatial gradient computation.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_betti_loss_gradient_edge_cases.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>BettiLoss works with minimum spatial dims (2x2x2)</criterion>
+        <criterion>All-zero prediction produces finite loss and gradient</criterion>
+        <criterion>Perfect prediction match produces near-zero loss</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T12" status="NOT_STARTED" priority="P1">
+      <title>SkeletonRecallLoss GPU memory: skeletonize() moves to CPU per-batch</title>
+      <description>
+        skeleton_recall.py:79-118 — _skeletonize_gt() moves each batch element to CPU
+        (.detach().cpu().numpy() at line 101), computes skimage.skeletonize(), then
+        moves back to GPU (.to(device=device) at line 117). For large batches or
+        volumes, this CPU-GPU transfer could be slow. More critically:
+
+        The RETURNED skeleton is .detach() (line 118), which is correct. But no test
+        verifies that the skeleton tensor does NOT accumulate in GPU memory across
+        iterations (memory leak potential if PyTorch retains the computation graph
+        through the skeleton).
+
+        Fix: Add a test that verifies skeleton is truly detached and does not
+        accumulate GPU memory across multiple forward passes.
+      </description>
+      <root-cause>Potential GPU memory accumulation from CPU-GPU transfer pattern</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/losses/test_skeleton_recall_memory.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/losses/test_skeleton_recall_memory.py:
+
+          test_skeleton_recall_detached_skeleton():
+          - loss_fn = SkeletonRecallLoss()
+          - logits, labels = make_test_pair()
+          - loss = loss_fn(logits, labels)
+          - Access loss_fn internal — check the skeleton tensor is detached
+          - Actually: verify by calling forward twice and checking that
+            gradient graph does not grow (gc.collect between calls)
+
+          test_skeleton_recall_multiple_forward_no_leak():
+          - loss_fn = SkeletonRecallLoss()
+          - Run forward 10 times
+          - After each: loss.backward(), optimizer.zero_grad()
+          - Verify no Python-level memory growth (check gc object count
+            or simply verify no OOM on small test data)
+
+          test_skeleton_recall_batch_size_scaling():
+          - Verify batch_size=1 and batch_size=4 both work
+          - Assert loss scales reasonably (not NaN for larger batch)
+        </red>
+        <green>
+          Pure test file — verifying the CPU-GPU transfer pattern in
+          skeleton_recall.py:79-118 does not leak memory. The .detach()
+          at line 118 should prevent graph accumulation. These tests
+          verify that invariant.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/losses/test_skeleton_recall_memory.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Skeleton tensor is detached (no gradient graph accumulation)</criterion>
+        <criterion>Multiple forward passes do not leak memory</criterion>
+        <criterion>Batch size 1 and 4 both produce finite results</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T13" status="NOT_STARTED" priority="P1">
+      <title>BettiMatchingLoss silent gudhi fallback: test proxy vs real behavior</title>
+      <description>
+        betti_matching.py:30-39 — BettiMatchingLoss checks gudhi availability at import
+        time. If gudhi is not installed, it silently uses a "differentiable proxy" that
+        is NOT the actual Betti matching from Stucki ICML 2023. The warning at line 36
+        fires at import time but is easily missed in a batch of 60+ SkyPilot jobs.
+
+        In our environment, gudhi IS installed (via uv sync --all-extras). But if a
+        Docker image is built without it, the proxy kicks in silently. No test verifies
+        that the gudhi-backed path and the proxy path produce DIFFERENT results, which
+        is important for scientific reproducibility — the proxy is an approximation.
+
+        Fix: Add tests that verify both paths and document the behavioral difference.
+      </description>
+      <root-cause>Silent fallback from exact topology matching to approximate proxy</root-cause>
+      <files>
+        <file action="modify">tests/v2/unit/test_betti_matching_loss.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Add to tests/v2/unit/test_betti_matching_loss.py:
+
+          test_betti_matching_gudhi_available():
+          - import gudhi — assert it is importable
+          - Verify betti_matching._GUDHI_AVAILABLE is True
+          - This guards against Docker images missing gudhi
+
+          test_betti_matching_differentiable():
+          - logits = torch.randn(1, 2, 16, 16, 8, requires_grad=True)
+          - labels = torch.randint(0, 2, (1, 1, 16, 16, 8)).float()
+          - loss_fn = BettiMatchingLoss()
+          - loss = loss_fn(logits, labels)
+          - Assert torch.isfinite(loss)
+          - loss.backward()
+          - Assert logits.grad is not None
+
+          test_betti_matching_all_background_finite():
+          - labels = torch.zeros(1, 1, 16, 16, 8)
+          - Assert loss is finite (should be 0 or near-0)
+
+          test_betti_matching_proxy_warns_when_no_gudhi(monkeypatch):
+          - monkeypatch.setattr("minivess.pipeline.vendored_losses.betti_matching._GUDHI_AVAILABLE", False)
+          - Instantiate BettiMatchingLoss with caplog
+          - Assert warning about "differentiable proxy" in caplog
+        </red>
+        <green>
+          Pure test file — verifying BettiMatchingLoss behavior in both
+          gudhi-available and proxy-fallback modes. If gudhi is NOT installed
+          in the test environment, the gudhi_available test will fail —
+          this is intentional (it catches Docker image misconfiguration).
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/test_betti_matching_loss.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>gudhi is importable in the test environment</criterion>
+        <criterion>BettiMatchingLoss is differentiable with gudhi backend</criterion>
+        <criterion>All-background labels produce finite loss</criterion>
+        <criterion>Proxy fallback logs a warning (not silent)</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T14" status="NOT_STARTED" priority="P1">
+      <title>Cross-flow EXPERIMENT_NAME consistency between train and analysis</title>
+      <description>
+        train_flow.py:1660 reads EXPERIMENT_NAME env var (default "minivess_training").
+        analysis_flow.py reads UPSTREAM_EXPERIMENT env var to find training runs.
+        post_training_flow.py reads EXPERIMENT env var at line 1598.
+
+        These three flows must agree on the experiment name for the cross-flow contract
+        to work. If train_flow uses "debug_dynunet_cbdice_cldice" but analysis_flow
+        searches for "minivess_training", zero runs are found and analysis is skipped.
+
+        No test verifies this cross-flow consistency. The SkyPilot YAML env vars are
+        the source of truth, but a test should verify the DEFAULT values match.
+      </description>
+      <root-cause>Cross-flow experiment name mismatch causes silent no-op analysis</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/orchestration/test_cross_flow_experiment_name.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/orchestration/test_cross_flow_experiment_name.py:
+
+          test_train_flow_experiment_name_env_var():
+          - Read train_flow.py source with ast.parse
+          - Find the argparse add_argument for --experiment-name
+          - Extract the default value
+          - Assert it reads from EXPERIMENT_NAME env var
+
+          test_analysis_flow_reads_upstream_experiment():
+          - Read analysis_flow.py source with ast.parse
+          - Find os.environ.get("UPSTREAM_EXPERIMENT") usage
+          - Assert it exists (the flow must read from env, not hardcode)
+
+          test_skypilot_yaml_experiment_names_consistent():
+          - Read deployment/skypilot/train_factorial.yaml
+          - Extract EXPERIMENT_NAME from env vars
+          - Read deployment/skypilot/analysis.yaml (if exists)
+          - Extract UPSTREAM_EXPERIMENT from env vars
+          - Assert the naming pattern is consistent
+            (e.g., both use the same EXPERIMENT variable or one derives from the other)
+
+          test_default_experiment_name_documented():
+          - The default "minivess_training" appears in train_flow.py
+          - Assert this string appears in at least one config or doc
+        </red>
+        <green>
+          Pure test file — verifying cross-flow experiment name consistency.
+          Use yaml.safe_load for YAML files, ast.parse for Python source.
+          Follow pattern from test_docker_image_consistency.py.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/orchestration/test_cross_flow_experiment_name.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Train flow reads EXPERIMENT_NAME from env</criterion>
+        <criterion>Analysis flow reads UPSTREAM_EXPERIMENT from env</criterion>
+        <criterion>SkyPilot YAML env vars are consistent across flows</criterion>
+      </acceptance-criteria>
+    </task>
+
+    <task id="T15" status="NOT_STARTED" priority="P1">
+      <title>ExperimentTracker: test log_hydra_config and log_artifact error paths</title>
+      <description>
+        tracking.py:498-555 — log_hydra_config() and tracking.py:344-346 — log_artifact()
+        are called during training to persist the resolved config and profiling data.
+        If MLflow is unreachable at these points (different from the resume check —
+        this is DURING training), these methods could either crash the training run
+        or silently lose the config artifact.
+
+        No test covers: (a) log_hydra_config with no active MLflow run,
+        (b) log_artifact with a non-existent file path, (c) log_artifact when
+        MLflow is unreachable mid-training.
+
+        These are P1 because: losing the config artifact makes the run non-reproducible,
+        but it should NOT crash training. The fix is to ensure these methods are
+        fault-tolerant (log warning, continue).
+      </description>
+      <root-cause>Config artifact loss during MLflow outage makes runs non-reproducible</root-cause>
+      <files>
+        <file action="create">tests/v2/unit/observability/test_tracker_error_paths.py</file>
+      </files>
+      <tdd-spec>
+        <red>
+          Create tests/v2/unit/observability/test_tracker_error_paths.py:
+
+          test_log_artifact_nonexistent_file_warns():
+          - tracker = ExperimentTracker(config, tracking_uri=str(tmp_path / "mlruns"))
+          - tracker.start_run()
+          - tracker.log_artifact(Path("/nonexistent/file.txt"))
+          - Assert warning logged (not crash)
+
+          test_log_hydra_config_no_active_run():
+          - tracker = ExperimentTracker(config, tracking_uri=str(tmp_path / "mlruns"))
+          - Do NOT call start_run()
+          - tracker.log_hydra_config(resolved_config={})
+          - Assert it handles gracefully (warning or no-op, not crash)
+
+          test_log_artifact_valid_file():
+          - Create a valid file in tmp_path
+          - tracker.start_run()
+          - tracker.log_artifact(valid_file)
+          - Assert no error
+
+          test_tracker_start_run_creates_experiment():
+          - tracker = ExperimentTracker(config, tracking_uri=str(tmp_path / "mlruns"))
+          - tracker.start_run()
+          - Assert MLflow experiment was created
+          - tracker.end_run()
+        </red>
+        <green>
+          Pure test file — verifying ExperimentTracker error paths.
+          The implementation at tracking.py should already handle most of these
+          via MLflow's internal error handling. If any test reveals a crash,
+          add try/except with logger.warning in the affected method.
+        </green>
+        <verify>
+          uv run pytest tests/v2/unit/observability/test_tracker_error_paths.py -v
+          make test-staging
+        </verify>
+      </tdd-spec>
+      <acceptance-criteria>
+        <criterion>Non-existent file does not crash log_artifact</criterion>
+        <criterion>No active run does not crash log_hydra_config</criterion>
+        <criterion>Valid file logging works correctly</criterion>
+        <criterion>All error paths produce warnings (not silent failures)</criterion>
+      </acceptance-criteria>
+    </task>
+  </phase>
+
+  <verification>
+    <gate name="staging">make test-staging</gate>
+    <gate name="lint">uv run ruff check src/ tests/</gate>
+    <gate name="types">uv run mypy src/</gate>
+    <expected-new-tests>~45-55 new tests across 12 test files</expected-new-tests>
+    <expected-staging-total>6640+ (current 6590+ from prior plan + new tests)</expected-staging-total>
+  </verification>
+</plan>

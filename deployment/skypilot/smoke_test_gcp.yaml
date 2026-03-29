@@ -2,7 +2,7 @@
 #
 # GCP provides VM-based instances with Docker preinstalled.
 # Spot instances: 60-91% cheaper than on-demand.
-# Same-region as GCS/Cloud SQL/MLflow (europe-north1, Finland).
+# Same-region as GCS/Cloud SQL/MLflow (us-central1, migrated from europe-west4 2026-03-28).
 # ALL infrastructure on GCP — no cross-Atlantic artifact uploads.
 #
 # Launch:
@@ -30,7 +30,7 @@ name: minivess-gcp-smoke-test
 
 resources:
   # Docker image from GCP Artifact Registry (same-region = fastest pulls, ~15 min for 9 GB)
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. A100 removed — unauthorized. T4 BANNED (no BF16).
   # See: .claude/metalearning/2026-03-15-t4-turing-fp16-nan-ban.md
   accelerators: L4:1
@@ -41,13 +41,8 @@ resources:
   job_recovery:
     max_restarts_on_errors: 3
 
-# Checkpoint persistence via GCS bucket mount.
-# The bucket must exist (created by Pulumi). Use 'source' to reference
-# an externally-created bucket rather than letting SkyPilot create one.
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT
+# Checkpoint persistence: MLflow GCS artifact store.
+# file_mounts removed — MLflow is the only persistence mechanism.
 
 envs:
   MODEL_FAMILY: sam3_vanilla

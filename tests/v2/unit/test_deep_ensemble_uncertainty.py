@@ -201,7 +201,7 @@ class TestDeepEnsembleUncertaintyDecomposition:
         expected_shape = (BATCH, 2, DEPTH, HEIGHT, WIDTH)
         assert result.prediction.shape == expected_shape
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No GPU available")
+    @pytest.mark.gpu
     def test_cpu_and_gpu_compatible(self) -> None:
         """Uncertainty decomposition should work on both CPU and CUDA tensors."""
         device = torch.device("cuda")

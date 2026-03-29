@@ -97,6 +97,7 @@ def _build_mock_trainer(tmp_path):
         max_epochs=1,
         learning_rate=1e-3,
         batch_size=1,
+        mixed_precision=False,  # CPU test — GradScaler warns without CUDA
         checkpoint=CheckpointConfig(save_last=False, save_history=False),
     )
 

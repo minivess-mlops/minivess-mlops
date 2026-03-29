@@ -93,19 +93,17 @@ def _find_env_get_with_fallback(filepath: Path) -> list[tuple[int, str, str]]:
             and isinstance(node.func.value, ast.Attribute)
             and node.func.value.attr == "environ"
             and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
         ):
-            # First arg is the env var name
-            if isinstance(node.args[0], ast.Constant) and isinstance(
-                node.args[0].value, str
-            ):
-                var_name = node.args[0].value
-                fallback = (
-                    repr(node.args[1].value)
-                    if isinstance(node.args[1], ast.Constant)
-                    else "<expression>"
-                )
-                if var_name not in ALLOWED_FALLBACK_VARS:
-                    violations.append((node.lineno, var_name, fallback))
+            var_name = node.args[0].value
+            fallback = (
+                repr(node.args[1].value)
+                if isinstance(node.args[1], ast.Constant)
+                else "<expression>"
+            )
+            if var_name not in ALLOWED_FALLBACK_VARS:
+                violations.append((node.lineno, var_name, fallback))
 
     return violations
 

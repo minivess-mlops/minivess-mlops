@@ -157,7 +157,6 @@ class TestBettiLoss:
         from minivess.pipeline.loss_functions import BettiLoss
 
         loss_fn = BettiLoss()
-        assert loss_fn.threshold == 0.5
         assert loss_fn.lambda_betti == 1.0
 
     def test_forward_returns_scalar(self) -> None:

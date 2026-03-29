@@ -10,7 +10,7 @@
     "fold": [0, 1, 2]
   },
   "skypilot_yaml": "deployment/skypilot/train_factorial.yaml",
-  "docker_image": "europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest",
+  "docker_image": "europe-west4-docker.pkg.dev/minivess-mlops/minivess/base:latest",
   "docker_digest": "sha256:abc123...",
   "max_relaunch_cycles": 2,
   "current_cycle": 0,

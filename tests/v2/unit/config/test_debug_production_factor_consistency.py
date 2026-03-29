@@ -128,7 +128,9 @@ class TestZeroShotBaselinesIdentical:
             f"debug={len(debug_baselines)}, paper_full={len(paper_baselines)}"
         )
 
-        for i, (dbg, ppr) in enumerate(zip(debug_baselines, paper_baselines)):
+        for i, (dbg, ppr) in enumerate(
+            zip(debug_baselines, paper_baselines, strict=True)
+        ):
             # Compare everything except 'folds' (allowed debug reduction per Rule #27)
             dbg_no_folds = {k: v for k, v in dbg.items() if k != "folds"}
             ppr_no_folds = {k: v for k, v in ppr.items() if k != "folds"}

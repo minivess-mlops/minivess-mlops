@@ -95,9 +95,9 @@ Details: `deployment/CLAUDE.md` (Docker, volumes, GPU, compose files).
 
 **GCP Project Details** (see `deployment/pulumi/gcp/CLAUDE.md` for full reference):
 - **Project**: `minivess-mlops`
-- **Region**: `europe-north1` (Finland)
+- **Region**: `europe-west4` (Netherlands)
 - **GCS Buckets**: `minivess-mlops-dvc-data`, `minivess-mlops-mlflow-artifacts`, `minivess-mlops-checkpoints`
-- **Docker Registry**: GAR (`europe-north1-docker.pkg.dev/minivess-mlops/minivess`)
+- **Docker Registry**: GAR (`europe-west4-docker.pkg.dev/minivess-mlops/minivess`)
 - **IaC**: Pulumi (`deployment/pulumi/gcp/`)
 - **Setup guide**: `docs/planning/gcp-setup-tutorial.md`
 
@@ -554,3 +554,19 @@ Read [`knowledge-graph/navigator.yaml`](knowledge-graph/navigator.yaml) FIRST ->
 
 65 PRD decision nodes across 11 domains. PRD Skill: `.claude/skills/prd-update/SKILL.md`.
 OpenSpec: `openspec/` -- spec-driven development via `/opsx:propose`.
+
+---
+
+## Knowledge Hub Integration
+
+This repo's knowledge graph and bibliography are indexed in the knowledge-hub DuckDB (5,432 docs, 43M words).
+When working in this repo, the `knowledge-hub` MCP server is auto-discovered.
+
+Use the MCP tools for cross-source context:
+- `search_knowledge("vascular segmentation loss functions")` — finds biblio papers + Obsidian notes + repo docs
+- `search_knowledge("clDice centerline topology")` — cross-reference topology-aware segmentation research
+- `search_knowledge("3D medical image reconstruction")` — biomedical imaging context
+- `knowledge_hierarchy("Deep 3D")` — browse Obsidian domain tree
+- `knowledge_coverage("vascular segmentation")` — find coverage gaps across sources
+
+Biblio path: `/home/petteri/Dropbox/knowledge-hub/repositories/sci-llm-writer/biblio/` (19 domains, 1,183+ papers)

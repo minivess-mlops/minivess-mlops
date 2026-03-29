@@ -1,0 +1,21 @@
+# Single-region us-central1 — highest GPU availability globally.
+#
+# Migrated from europe-west4 on 2026-03-28 due to 13+ hours GPU capacity exhaustion.
+# All infrastructure (GAR, GCS, Cloud SQL, Cloud Run) co-located in us-central1.
+# Zero cross-region egress.
+#
+# See: docs/planning/v0-2_archive/original_docs/gcs-region-migration-to-us-central1.xml
+
+description: "Single-region us-central1 — highest GPU availability, zero egress"
+
+regions:
+  gcp:
+    L4:
+      - region: us-central1     # Iowa — 3 zones, highest L4 availability ($0.224/hr spot)
+        zones: 3
+    A100:
+      - region: us-central1     # A100-40GB spot fallback ($1.10/hr spot, quota: 1 preemptible)
+        zones: 3
+    A100-80GB:
+      - region: us-central1     # A100-80GB spot fallback ($1.38/hr spot, quota: 1 preemptible)
+        zones: 3

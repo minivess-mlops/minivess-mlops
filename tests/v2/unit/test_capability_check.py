@@ -10,7 +10,6 @@ Verifies that the capability schema check:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import yaml
 

@@ -18,8 +18,8 @@
 name: minivess-production
 
 resources:
-  # GAR image — Docker registry in europe-north1.
-  image_id: docker:europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest
+  # GAR image — Docker registry in us-central1 (migrated from europe-west4 2026-03-28).
+  image_id: docker:us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest
   # L4 ONLY. T4 BANNED. A100 requires explicit user authorization.
   cloud: gcp
   use_spot: true
@@ -31,11 +31,8 @@ resources:
   job_recovery:
     max_restarts_on_errors: 3
 
-# Checkpoint persistence via GCS bucket mount (#878).
-file_mounts:
-  /app/checkpoints:
-    source: gs://minivess-mlops-checkpoints
-    mode: MOUNT_CACHED
+# Checkpoint persistence: MLflow GCS artifact store (gs://minivess-mlops-mlflow-artifacts).
+# file_mounts removed — was a competing persistence mechanism.
 
 envs:
   # Per-condition parameters — override with --env flags

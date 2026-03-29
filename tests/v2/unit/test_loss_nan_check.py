@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
+from unittest.mock import patch
+
 import pytest
 import torch
 
-from minivess.pipeline.loss_functions import build_loss_function
+from minivess.pipeline.loss_functions import VesselCompoundLoss, build_loss_function
 
 
 @pytest.fixture()
@@ -94,6 +97,82 @@ class TestAllLossesNoNaN:
         loss_fn = build_loss_function(loss_name)
         loss = loss_fn(logits, labels)
         assert not torch.isnan(loss), f"{loss_name} produced NaN on empty labels"
+
+    @pytest.mark.parametrize(
+        "loss_name",
+        ["dice_ce_cldice", "cbdice_cldice", "bce_dice_05cldice", "full_topo"],
+    )
+    def test_cldice_nan_guard_catches_degenerate(self, loss_name: str) -> None:
+        """NaN guard must catch degenerate SoftclDiceLoss output and fall back to 0.0.
+
+        Mocks SoftclDiceLoss.forward to return NaN (simulating soft skeleton
+        degeneration). The VesselCompoundLoss NaN guard must:
+        1. Replace NaN with 0.0 (clDice = 0 is semantically correct for no centerline)
+        2. Log a warning (Rule 25: loud failures)
+        3. Produce finite overall loss (DiceCE component provides gradient signal)
+        """
+        torch.manual_seed(42)
+        logits = torch.randn(1, 2, 8, 16, 16, requires_grad=True)
+        labels = torch.zeros(1, 1, 8, 16, 16)
+        labels[:, :, 2:6, 4:12, 4:12] = 1.0
+
+        loss_fn = build_loss_function(loss_name)
+
+        # Mock SoftclDiceLoss.forward to return NaN
+        nan_tensor = torch.tensor(float("nan"))
+        with patch(
+            "monai.losses.cldice.SoftclDiceLoss.forward", return_value=nan_tensor
+        ):
+            loss = loss_fn(logits, labels)
+            assert torch.isfinite(loss), f"{loss_name}: NaN guard failed — loss is {loss}"
+
+    @pytest.mark.parametrize(
+        "loss_name",
+        ["dice_ce_cldice", "cbdice_cldice", "bce_dice_05cldice", "full_topo"],
+    )
+    def test_cldice_nan_guard_logs_warning(
+        self, loss_name: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """NaN guard must log a warning when clDice is NaN (Rule 25)."""
+        torch.manual_seed(42)
+        logits = torch.randn(1, 2, 8, 16, 16, requires_grad=True)
+        labels = torch.zeros(1, 1, 8, 16, 16)
+
+        loss_fn = build_loss_function(loss_name)
+
+        nan_tensor = torch.tensor(float("nan"))
+        with (
+            patch(
+                "monai.losses.cldice.SoftclDiceLoss.forward", return_value=nan_tensor
+            ),
+            caplog.at_level(logging.WARNING),
+        ):
+            loss_fn(logits, labels)
+            assert any(
+                "clDice" in r.message or "cldice" in r.message.lower()
+                for r in caplog.records
+            ), "NaN guard did not log a warning about degenerate clDice"
+
+    def test_cldice_nan_guard_gradient_finite(self) -> None:
+        """When NaN guard triggers, backward() must still produce finite gradients."""
+        torch.manual_seed(42)
+        logits = torch.randn(1, 2, 8, 16, 16, requires_grad=True)
+        labels = torch.zeros(1, 1, 8, 16, 16)
+        labels[:, :, 2:6, 4:12, 4:12] = 1.0
+
+        loss_fn = VesselCompoundLoss()
+
+        nan_tensor = torch.tensor(float("nan"))
+        with patch(
+            "monai.losses.cldice.SoftclDiceLoss.forward", return_value=nan_tensor
+        ):
+            loss = loss_fn(logits, labels)
+            assert torch.isfinite(loss), f"Loss is not finite: {loss}"
+            loss.backward()
+            assert logits.grad is not None, "No gradient computed"
+            assert not torch.any(
+                torch.isnan(logits.grad)
+            ), "NaN in gradients after guard"
 
     @pytest.mark.parametrize("loss_name", EXPERIMENT_LOSSES)
     def test_multi_step_no_nan(self, loss_name: str) -> None:

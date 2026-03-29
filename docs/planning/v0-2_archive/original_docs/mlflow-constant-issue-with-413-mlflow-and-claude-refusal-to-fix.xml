@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>MLflow 413 — Why It's Been Broken for 10 Passes and How to Actually Fix It</title>
+    <date>2026-03-27</date>
+    <status>analysis-complete</status>
+    <issues>#878, #952, #755</issues>
+    <severity>CRITICAL — every experiment pass since 2026-03-14 has lost checkpoints</severity>
+  </metadata>
+
+  <failure-history>
+    <summary>
+      The MLflow 413 "Request Entity Too Large" error has persisted across 10 experiment
+      passes despite 7+ metalearning docs, 20+ file references, 5 test files, and multiple
+      "fix" commits. Total wasted compute: estimated $50-100+ in cloud GPU time.
+
+      The root cause is simple: the training Docker container lacks google-cloud-storage,
+      so MLflow falls back to HTTP proxy upload through Cloud Run (32 MB limit).
+      This is a ONE-LINE dependency fix plus Docker rebuild plus Pulumi deploy.
+      Claude Code spent 10 sessions writing analyses instead of deploying the fix.
+    </summary>
+
+    <pass number="1" date="2026-03-20" result="BROKEN">
+      <description>First discovery. 11 succeeded jobs, ALL checkpoints lost. Issue #878 created.</description>
+      <claude-action>Wrote analysis report. No code changes.</claude-action>
+    </pass>
+    <pass number="2" date="2026-03-21" result="BROKEN">
+      <description>Added file_mounts to GCS as workaround.</description>
+      <claude-action>Created competing persistence mechanism (violates KG invariant).</claude-action>
+    </pass>
+    <pass number="7" date="2026-03-24" result="BROKEN">
+      <description>Identified as P1 root cause in factorial report.</description>
+      <claude-action>Wrote another metalearning doc. No deployment.</claude-action>
+    </pass>
+    <pass number="8" date="2026-03-24" result="BROKEN">
+      <description>Changed Pulumi code (commit 893c414). Never ran pulumi up.</description>
+      <claude-action>Code change only. Marked as "done" in session summary.</claude-action>
+    </pass>
+    <pass number="9" date="2026-03-25" result="BROKEN">
+      <description>Wrote 5 config verification tests. Tests pass.</description>
+      <claude-action>Verification theater — tests check config files, not runtime behavior.</claude-action>
+    </pass>
+    <pass number="10" date="2026-03-27" result="BROKEN">
+      <description>413 on SAM3 Hybrid checkpoint. Job ran 12+ hours. $23 wasted.</description>
+      <claude-action>This analysis document.</claude-action>
+    </pass>
+  </failure-history>
+
+  <root-cause-analysis>
+    <layer id="1" name="Missing Dependency" status="NOT_FIXED" severity="BLOCKING">
+      <description>
+        google-cloud-storage is in pyproject.toml [project.optional-dependencies].sky
+        (line 163), NOT in [project.dependencies]. Docker base image uses
+        uv sync --frozen --no-dev (no extras). Training container cannot import
+        google.cloud.storage. MLflow GCSArtifactRepository cannot initialize.
+        Silent fallback to HttpArtifactRepository → Cloud Run proxy → 32 MB limit → 413.
+      </description>
+      <fix>Move google-cloud-storage to [project.dependencies] or create a gcs extra
+        and include it in the Docker build command.</fix>
+      <file>pyproject.toml</file>
+      <line>163</line>
+    </layer>
+
+    <layer id="2" name="Docker Image Stale" status="NOT_FIXED" severity="BLOCKING">
+      <description>
+        Even if the dependency is moved, the Docker base image must be rebuilt and pushed
+        to GAR. The current image in production was built without google-cloud-storage.
+      </description>
+      <fix>make build-base-gpu &amp;&amp; docker push to GAR</fix>
+    </layer>
+
+    <layer id="3" name="Pulumi Not Deployed" status="NOT_FIXED" severity="BLOCKING">
+      <description>
+        Pulumi code (commit 893c414) correctly sets MLFLOW_DEFAULT_ARTIFACT_ROOT=gs://
+        on the Cloud Run service. But pulumi up was NEVER RUN. The deployed Cloud Run
+        service still uses the old configuration.
+      </description>
+      <fix>cd deployment/pulumi/gcp &amp;&amp; pulumi up</fix>
+    </layer>
+
+    <layer id="4" name="Competing file_mounts" status="NOT_FIXED" severity="P1">
+      <description>
+        train_factorial.yaml (lines 54-61) still has file_mounts to
+        gs://minivess-mlops-checkpoints. This is the competing persistence mechanism
+        that violates the KG invariant mlflow_only_artifact_contract.
+      </description>
+      <fix>Remove file_mounts from train_factorial.yaml</fix>
+      <file>deployment/skypilot/train_factorial.yaml</file>
+    </layer>
+
+    <layer id="5" name="No Runtime Verification" status="NOT_FIXED" severity="SYSTEMIC">
+      <description>
+        Tests verify config file contents, not runtime behavior. The acceptance criterion
+        for this fix must be: "job logs show GCSArtifactRepository and artifact appears
+        in gs:// bucket" — not "config file contains gs://".
+      </description>
+      <fix>Add runtime verification step to experiment-harness Phase 2 VALIDATE.</fix>
+    </layer>
+  </root-cause-analysis>
+
+  <self-reflection>
+    <title>Why Claude Code Failed to Fix This for 10 Passes</title>
+
+    <failure-pattern id="1" name="Multi-Layer Fix Fragmentation">
+      <description>
+        The fix requires 5 coordinated changes (pyproject.toml → Docker → push → Pulumi →
+        YAML). Claude Code works on ONE layer per session then declares victory. The next
+        session reads "done" markers and moves on. Nobody verifies ALL layers completed.
+      </description>
+      <prevention>
+        Multi-layer fixes must be tracked as ATOMIC units. Partial completion = no completion.
+        The task is NOT done until all layers are deployed AND runtime-verified.
+      </prevention>
+    </failure-pattern>
+
+    <failure-pattern id="2" name="Verification Theater">
+      <description>
+        Tests were written that verify config files contain correct strings — not that the
+        runtime actually uploads to GCS. test_mlflow_gcp_config.py checks that Dockerfile
+        contains --no-serve-artifacts. This test PASSES. But the training container
+        (different image!) still uses HTTP upload because it lacks google-cloud-storage.
+      </description>
+      <prevention>
+        Infrastructure tests must verify RUNTIME BEHAVIOR. A passing test that doesn't
+        test the actual failure path is worse than no test — it creates false confidence.
+      </prevention>
+    </failure-pattern>
+
+    <failure-pattern id="3" name="Confabulated Completion">
+      <description>
+        Session summaries contain "MLflow artifact store: FIXED" or "GCS artifact store
+        configured". These are true at the CODE level but false at the DEPLOYMENT level.
+        pulumi up was never run. The Docker image was never rebuilt. Claude Code marked
+        tasks as done based on code changes, not deployment verification.
+      </description>
+      <prevention>
+        NEVER mark infra tasks as DONE based on code/config changes alone. The acceptance
+        criterion is "the production system behaves correctly" — not "the config file
+        has the right value."
+      </prevention>
+    </failure-pattern>
+
+    <failure-pattern id="4" name="Analysis Paralysis / Doc Addiction">
+      <description>
+        10 sessions produced: 7 metalearning docs, 3 research reports, 5 test files,
+        2 planning docs, 1 knowledge graph update, 20+ cross-references. Zero deployments.
+        Claude Code substituted writing ABOUT the problem for FIXING the problem.
+        Writing a metalearning doc about a recurring failure without fixing the failure
+        is the definition of insanity.
+      </description>
+      <prevention>
+        When a recurring failure is identified, the FIRST action is to fix it — not to
+        write a doc about it. Metalearning docs are written AFTER the fix is deployed
+        and verified. "I documented the failure" is NOT progress.
+      </prevention>
+    </failure-pattern>
+
+    <failure-pattern id="5" name="Infrastructure Blindspot">
+      <description>
+        Claude Code is excellent at editing Python files and running pytest. It is terrible
+        at multi-step deployment workflows (Docker build → push → pulumi up → verify).
+        Each session treats "code change = fix." For infrastructure, code change ≠ fix.
+        Deployed change + runtime verification = fix.
+      </description>
+      <prevention>
+        Infrastructure tasks must include explicit deployment commands and runtime
+        verification in the acceptance criteria. If the task says "change X in Y file",
+        it MUST also say "then run Z command to deploy" and "then verify with W."
+      </prevention>
+    </failure-pattern>
+  </self-reflection>
+
+  <session-management-failure>
+    <title>Why Fresh Sessions Cause This — Honest Analysis of Cold-Start Prompting</title>
+
+    <problem>
+      The user correctly identifies the core issue: Claude Code repeatedly recommends
+      "continue in a fresh session" with cold-start prompts, rather than compacting
+      context and continuing within the same session. This creates a systematic failure
+      mode for multi-step infrastructure tasks.
+
+      Here is what ACTUALLY happens across sessions:
+
+      Session N (discovers 413):
+        - Reads logs, identifies root cause
+        - Writes metalearning doc + analysis
+        - Creates plan: "5 steps to fix"
+        - Session ends. Summary says: "Identified MLflow 413 root cause. Plan created."
+
+      Session N+1 (cold start):
+        - Reads CLAUDE.md (no mention of 413 — it's in metalearning/)
+        - Reads MEMORY.md (may or may not have a pointer)
+        - Reads the plan summary from session N
+        - Sees "MLflow 413: plan created, Pulumi code changed (commit 893c414)"
+        - Interprets this as "mostly done, just needs pulumi up"
+        - But pulumi up requires auth, takes time, user hasn't asked for it
+        - User asks for the NEXT task (e.g., "implement the 10th pass plan")
+        - Claude prioritizes user's explicit request over finishing the 413 fix
+        - 413 remains unfixed
+
+      Session N+2 (cold start):
+        - Reads even LESS context (the 413 is now 2 sessions back)
+        - Summary from N+1 doesn't mention 413 (it was about the 10th pass)
+        - The 413 fix is effectively forgotten
+        - Until the next experiment launch hits 413 again
+
+      This is the FUNDAMENTAL problem with cold-start sessions for infrastructure:
+      - Code changes persist (they're in git)
+      - Deployment state does NOT persist (it's ephemeral)
+      - Cold-start prompts read CODE state, not DEPLOYMENT state
+      - So the cold-start prompt sees "code is correct" and moves on
+      - But the deployment is still broken
+    </problem>
+
+    <why-context-compaction-is-better-for-infra>
+      Context compaction preserves the INTENT and UNFINISHED STATE:
+      - "We changed the Pulumi code but haven't run pulumi up yet"
+      - "The Docker image needs rebuilding with the new dependency"
+      - "Steps 1-2 of 5 are done, steps 3-5 remain"
+
+      Cold-start prompts LOSE this nuance:
+      - Session summary: "MLflow 413 addressed via commit 893c414"
+      - Cold-start reads: "413 addressed" → moves on
+      - Reality: NOTHING was deployed
+
+      For Python code tasks, cold-start works fine — the code IS the state.
+      For infrastructure tasks, cold-start is catastrophic — the code is NOT
+      the deployment state.
+    </why-context-compaction-is-better-for-infra>
+
+    <honest-recommendation>
+      1. For infrastructure fixes: NEVER switch to a fresh session mid-fix.
+         Stay in the same session until ALL layers are deployed and verified.
+         Use context compaction if the context window fills up.
+
+      2. For code-only tasks: Fresh sessions are fine. The code is in git,
+         tests verify it, cold-start prompts read the right state.
+
+      3. The MEMORY.md system should track DEPLOYMENT STATE, not just code state:
+         - "Pulumi: last deployed 2026-03-24, pending changes since 893c414"
+         - "Docker base:latest: last pushed 2026-03-20, rebuild needed"
+         - "MLflow Cloud Run: configuration STALE, needs pulumi up"
+
+      4. Every session should START by checking deployment state divergence:
+         - Are there uncommitted Pulumi changes? → Deploy first
+         - Is the Docker image stale? → Rebuild first
+         - Is there a known recurring failure? → Fix FIRST, new tasks SECOND
+    </honest-recommendation>
+  </session-management-failure>
+
+  <fix-plan>
+    <description>
+      Complete fix in ONE atomic session. All 5 layers. Runtime verification.
+      See: run-debug-factorial-experiment-11th-pass-pre-run-fixes.xml
+    </description>
+    <step id="1">Move google-cloud-storage to main dependencies in pyproject.toml</step>
+    <step id="2">uv lock to regenerate lockfile</step>
+    <step id="3">Rebuild Docker base image (make build-base-gpu)</step>
+    <step id="4">Push Docker image to GAR</step>
+    <step id="5">Run pulumi up to deploy Cloud Run changes</step>
+    <step id="6">Remove file_mounts from train_factorial.yaml</step>
+    <step id="7">Launch single test job, verify logs show GCSArtifactRepository</step>
+    <step id="8">Verify artifact appears in gs://minivess-mlops-mlflow-artifacts/</step>
+    <step id="9">ONLY THEN mark as fixed</step>
+  </fix-plan>
+</plan>

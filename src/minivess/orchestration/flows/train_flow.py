@@ -16,8 +16,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import time
 import warnings
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -162,13 +164,13 @@ def is_heartbeat_stale(
     bool
         ``True`` when the heartbeat is stale (older than the threshold).
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     timestamp = datetime.fromisoformat(heartbeat["timestamp"])
     # Ensure the parsed timestamp is timezone-aware (UTC)
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+        timestamp = timestamp.replace(tzinfo=UTC)
+    cutoff = datetime.now(UTC) - timedelta(minutes=threshold_minutes)
     return timestamp < cutoff
 
 
@@ -315,16 +317,45 @@ def check_resume_state_task(checkpoint_dir: Path) -> dict[str, Any] | None:
     if not run_id:
         return None
 
-    # Validate the referenced MLflow run is still RUNNING
-    try:
-        import mlflow
+    # Validate the referenced MLflow run is still RUNNING (with retry for spot recovery)
+    import mlflow
 
-        run = mlflow.get_run(run_id)
-        if run.info.status == "RUNNING":
-            return state
-    except Exception:
-        logger.debug("Could not fetch MLflow run %s — treating as stale", run_id)
+    _RESUME_MAX_RETRIES = 3
+    for attempt in range(_RESUME_MAX_RETRIES):
+        try:
+            run = mlflow.get_run(run_id)
+            if run.info.status == "RUNNING":
+                return state
+            else:
+                return None  # Run ended, don't resume
+        except Exception:
+            if attempt < _RESUME_MAX_RETRIES - 1:
+                backoff = 10 * (attempt + 1)
+                logger.warning(
+                    "MLflow unreachable (attempt %d/%d) for run %s — retrying in %ds",
+                    attempt + 1,
+                    _RESUME_MAX_RETRIES,
+                    run_id,
+                    backoff,
+                )
+                time.sleep(backoff)
+            else:
+                logger.warning(
+                    "MLflow unreachable after %d attempts for run %s",
+                    _RESUME_MAX_RETRIES,
+                    run_id,
+                )
 
+    # Checkpoint-based fallback when MLflow is down
+    epoch_pth = checkpoint_dir / "epoch_latest.pth"
+    if epoch_pth.exists():
+        logger.warning(
+            "MLflow unreachable but checkpoint exists at %s — resuming from file",
+            epoch_pth,
+        )
+        return state
+
+    logger.warning("MLflow unreachable and no checkpoint — starting fresh")
     return None
 
 
@@ -533,6 +564,13 @@ def train_one_fold_task(
         from minivess.config.debug import DEBUG_MAX_VOLUMES
 
         val_dicts = val_dicts[: max(2, DEBUG_MAX_VOLUMES // 3)]
+
+    if not train_dicts:
+        msg = (
+            "train_dicts is empty — no training volumes found. "
+            "Check DVC pull, data directory, and split configuration."
+        )
+        raise ValueError(msg)
 
     logger.info(
         "Fold %d: loss=%s, device=%s, train=%d, val=%d",
@@ -810,6 +848,13 @@ def training_subflow(
     -------
     TrainingFlowResult with fold results, MLflow run ID, and upstream link.
     """
+    if not folds_to_run:
+        msg = (
+            "folds_to_run is empty — no folds to train. "
+            "Check factorial config: num_folds, fold_id, and splits file."
+        )
+        raise ValueError(msg)
+
     loss_name: str = config["loss_name"]
     model_family: str = config["model_family"]
     experiment_name: str = config["experiment_name"]
@@ -1654,10 +1699,7 @@ if __name__ == "__main__":
         )
         parser.add_argument(
             "--post-training-method",
-            default=os.environ.get(
-                "POST_TRAINING_METHODS",
-                os.environ.get("POST_TRAINING_METHOD", "none,swag"),
-            ),
+            default=os.environ.get("POST_TRAINING_METHODS", "none,swag"),
             help="Comma-separated post-training methods: none,swag (default: none,swag)",
         )
         parser.add_argument(

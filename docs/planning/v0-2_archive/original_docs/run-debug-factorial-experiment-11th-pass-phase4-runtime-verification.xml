@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plan>
+  <metadata>
+    <title>11th Pass Phase 4: Runtime Verification — Smoke Test in europe-west4</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-28</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — validates entire FinOps migration</priority>
+    <prerequisite>Phase 2 (Pulumi) + Phase 3 (code changes) DONE</prerequisite>
+    <skill>ralph-loop</skill>
+  </metadata>
+
+  <context>
+    <summary>
+      All infrastructure is now in europe-west4. GAR, GCS, Cloud SQL migrated.
+      Docker images pushed. Code updated. 6695 tests pass. Need runtime verification
+      that SkyPilot jobs actually use the new region with zero egress.
+    </summary>
+    <verified-state>
+      GAR: europe-west4-docker.pkg.dev/minivess-mlops/minivess (base:latest + mlflow:v3.10.0)
+      GCS: minivess-mlops-dvc-data (europe-west4)
+      Cloud SQL: mlflow-db-479b793 (europe-west4)
+      Controller: .sky.yaml pinned to gcp/europe-west4, cpus: 2+, memory: 4+
+    </verified-state>
+  </context>
+
+  <task id="T1" status="NOT_STARTED" priority="P0">
+    <title>Launch DynUNet smoke test in europe-west4</title>
+    <description>
+      Single DynUNet job — cheapest, fastest model. Validates:
+      1. New controller starts in europe-west4 as e2-medium
+      2. Docker pull is same-region (free, fast)
+      3. DVC data pulls from GCS
+      4. Training completes (2 epochs)
+      5. MLflow metrics logged
+    </description>
+    <commands>
+      cd /home/petteri/Dropbox/github-personal/vascadia/deployment/skypilot
+      uv run sky jobs launch train_factorial.yaml \
+        --env MODEL_FAMILY=dynunet \
+        --env LOSS_NAME=dice_ce \
+        --env WITH_AUX_CALIB=false \
+        --env FOLD_ID=0 \
+        --env MAX_EPOCHS=2 \
+        --env MAX_TRAIN_VOLUMES=23 \
+        --env MAX_VAL_VOLUMES=12 \
+        --env EXPERIMENT_NAME=smoke_test_europe_west4 \
+        --env ZERO_SHOT=false \
+        --env POST_TRAINING_METHODS=none \
+        --env GRADIENT_CHECKPOINTING=false \
+        -y
+    </commands>
+    <verification>
+      <criterion>Job region is europe-west4 (check sky jobs queue)</criterion>
+      <criterion>Controller is e2-medium (check gcloud compute instances list)</criterion>
+      <criterion>Docker pull &lt; 60 seconds (same-region)</criterion>
+      <criterion>Job completes in &lt; 15 minutes</criterion>
+      <criterion>Training metrics logged (loss decreasing)</criterion>
+    </verification>
+    <expected-duration>10-15 minutes</expected-duration>
+    <max-duration>30 minutes</max-duration>
+    <cost-estimate>$0.12 (spot L4 × 15 min + controller)</cost-estimate>
+  </task>
+
+  <task id="T2" status="NOT_STARTED" priority="P1">
+    <title>Verify controller instance type and region</title>
+    <description>
+      After T1 launches, verify the new controller was created correctly.
+    </description>
+    <commands>
+      uv run sky status
+      gcloud compute instances list --project=minivess-mlops \
+        --filter="zone:europe-west4-*" \
+        --format="table(name,machineType,zone,status)"
+    </commands>
+    <verification>
+      <criterion>Controller in europe-west4 (not europe-west1)</criterion>
+      <criterion>Machine type is e2-medium or e2-small (not n4-standard-4)</criterion>
+    </verification>
+  </task>
+
+  <task id="T3" status="NOT_STARTED" priority="P1">
+    <title>Verify no old europe-north1 resources remain</title>
+    <commands>
+      gcloud artifacts repositories list --project=minivess-mlops
+      gcloud sql instances list --project=minivess-mlops
+      gsutil ls -L -b gs://minivess-mlops-dvc-data/ 2>&amp;1 | grep Location
+    </commands>
+    <verification>
+      <criterion>No europe-north1 GAR repos</criterion>
+      <criterion>Cloud SQL in europe-west4</criterion>
+      <criterion>GCS buckets in europe-west4</criterion>
+    </verification>
+  </task>
+</plan>

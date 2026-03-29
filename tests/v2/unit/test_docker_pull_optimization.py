@@ -1,6 +1,6 @@
 """Tests for Docker pull optimization — GAR remote repository + SkyPilot MOUNT_CACHED.
 
-T1.6: Validate Pulumi GAR remote repo in europe-north1. Validate SkyPilot
+T1.6: Validate Pulumi GAR remote repo region config. Validate SkyPilot
 file_mounts with mode: MOUNT_CACHED.
 
 Uses yaml.safe_load() and ast.parse() — NO regex (CLAUDE.md Rule #16).
@@ -59,17 +59,24 @@ class TestGARRemoteRepo:
 
         assert found_remote_repo, (
             "Pulumi __main__.py must define a GAR remote repository cache "
-            "for nvidia base layers in europe-north1. "
+            "for nvidia base layers (same-region as training VMs). "
             "Add a gcp.artifactregistry.Repository with mode=REMOTE_REPOSITORY."
         )
 
-    def test_pulumi_gar_in_europe_north1(self) -> None:
-        """GAR remote repo must be in europe-north1 (same region as training)."""
+    def test_pulumi_gar_in_configured_region(self) -> None:
+        """GAR remote repo must be in the configured region (same region as training)."""
         source = PULUMI_MAIN.read_text(encoding="utf-8")
-        # The existing docker_repo already uses location=region which is europe-north1
-        # Just verify the region variable is used consistently
-        assert "europe-north1" in source or "region" in source, (
-            "Pulumi GAR configuration must use europe-north1 region"
+        # The existing docker_repo uses location=region which is read from Pulumi config.
+        # Verify the region variable is used consistently.
+        gar_config = yaml.safe_load(
+            (PROJECT_ROOT / "configs" / "registry" / "gar.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        expected_server = gar_config["server"]
+        region_prefix = expected_server.split("-docker.pkg.dev")[0]
+        assert region_prefix in source or "region" in source, (
+            f"Pulumi GAR configuration must use {region_prefix} region"
         )
 
 

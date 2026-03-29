@@ -53,6 +53,34 @@ decisions:
     config_source: "configs/experiment/*.yaml infrastructure.parallel_submissions field"
     issue: "https://github.com/petteriTeikari/minivess-mlops/issues/913"
 
+  pretrained_weight_caching:
+    status: proposed
+    winner: gcs_cache_with_hf_fallback
+    rationale: >
+      Pretrained model weights (SAM3 ~9 GB, VesselFM ~2 GB) cached on GCS in europe-west4.
+      GCP SkyPilot jobs pull from same-region GCS (free, ~1-2 min) instead of HuggingFace
+      (10-15 min, rate-limited, causes exit code 34 timeouts and spot preemption failures).
+      HuggingFace remains the fallback if GCS pull fails. RunPod and local environments
+      are unchanged (download from HF directly). Does NOT violate mlflow_only_artifact_contract
+      because pretrained weights are external inputs, not training artifacts.
+    bucket: "gs://minivess-mlops-checkpoints/pretrained/"
+    bucket_note: >
+      Repurposes the orphaned checkpoints bucket (deprecated for training artifacts
+      per mlflow_only_artifact_contract). The pretrained/ prefix separates cached
+      weights from any legacy data.
+    versioning: "Path-based: pretrained/{model}/{version}/{filename} + SHA256 checksums"
+    per_environment:
+      gcp: "GCS primary, HF fallback"
+      runpod: "HF only (no GCP dependency)"
+      local: "Host filesystem via MODEL_CACHE_HOST_PATH"
+    implementation:
+      - deployment/skypilot/train_factorial.yaml
+      - scripts/upload_pretrained.sh
+      - scripts/verify_pretrained_gcs.sh
+    config_source: ".env.example (GCS_PRETRAINED_BUCKET, SAM3_WEIGHTS_VERSION, VESSELFM_WEIGHTS_VERSION)"
+    planning_doc: "docs/planning/v0-2_archive/original_docs/gcs-weights-caching-report.md"
+    cost: "$0.25/month storage, saves ~$1.50/pass in GPU idle time"
+
 # ─── HARD CONSTRAINT ──────────────────────────────────────────────────────────
 # The repo has EXACTLY two cloud compute providers. Adding a third (AWS, Azure,
 # Lambda Labs, etc.) requires EXPLICIT user authorization. This constraint exists
@@ -99,7 +127,7 @@ providers:
     role: "Production-grade. Full managed cloud stack. All infrastructure via Pulumi IaC."
     status: active
     project: minivess-mlops
-    region: europe-north1  # Finland — closest to Helsinki
+    region: europe-west4  # Netherlands — L4 GPU availability, co-located with GAR/GCS
     compute: "SkyPilot (cloud: gcp), L4 spot preferred"
     storage: "GCS (Google Cloud Storage)"
     mlflow: "Cloud Run MLflow server (optional, enable_cloud_run config)"
@@ -118,7 +146,7 @@ providers:
     gcs_buckets:
       mlflow_artifacts: minivess-mlops-mlflow-artifacts  # THE artifact store — checkpoints, configs, figures
       dvc_data: minivess-mlops-dvc-data                  # Data versioning ONLY (raw volumes, labels)
-      checkpoints: minivess-mlops-checkpoints            # DEPRECATED — use mlflow_artifacts instead
+      checkpoints: minivess-mlops-checkpoints            # Pretrained weight cache (pretrained/ prefix). Formerly deprecated for training artifacts.
 
     # ARTIFACT PERSISTENCE RULE (Non-Negotiable):
     #   MLflow artifact store (backed by GCS mlflow_artifacts bucket) is THE ONLY
@@ -132,7 +160,7 @@ providers:
     # Docker registry (Artifact Registry)
     docker_registry:
       type: gar  # Google Artifact Registry
-      url: europe-north1-docker.pkg.dev/minivess-mlops/minivess
+      url: europe-west4-docker.pkg.dev/minivess-mlops/minivess
       config: configs/registry/gar.yaml
 
     # Cloud SQL

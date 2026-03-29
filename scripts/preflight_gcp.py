@@ -34,7 +34,7 @@ import yaml
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-GAR_IMAGE = "europe-north1-docker.pkg.dev/minivess-mlops/minivess/base:latest"
+GAR_IMAGE = "us-central1-docker.pkg.dev/minivess-mlops/minivess/base:latest"
 GCS_BUCKET = "gs://minivess-mlops-dvc-data"
 CHECKPOINT_BUCKET = "gs://minivess-mlops-checkpoints"
 SKYPILOT_YAML = REPO_ROOT / "deployment" / "skypilot" / "train_factorial.yaml"
@@ -573,7 +573,7 @@ def check_gcp_cpu_quota() -> tuple[bool, str]:
             "compute",
             "regions",
             "describe",
-            "europe-north1",
+            "europe-west4",
             "--format=json",
             "--project=minivess-mlops",
         ],
@@ -594,7 +594,7 @@ def check_gcp_cpu_quota() -> tuple[bool, str]:
             usage = q.get("usage", 0)
             available = limit - usage
             if limit == 0:
-                return False, "CPU quota is 0 in europe-north1 — request increase"
+                return False, "CPU quota is 0 in europe-west4 — request increase"
             if available < 8:
                 return False, (
                     f"CPU quota low: {available:.0f} available "

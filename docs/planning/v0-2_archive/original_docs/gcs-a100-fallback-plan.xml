@@ -1,0 +1,980 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  source_of_truth: docs/planning/v0-2_archive/original_docs/gpu-instances-finops-report.md
+  decisions_referenced:
+    - cloud_provider_selection (cloud.yaml: runpod_gcp_dual)
+    - compute_orchestration (cloud.yaml: skypilot_broker)
+    - yaml_contract_system (CLAUDE.md Rule 31)
+  contradictions_checked:
+    - configs/cloud/yaml_contract.yaml (current: L4 only for GCP)
+    - .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md (A100 incident)
+    - knowledge-graph/domains/cloud.yaml (two-provider architecture)
+    - CLAUDE.md Rule 31 (zero YAML improvisation)
+  context_loaded:
+    navigator: knowledge-graph/navigator.yaml
+    domains:
+      - knowledge-graph/domains/cloud.yaml
+    metalearning:
+      - 2026-03-24-unauthorized-a100-in-skypilot-yaml.md
+      - 2026-03-24-yaml-is-the-contract-zero-improvisation.md
+      - 2026-03-15-t4-turing-fp16-nan-ban.md
+    registry: knowledge-graph/decisions/registry.yaml
+    finops_report: docs/planning/v0-2_archive/original_docs/gpu-instances-finops-report.md
+    memory: MEMORY.md
+
+  CRITICAL METALEARNING CONTEXT:
+    On 2026-03-24, Claude UNAUTHORIZED added A100-80GB to train_factorial.yaml as a
+    "smart fallback" without user authorization. This caused 34 jobs x A100 = ~$40
+    instead of ~$8 (5.5x cost multiplier). This led to:
+      - CLAUDE.md Rule 31 (zero improvisation on declarative configs)
+      - configs/cloud/yaml_contract.yaml (golden contract system)
+      - 5-layer defense: pre-commit, test suite, preflight, experiment harness, Rule 31
+      - test_contract_gcp_does_not_include_a100 test (now to be UPDATED)
+
+    THIS PLAN HAS EXPLICIT USER AUTHORIZATION. The user asked for this change after
+    reviewing the FinOps report. The difference from the incident:
+      - Incident: Claude unilaterally added A100 as "helpful fallback"
+      - This plan: User explicitly requested A100 fallback after 11+ hours PENDING
+
+  COUNCIL METHODOLOGY: iterated-llm-council with 5 experts
+-->
+<plan>
+  <metadata>
+    <title>GCS A100 Ordered Fallback for L4 Capacity Exhaustion</title>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <date>2026-03-28</date>
+    <status>ready-for-execution</status>
+    <priority>P0 — 3 GPU jobs stuck PENDING for 11+ hours, controller burning $3.22/day</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-cost>Implementation: 0 (config changes). Per-pass when A100 used: ~$18.70 vs $6.85 for L4</estimated-cost>
+    <report-output>docs/planning/v0-2_archive/original_docs/gcs-a100-fallback-report.md</report-output>
+    <user-authorization>Explicit — user requested after reviewing gpu-instances-finops-report.md</user-authorization>
+  </metadata>
+
+  <!-- ================================================================= -->
+  <!-- COUNCIL REVIEW: 5 Expert Perspectives                             -->
+  <!-- ================================================================= -->
+
+  <council-review>
+    <expert role="Platform Engineer" focus="SkyPilot ordered: block syntax and failover behavior">
+      <assessment>
+        SkyPilot's `ordered:` block in resources specifies a priority-ordered list of
+        resource configurations. SkyPilot tries each entry in order until one can be
+        provisioned. This is the CORRECT mechanism for L4-to-A100 fallback — it is a
+        2-line YAML change in the region config, not an architecture change.
+
+        Key technical detail: the `ordered:` block is ALREADY used by this project for
+        multi-region failover (see `src/minivess/cloud/region_injection.py`). The
+        region_injection module reads `configs/cloud/regions/*.yaml` and generates
+        `ordered:` blocks with per-region entries. Adding A100 as a GPU fallback means
+        extending the region config format to support MULTIPLE GPU types per region,
+        creating a (GPU, region) matrix in the ordered list.
+
+        Current region config structure:
+        ```yaml
+        regions:
+          gcp:
+            L4:
+              - region: europe-west4
+                zones: 3
+        ```
+
+        Proposed extension:
+        ```yaml
+        regions:
+          gcp:
+            L4:
+              - region: europe-west4
+                zones: 3
+            A100:
+              - region: europe-west4
+                zones: 3
+        ```
+
+        The region_injection module already iterates `for gpu_type, entries in
+        provider_regions.items()` — adding A100 entries requires ZERO code changes
+        to region_injection.py. The ordered list will naturally contain L4 entries
+        first (from config order), then A100 entries.
+
+        IMPORTANT: The base `train_factorial.yaml` keeps `accelerators: L4:1` as the
+        static default. The `ordered:` block is INJECTED at launch time by
+        `run_factorial.sh` via the region_injection module. This means the static YAML
+        file itself does NOT change — only the region config and the contract change.
+
+        Spot override for SAM3: The `run_factorial.sh` already passes `--no-use-spot`
+        for SAM3 models (via MODEL_USE_SPOT from model_overrides). This flag overrides
+        the `use_spot: true` in the YAML. This mechanism works with both L4 and A100
+        because it is applied at the `sky jobs launch` command level, not in the YAML.
+      </assessment>
+      <recommendation>
+        1. Update region configs to include A100 entries AFTER all L4 entries
+        2. Update the YAML contract to allow A100 for GCP
+        3. Do NOT modify train_factorial.yaml itself — the ordered: injection handles it
+        4. The region_injection.py code needs NO changes (already handles multi-GPU)
+      </recommendation>
+    </expert>
+
+    <expert role="Cost Engineer" focus="Price comparison and total cost per pass">
+      <assessment>
+        Cost analysis for a 34-job debug factorial pass, using data from the FinOps report
+        and verified GCP europe-west4 pricing (March 2026):
+
+        ASSUMPTIONS:
+        - Setup time per job: 10 min (Docker pull + DVC data + weight loading) — same region
+        - L4 training time per job: 45 min (observed from prior passes)
+        - A100 speedup factor: 2.2x (conservative for memory-bandwidth-bound 3D segmentation)
+        - A100 training time per job: 45/2.2 = ~20 min
+        - Total time per job: setup + training
+
+        COST TABLE:
+
+        | GPU        | Hourly (spot)| Hourly (OD) | Setup (min) | Train (min) | Total/job (min) | Cost/job (spot) | Total/pass 34 jobs (spot) |
+        |------------|-------------|-------------|-------------|-------------|-----------------|-----------------|---------------------------|
+        | L4         | $0.22       | $0.74       | 10          | 45          | 55              | $0.20           | $6.85                     |
+        | A100-40GB  | $1.10       | $3.67       | 10          | 20          | 30              | $0.55           | $18.70                    |
+        | A100-80GB  | $1.38       | $4.61       | 10          | 20          | 30              | $0.69           | $23.46                    |
+        | H100 SXM   | $3.40       | $9.80       | 10          | 9           | 19              | $1.08           | $36.59                    |
+
+        COST DELTA: A100-40GB costs $11.85/pass more than L4 spot. But the WAITING COST
+        is $3.22/day (controller VM) + researcher time. After 3.7 days of waiting, the
+        accumulated controller cost alone exceeds the A100 premium for one pass.
+
+        RECOMMENDATION: A100-40GB is the right choice. A100-80GB adds $4.76/pass for
+        VRAM that is unnecessary (largest model SAM3 Hybrid uses ~7.5 GB). H100 adds
+        $17.89/pass for speed that is not needed for debug passes.
+
+        MAXIMUM COST GUARD: With A100-40GB at spot $1.10/hr and worst-case 1 hour/job,
+        the absolute maximum per-pass cost is 34 x $1.10 = $37.40. This is within the
+        $50-100/pass academic budget.
+      </assessment>
+      <recommendation>
+        1. Add ONLY A100-40GB (not A100-80GB, not H100) to the GCP allowlist
+        2. Set max_hourly_cost_usd for A100 to $1.50 (authorized, with buffer)
+        3. Keep L4 as primary — A100 is FALLBACK only (ordered: list priority)
+        4. Consider adding a per-pass budget ceiling to preflight checks
+      </recommendation>
+    </expert>
+
+    <expert role="Test Engineer" focus="Test suite updates for new GPU allowlist">
+      <assessment>
+        The current test suite has these A100-blocking tests that MUST be updated:
+
+        1. `test_contract_gcp_does_not_include_a100` in test_yaml_contract_enforcement.py
+           — This test was written specifically to prevent the unauthorized A100 incident.
+           It asserts A100 is NOT in gcp allowed list. Must be REMOVED or INVERTED.
+
+        2. `test_factorial_uses_exactly_l4` in test_yaml_contract_enforcement.py
+           — Asserts factorial YAML accelerators == ["L4"]. Since the static YAML
+           still says `accelerators: L4:1` (ordered: is injected at runtime), this
+           test should still pass. BUT we need a NEW test that validates the generated
+           ordered: block includes only L4 and A100 (no H100, no A100-80GB).
+
+        3. `test_factorial_accelerators_not_dict` — Ensures accelerators is string, not
+           dict. Still valid since the static YAML remains `L4:1`. Pass.
+
+        4. `test_factorial_accelerators_match_contract` — Reads factorial.allowed_accelerators
+           from contract. Must be updated in the CONTRACT (not the test) to include A100.
+
+        5. Cross-file consistency tests (`test_gcp_skypilot_yamls_match_gcp_spot_config`)
+           — Reads from gcp_spot.yaml. Must update gcp_spot.yaml accelerator list too.
+
+        NEW TESTS NEEDED:
+        a. Test that region configs with A100 entries produce valid ordered: blocks
+        b. Test that the generated YAML from region_injection includes only contract-allowed GPUs
+        c. Test that A100 entries appear AFTER all L4 entries in the ordered: list (priority)
+        d. Test preflight cost estimate handles A100 hourly rate correctly
+      </assessment>
+      <recommendation>
+        1. Update test_contract_gcp_does_not_include_a100 to VERIFY A100 IS in gcp list
+        2. Add test_a100_is_fallback_not_primary — verify L4 entries precede A100 in region configs
+        3. Add test_region_injection_respects_contract — generated YAML only uses allowed GPUs
+        4. Add test_preflight_cost_estimate_a100 — cost guardrail works with A100 rates
+        5. Keep test_factorial_uses_exactly_l4 — the STATIC yaml still says L4:1
+      </recommendation>
+    </expert>
+
+    <expert role="Security/Governance Engineer" focus="YAML contract updates and preflight checks">
+      <assessment>
+        The YAML contract system exists because of the A100 incident. This plan is the
+        FIRST authorized modification to the contract since its creation. The change must
+        be surgically precise and maintain all 5 defense layers:
+
+        L1 (Pre-commit): scripts/validate_yaml_contract.py
+          - Reads allowed_accelerators from contract → A100 added to contract → passes
+          - The factorial strict check reads factorial.allowed_accelerators → must update
+          - No code change needed in the validator itself, only in the contract YAML
+
+        L2 (Test suite): tests/v2/unit/deployment/test_yaml_contract_enforcement.py
+          - test_contract_gcp_does_not_include_a100 → must be updated (see Test Engineer)
+          - test_factorial_accelerators_match_contract → reads from contract → auto-passes
+
+        L3 (Preflight): scripts/preflight_gcp.py
+          - check_yaml_contract() checks accelerators against factorial allowlist
+          - check_gcp_gpu_quota() only checks NVIDIA_L4_GPUS → must add NVIDIA_A100_GPUS
+          - check_cost_estimate() uses max_hourly_cost_usd → A100 already listed (as "NOT AUTHORIZED")
+            → update comment to "AUTHORIZED as fallback"
+          - check_yaml_contract() has a check: "Accelerators is NOT a dict (priority list = non-determinism)"
+            → This check fires when accelerators is a dict. The static YAML keeps accelerators as
+            string "L4:1", and ordered: is injected separately. This check should still pass.
+
+        L4 (Experiment harness): Phase 2 VALIDATE gate reads contract → auto-passes
+
+        L5 (CLAUDE.md Rule 31): This plan has explicit user authorization. Rule 31 is satisfied.
+
+        QUOTA CHECK: GCP GPU quotas are per-type. We need to check NVIDIA_A100_GPUS
+        quota in addition to NVIDIA_L4_GPUS. If A100 quota is 0, the fallback will
+        fail silently (SkyPilot will try A100, get rejected, and exhaust all options).
+        Adding an A100 quota check to preflight prevents this.
+      </assessment>
+      <recommendation>
+        1. Update yaml_contract.yaml: add A100 to allowed_accelerators.gcp AND factorial.allowed_accelerators
+        2. Update max_hourly_cost_usd: change A100 comment from "NOT AUTHORIZED" to authorized
+        3. Add NVIDIA_A100_GPUS quota check to preflight_gcp.py
+        4. Keep all 5 defense layers intact — this is a CONTRACT UPDATE, not a bypass
+        5. Add cost ceiling guard: if estimated total > $50, warn (not block)
+      </recommendation>
+    </expert>
+
+    <expert role="DevEx Engineer" focus="Researcher experience and config clarity">
+      <assessment>
+        From a researcher's perspective, this change should be INVISIBLE. The researcher
+        runs the same command:
+
+        ```bash
+        ./scripts/run_factorial.sh configs/factorial/debug.yaml
+        ```
+
+        SkyPilot handles the L4-to-A100 fallback automatically. The researcher sees
+        "Provisioning A100" in the SkyPilot output instead of "PENDING" for 11 hours.
+        This is exactly the DevEx principle: "everything automatic by default, everything
+        tweakable by choice."
+
+        The region_config field in debug.yaml controls which regions and GPUs are tried.
+        Changing from `europe_strict` (L4 only, europe-west4 only) to a new config that
+        includes A100 fallback requires updating the infrastructure.region_config field.
+
+        CONFIGURATION CLARITY:
+        - `europe_strict.yaml` → L4 only, europe-west4 only (current, gets stuck)
+        - `europe.yaml` → L4 across 3 EU regions (broader, but still L4 only)
+        - NEW: `europe_a100_fallback.yaml` → L4 first across EU, then A100 in europe-west4
+
+        The researcher picks their availability/cost tradeoff by setting region_config
+        in their factorial YAML. This is the Hydra config philosophy: choice via config,
+        not code changes.
+
+        IMPORTANT: The debug.yaml currently sets `region_config: europe_strict`. To
+        activate the A100 fallback, the user must change this to the new region config.
+        This is a DELIBERATE friction — the researcher explicitly opts into the higher
+        cost tier. We should NOT silently change the default.
+      </assessment>
+      <recommendation>
+        1. Create `europe_a100_fallback.yaml` as a NEW region config (do not modify existing)
+        2. Do NOT change debug.yaml default — let the user choose when to use the fallback
+        3. Document the cost difference clearly in the region config comments
+        4. Add a `--gpu-fallback` flag to run_factorial.sh that overrides region_config (future)
+      </recommendation>
+    </expert>
+
+    <council-synthesis>
+      All 5 experts agree on the core approach:
+      1. Add A100-40GB (NOT A100-80GB, NOT H100) to the YAML contract
+      2. Create a new region config with A100 fallback entries
+      3. Update tests to reflect the authorized change
+      4. Add A100 quota check to preflight
+      5. Keep the static train_factorial.yaml unchanged (ordered: injected at runtime)
+      6. Let the user explicitly opt in via region_config (not a silent default change)
+
+      Key disagreement resolved: Cost Engineer recommended A100-40GB only. Platform
+      Engineer noted A100 (without -40GB/-80GB suffix) is how SkyPilot references it
+      on GCP. In GCP, "A100" means the 40GB variant by default, and "A100-80GB" is the
+      explicit 80GB variant. We use "A100" in configs (maps to 40GB on GCP).
+    </council-synthesis>
+  </council-review>
+
+  <!-- ================================================================= -->
+  <!-- COST IMPACT ANALYSIS                                              -->
+  <!-- ================================================================= -->
+
+  <cost-impact>
+    <before>
+      <scenario name="L4 available">$6.85/pass (34 jobs x $0.20/job) — cheapest option</scenario>
+      <scenario name="L4 exhausted (current)">$3.22/day controller burn + $0/pass (no jobs run) — infinite wait</scenario>
+      <scenario name="L4 exhausted 3 days">$9.66 controller + $0 compute = $9.66 wasted, zero science</scenario>
+    </before>
+    <after>
+      <scenario name="L4 available">$6.85/pass — unchanged, L4 is still primary</scenario>
+      <scenario name="L4 exhausted, A100 available">$18.70/pass (34 jobs x $0.55/job) — $11.85 premium</scenario>
+      <scenario name="Both exhausted">Falls through to next region in ordered: list, then PENDING</scenario>
+    </after>
+    <breakeven>After 3.7 days of L4 waiting ($3.22/day), the A100 premium is recovered</breakeven>
+    <worst-case>34 jobs x A100 on-demand x 1 hour = $124.78 — still within $50-100 budget ceiling with spot</worst-case>
+    <budget-guard>max_hourly_cost_usd: A100 set to $1.50 (spot $1.10 + buffer)</budget-guard>
+  </cost-impact>
+
+  <!-- ================================================================= -->
+  <!-- RISK ASSESSMENT                                                   -->
+  <!-- ================================================================= -->
+
+  <risk-assessment>
+    <risk id="R1" severity="medium" likelihood="low">
+      <description>A100 spot also exhausted in europe-west4</description>
+      <mitigation>Region config includes europe-west1 as secondary region for A100</mitigation>
+    </risk>
+    <risk id="R2" severity="medium" likelihood="medium">
+      <description>A100 quota is 0 (never requested for this GCP project)</description>
+      <mitigation>Preflight check for NVIDIA_A100_GPUS quota added (Task 4). User must request quota via GCP console if 0.</mitigation>
+    </risk>
+    <risk id="R3" severity="low" likelihood="low">
+      <description>A100 training produces different results than L4 (numerical precision)</description>
+      <mitigation>Both A100 (Ampere) and L4 (Ada Lovelace) support BF16. Results should be equivalent within floating point tolerance. This is a debug pass — exact reproducibility is not the goal.</mitigation>
+    </risk>
+    <risk id="R4" severity="high" likelihood="low">
+      <description>Accidental A100 on-demand (spot unavailable, SkyPilot falls back to on-demand)</description>
+      <mitigation>train_factorial.yaml has `use_spot: true`. SkyPilot will NOT fall back to on-demand unless `--no-use-spot` is passed (only for SAM3 models). Cost guard: max_hourly_cost_usd in contract.</mitigation>
+    </risk>
+    <risk id="R5" severity="medium" likelihood="medium">
+      <description>GAR Docker image pull from A100 VM in different zone takes longer</description>
+      <mitigation>A100 in europe-west4 = same region as GAR. Cross-region pull (europe-west1) adds ~5-10 min but is acceptable vs 11+ hr PENDING.</mitigation>
+    </risk>
+  </risk-assessment>
+
+  <!-- ================================================================= -->
+  <!-- ROLLBACK PLAN                                                     -->
+  <!-- ================================================================= -->
+
+  <rollback-plan>
+    <description>
+      If A100 causes unexpected issues (cost overrun, training failures, quota problems),
+      revert to L4-only by:
+    </description>
+    <steps>
+      <step>1. Change debug.yaml `region_config: europe_a100_fallback` back to `europe_strict`</step>
+      <step>2. Revert yaml_contract.yaml: remove A100 from allowed_accelerators.gcp and factorial.allowed_accelerators</step>
+      <step>3. Revert gcp_spot.yaml: remove A100 from accelerators list</step>
+      <step>4. Revert region config: delete europe_a100_fallback.yaml</step>
+      <step>5. Revert tests: restore test_contract_gcp_does_not_include_a100 assertion</step>
+      <step>6. Run `make test-staging` to verify all tests pass with reverted config</step>
+    </steps>
+    <time-to-revert>5 minutes — all changes are config/test only, no code changes</time-to-revert>
+  </rollback-plan>
+
+  <!-- ================================================================= -->
+  <!-- TASK 1: Update YAML Contract                                      -->
+  <!-- ================================================================= -->
+
+  <task id="T1" name="Update YAML Contract" priority="P0">
+    <description>
+      Add A100 (40GB) to the golden contract as an authorized GCP fallback GPU.
+      Update factorial section to allow both L4 and A100.
+      Update cost guardrails to reflect authorized status.
+    </description>
+
+    <files-to-modify>
+      <file>configs/cloud/yaml_contract.yaml</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T1.1" description="Add A100 to GCP allowed accelerators">
+        <before><![CDATA[
+allowed_accelerators:
+  gcp:
+    - L4
+]]></before>
+        <after><![CDATA[
+allowed_accelerators:
+  gcp:
+    - L4
+    - A100     # Fallback for L4 capacity exhaustion — authorized 2026-03-28
+]]></after>
+      </change>
+
+      <change id="T1.2" description="Add A100 to factorial allowed accelerators">
+        <before><![CDATA[
+factorial:
+  allowed_accelerators:
+    - L4
+]]></before>
+        <after><![CDATA[
+factorial:
+  allowed_accelerators:
+    - L4
+    - A100     # Ordered fallback — L4 primary, A100 when L4 exhausted
+]]></after>
+      </change>
+
+      <change id="T1.3" description="Update A100 cost guardrail comment">
+        <before><![CDATA[
+  A100: 1.50     # NOT AUTHORIZED — listed only for detection
+  A100-80GB: 1.80  # NOT AUTHORIZED
+  H100: 3.00     # NOT AUTHORIZED
+]]></before>
+        <after><![CDATA[
+  A100: 1.50     # AUTHORIZED as fallback — GCP spot ~$1.10/hr (2026-03-28)
+  A100-80GB: 1.80  # NOT AUTHORIZED — 40GB sufficient for all models
+  H100: 3.00     # NOT AUTHORIZED — overpowered for debug passes
+]]></after>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="Verify contract YAML parses">uv run python -c "import yaml; yaml.safe_load(open('configs/cloud/yaml_contract.yaml'))"</command>
+      <command description="Verify contract validator passes">uv run python scripts/validate_yaml_contract.py --all</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>yaml_contract.yaml has A100 in allowed_accelerators.gcp</criterion>
+      <criterion>yaml_contract.yaml has A100 in factorial.allowed_accelerators</criterion>
+      <criterion>A100 max_hourly_cost_usd comment says AUTHORIZED</criterion>
+      <criterion>A100-80GB and H100 remain NOT AUTHORIZED</criterion>
+      <criterion>validate_yaml_contract.py passes on all SkyPilot YAMLs</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- TASK 2: Create A100 Fallback Region Config                        -->
+  <!-- ================================================================= -->
+
+  <task id="T2" name="Create A100 Fallback Region Config" priority="P0">
+    <description>
+      Create a new region config file that includes both L4 and A100 entries,
+      with L4 entries first (higher priority) and A100 entries second (fallback).
+      The region_injection.py module already handles multi-GPU region configs
+      with zero code changes needed.
+    </description>
+
+    <files-to-modify>
+      <file action="create">configs/cloud/regions/europe_a100_fallback.yaml</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T2.1" description="Create europe_a100_fallback.yaml">
+        <content><![CDATA[
+# EU regions with A100 fallback — use when L4 spot is capacity-exhausted.
+#
+# Priority order (enforced by region_injection.py iteration order):
+#   1. L4 in europe-west4   — cheapest ($0.22/hr spot), co-located with GAR/GCS
+#   2. L4 in europe-west1   — second cheapest, low cross-region egress
+#   3. L4 in europe-west3   — third EU region
+#   4. A100 in europe-west4 — fallback ($1.10/hr spot), same region as infra
+#   5. A100 in europe-west1 — secondary A100 region
+#
+# User authorization: 2026-03-28 (gpu-instances-finops-report.md Recommendation 1)
+# Cost impact: A100 debug pass = ~$18.70 vs L4 at ~$6.85 (+$11.85)
+# Breakeven: 3.7 days of L4 waiting ($3.22/day controller) > A100 premium
+#
+# See: docs/planning/v0-2_archive/original_docs/gpu-instances-finops-report.md
+# See: .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md
+
+description: "EU regions with A100 fallback — L4 primary, A100 when L4 exhausted"
+
+regions:
+  gcp:
+    L4:
+      - region: europe-west4     # Netherlands — co-located with GAR/GCS
+        zones: 3
+      - region: europe-west1     # Belgium — low cross-region egress
+        zones: 2
+      - region: europe-west3     # Frankfurt — third EU region
+        zones: 2
+    A100:
+      - region: europe-west4     # Netherlands — same region as infra
+        zones: 3
+      - region: europe-west1     # Belgium — secondary A100 region
+        zones: 2
+]]></content>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="Verify region config YAML parses">uv run python -c "import yaml; yaml.safe_load(open('configs/cloud/regions/europe_a100_fallback.yaml'))"</command>
+      <command description="Verify region injection produces valid output">uv run python -m minivess.cloud.region_injection --base deployment/skypilot/train_factorial.yaml --region-config configs/cloud/regions/europe_a100_fallback.yaml --output-dir /tmp/test_region_injection</command>
+      <command description="Verify L4 entries precede A100 entries in generated YAML">uv run python -c "
+import yaml
+from pathlib import Path
+generated = yaml.safe_load(Path('/tmp/test_region_injection/generated_train_factorial.yaml').read_text())
+ordered = generated['resources']['ordered']
+gpu_order = [entry['accelerators'].split(':')[0] for entry in ordered]
+l4_indices = [i for i, g in enumerate(gpu_order) if g == 'L4']
+a100_indices = [i for i, g in enumerate(gpu_order) if g == 'A100']
+assert max(l4_indices) &lt; min(a100_indices), f'L4 must precede A100: {gpu_order}'
+print(f'GPU ordering correct: {gpu_order}')
+"</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>europe_a100_fallback.yaml exists and parses without errors</criterion>
+      <criterion>region_injection produces ordered: block with L4 entries before A100 entries</criterion>
+      <criterion>Generated YAML is valid SkyPilot syntax</criterion>
+      <criterion>Only L4 and A100 appear in the generated ordered: block (no H100, no A100-80GB)</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- TASK 3: Update Cloud Config (gcp_spot.yaml)                       -->
+  <!-- ================================================================= -->
+
+  <task id="T3" name="Update Cloud Config" priority="P0">
+    <description>
+      Add A100 to the gcp_spot.yaml accelerator list. This file is read by
+      cross-file consistency tests to verify SkyPilot YAMLs only use
+      cloud-config-approved GPUs.
+    </description>
+
+    <files-to-modify>
+      <file>configs/cloud/gcp_spot.yaml</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T3.1" description="Add A100 to accelerators list">
+        <before><![CDATA[
+accelerators:
+  - L4:1
+  # A100 REMOVED — was never authorized by user (5.5x cost).
+  # Add back ONLY with explicit user authorization.
+]]></before>
+        <after><![CDATA[
+accelerators:
+  - L4:1
+  - A100:1   # Fallback for L4 capacity exhaustion — authorized 2026-03-28
+  # A100-80GB NOT AUTHORIZED — 40GB sufficient for all models
+  # H100 NOT AUTHORIZED — overpowered for debug passes
+]]></after>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="Verify gcp_spot.yaml parses">uv run python -c "import yaml; yaml.safe_load(open('configs/cloud/gcp_spot.yaml'))"</command>
+      <command description="Verify cross-file consistency tests pass">uv run pytest tests/v2/unit/deployment/test_yaml_contract_enforcement.py::TestCrossFileConsistency -v</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>gcp_spot.yaml accelerators list contains both L4:1 and A100:1</criterion>
+      <criterion>Cross-file consistency tests pass (SkyPilot YAML GPUs subset of cloud config GPUs)</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- TASK 4: Update Preflight Checks                                   -->
+  <!-- ================================================================= -->
+
+  <task id="T4" name="Update Preflight Checks" priority="P1">
+    <description>
+      Add A100 GPU quota check to preflight_gcp.py. Update the YAML contract
+      validator check that currently rejects dict-format accelerators (the
+      static YAML is unchanged, but verify the preflight handles ordered:
+      blocks from generated YAMLs correctly). Update cost estimate to handle
+      A100 rates.
+    </description>
+
+    <files-to-modify>
+      <file>scripts/preflight_gcp.py</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T4.1" description="Add check_gcp_a100_quota function">
+        <detail>
+          Add a new preflight check function `check_gcp_a100_gpu_quota()` that queries
+          NVIDIA_A100_GPUS quota in europe-west4 and europe-west1. If quota is 0, WARN
+          (not block) — the user may need to request quota. Structure mirrors existing
+          `check_gcp_gpu_quota()` function.
+        </detail>
+      </change>
+
+      <change id="T4.2" description="Update cost estimate to show A100 fallback cost">
+        <detail>
+          Update `check_cost_estimate()` to:
+          1. Read the region_config from the factorial config
+          2. If region config includes A100, show BOTH cost estimates:
+             - Best case (L4): $6.85/pass
+             - Fallback (A100): $18.70/pass
+          3. Show cost ceiling based on max_hourly_cost_usd
+        </detail>
+      </change>
+
+      <change id="T4.3" description="Register A100 quota check in main()">
+        <detail>
+          Add `("GCP A100 GPU quota", check_gcp_a100_gpu_quota)` to the checks list in main().
+          This runs alongside the existing L4 quota check.
+        </detail>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="Verify preflight script runs without error (will skip gcloud checks locally)">uv run python scripts/preflight_gcp.py || true</command>
+      <command description="Verify preflight module imports cleanly">uv run python -c "import scripts.preflight_gcp"</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>preflight_gcp.py has check_gcp_a100_gpu_quota function</criterion>
+      <criterion>check_gcp_a100_gpu_quota queries NVIDIA_A100_GPUS metric</criterion>
+      <criterion>cost estimate shows A100 fallback cost when region config includes A100</criterion>
+      <criterion>A100 quota check registered in main() checks list</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- TASK 5: Update Tests                                              -->
+  <!-- ================================================================= -->
+
+  <task id="T5" name="Update Tests" priority="P0">
+    <description>
+      Update the YAML contract enforcement test suite to reflect the authorized
+      A100 addition. Remove the test that blocks A100 in GCP. Add new tests
+      for A100 fallback ordering and region config validation.
+    </description>
+
+    <files-to-modify>
+      <file>tests/v2/unit/deployment/test_yaml_contract_enforcement.py</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T5.1" description="Update test_contract_gcp_does_not_include_a100">
+        <detail>
+          REPLACE this test with `test_contract_gcp_includes_authorized_a100`:
+          - Assert A100 IS in gcp allowed list (it is now authorized)
+          - Assert A100-80GB is NOT in gcp allowed list (not authorized)
+          - Assert H100 is NOT in gcp allowed list (not authorized)
+          - Add provenance comment: "A100 authorized 2026-03-28, FinOps report Recommendation 1"
+        </detail>
+      </change>
+
+      <change id="T5.2" description="Update test_factorial_uses_exactly_l4">
+        <detail>
+          This test asserts `unique_gpus == ["L4"]` for the STATIC factorial YAML.
+          Since the static YAML still says `accelerators: L4:1`, this test should
+          still pass WITHOUT changes. Verify this is the case.
+
+          However, update the factorial.allowed_accelerators in the contract (T1.2)
+          means the contract-based test `test_factorial_accelerators_match_contract`
+          now allows both L4 and A100. This is CORRECT — the static YAML uses L4,
+          which is a subset of {L4, A100}. No test change needed.
+        </detail>
+      </change>
+
+      <change id="T5.3" description="Add test_a100_fallback_ordering_in_region_configs">
+        <detail>
+          New test class `TestA100FallbackOrdering`:
+
+          a. `test_a100_fallback_region_config_exists` — verify europe_a100_fallback.yaml exists
+          b. `test_l4_entries_precede_a100_entries` — in every region config that includes A100,
+             ALL L4 entries must appear before ANY A100 entry (priority ordering)
+          c. `test_region_config_gpus_match_contract` — every GPU type in region configs must
+             be in the YAML contract allowed_accelerators for that cloud
+          d. `test_generated_yaml_respects_gpu_ordering` — run region_injection and verify
+             the generated ordered: block has L4 before A100
+        </detail>
+      </change>
+
+      <change id="T5.4" description="Add test_no_unauthorized_gpus_in_region_configs">
+        <detail>
+          Parametrized test over all region config files in configs/cloud/regions/:
+          - For each region config, extract all GPU types
+          - Verify each GPU type is in the YAML contract allowed_accelerators for the cloud
+          - Verify no banned GPU types appear
+          This catches future unauthorized GPU additions to region configs.
+        </detail>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="RED phase: run existing tests to see which fail after contract change">uv run pytest tests/v2/unit/deployment/test_yaml_contract_enforcement.py -v --tb=short 2>&amp;1 | head -80</command>
+      <command description="GREEN phase: run all contract tests after test updates">uv run pytest tests/v2/unit/deployment/test_yaml_contract_enforcement.py -v</command>
+      <command description="VERIFY: full staging suite">make test-staging</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>test_contract_gcp_does_not_include_a100 replaced with test that VERIFIES A100 is authorized</criterion>
+      <criterion>test_factorial_uses_exactly_l4 still passes (static YAML unchanged)</criterion>
+      <criterion>New test_a100_fallback_ordering_in_region_configs passes</criterion>
+      <criterion>New test_no_unauthorized_gpus_in_region_configs passes</criterion>
+      <criterion>All existing YAML contract tests pass (no regressions)</criterion>
+      <criterion>make test-staging passes with 0 failures, 0 unexpected skips</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- TASK 6: Update Preflight YAML Contract Validator                  -->
+  <!-- ================================================================= -->
+
+  <task id="T6" name="Update Preflight YAML Contract Validator" priority="P1">
+    <description>
+      The preflight check_yaml_contract() function in scripts/preflight_gcp.py
+      has a check that rejects dict-format accelerators as "non-deterministic."
+      This was added after the A100 incident. Since the static train_factorial.yaml
+      still uses string format `L4:1` (ordered: is injected at runtime), this
+      check should still pass. Verify and document.
+
+      Also update the validate_yaml_contract.py pre-commit hook to handle
+      ordered: blocks that contain A100 (currently passes because ordered:
+      blocks are validated against the contract allowlist, and A100 is now
+      in the contract).
+    </description>
+
+    <files-to-modify>
+      <file>scripts/validate_yaml_contract.py</file>
+      <file>scripts/preflight_gcp.py</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T6.1" description="Verify validate_yaml_contract.py handles A100 in ordered: blocks">
+        <detail>
+          The validator already checks ordered: blocks in the validate_yaml() function
+          (lines 135-156). It validates each option's accelerators against the
+          allowed_accelerators for that cloud. Since A100 is now in the contract,
+          this will pass. No code change needed — just VERIFY with a test.
+        </detail>
+      </change>
+
+      <change id="T6.2" description="Update preflight check_yaml_contract() comment">
+        <detail>
+          Update the comment in check_yaml_contract() that says:
+          "Accelerators is NOT a dict (priority list = non-determinism)"
+          to clarify this only applies to the STATIC YAML, not to generated
+          ordered: blocks. The static YAML remains `accelerators: L4:1`.
+        </detail>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="Verify pre-commit validator passes on all SkyPilot YAMLs">uv run python scripts/validate_yaml_contract.py --all</command>
+      <command description="Verify pre-commit validator accepts generated YAML with A100 in ordered">uv run python -c "
+from pathlib import Path
+from scripts.validate_yaml_contract import load_contract, validate_yaml
+import yaml, tempfile
+
+# Generate a YAML that looks like what region_injection produces
+generated = {
+    'name': 'test',
+    'resources': {
+        'image_id': 'docker:test',
+        'cloud': 'gcp',
+        'use_spot': True,
+        'disk_size': 100,
+        'disk_tier': 'best',
+        'ordered': [
+            {'accelerators': 'L4:1', 'region': 'europe-west4'},
+            {'accelerators': 'A100:1', 'region': 'europe-west4'},
+        ],
+    },
+    'envs': {},
+    'setup': 'echo test',
+    'run': 'echo test',
+}
+with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f:
+    yaml.dump(generated, f)
+    tmp_path = Path(f.name)
+
+contract = load_contract()
+violations = validate_yaml(tmp_path, contract)
+tmp_path.unlink()
+assert not violations, f'Violations: {violations}'
+print('Generated YAML with A100 in ordered: block passes validation')
+"</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>validate_yaml_contract.py passes on all existing SkyPilot YAMLs</criterion>
+      <criterion>validate_yaml_contract.py accepts generated YAML with A100 in ordered: blocks</criterion>
+      <criterion>preflight check_yaml_contract() still passes on static train_factorial.yaml</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- TASK 7: Update Knowledge Graph and Documentation                  -->
+  <!-- ================================================================= -->
+
+  <task id="T7" name="Update Knowledge Graph and Documentation" priority="P2">
+    <description>
+      Update the cloud domain KG to reflect the A100 fallback decision.
+      Update CLAUDE.md if needed. The KG already has `prod` environment
+      listing "GCP L4/A100 spot" — verify this is accurate.
+    </description>
+
+    <files-to-modify>
+      <file>knowledge-graph/domains/cloud.yaml</file>
+    </files-to-modify>
+
+    <changes>
+      <change id="T7.1" description="Add A100 fallback decision to cloud.yaml">
+        <detail>
+          Add a new decision entry under `decisions:`:
+
+          ```yaml
+          a100_capacity_fallback:
+            status: resolved
+            winner: ordered_l4_a100
+            rationale: >
+              L4 capacity exhaustion in europe-west4 (11+ hours PENDING, 2026-03-28).
+              A100-40GB added as ordered fallback via region config. L4 remains primary.
+              Cost: $18.70/pass vs $6.85 for L4 (+$11.85). Breakeven vs waiting: 3.7 days.
+              User authorized 2026-03-28 after reviewing FinOps report.
+            implementation:
+              - configs/cloud/yaml_contract.yaml
+              - configs/cloud/regions/europe_a100_fallback.yaml
+              - configs/cloud/gcp_spot.yaml
+            planning_doc: docs/planning/v0-2_archive/original_docs/gpu-instances-finops-report.md
+            metalearning: .claude/metalearning/2026-03-24-unauthorized-a100-in-skypilot-yaml.md
+          ```
+        </detail>
+      </change>
+
+      <change id="T7.2" description="Verify cloud.yaml environments section is accurate">
+        <detail>
+          The `staging` environment already says `compute: "GCP L4 spot"`.
+          The `prod` environment already says `compute: "GCP L4/A100 spot"`.
+          Update `staging` to also include A100 as fallback:
+          `compute: "GCP L4 spot (A100 fallback via ordered: regions)"`
+        </detail>
+      </change>
+
+      <change id="T7.3" description="Verify CLAUDE.md GPU section">
+        <detail>
+          CLAUDE.md already says "GCP L4/A100 spot" in the environment table for
+          staging/prod. Verify this is still accurate after the changes. No change
+          needed if already present.
+        </detail>
+      </change>
+    </changes>
+
+    <test-commands>
+      <command description="Verify cloud.yaml parses">uv run python -c "import yaml; yaml.safe_load(open('knowledge-graph/domains/cloud.yaml'))"</command>
+      <command description="Verify KG integrity">uv run pytest tests/v2/unit/knowledge_graph/ -v --tb=short 2>&amp;1 | tail -20</command>
+    </test-commands>
+
+    <verification-criteria>
+      <criterion>cloud.yaml has a100_capacity_fallback decision with resolved status</criterion>
+      <criterion>cloud.yaml environments section reflects A100 fallback for staging</criterion>
+      <criterion>KG integrity tests pass</criterion>
+    </verification-criteria>
+  </task>
+
+  <!-- ================================================================= -->
+  <!-- EXECUTION ORDER                                                   -->
+  <!-- ================================================================= -->
+
+  <execution-order>
+    <phase id="1" name="Contract and Config Changes" tasks="T1,T2,T3">
+      <description>
+        Update the golden contract, create the region config, and update the cloud config.
+        These are the config-only changes that enable A100 fallback.
+      </description>
+      <tdd-sequence>
+        <step>RED: Run existing test_contract_gcp_does_not_include_a100 — it will PASS (A100 not yet in contract)</step>
+        <step>RED: Write new test_contract_gcp_includes_authorized_a100 — it will FAIL (A100 not yet in contract)</step>
+        <step>RED: Write new test_a100_fallback_region_config_exists — it will FAIL (file not yet created)</step>
+        <step>GREEN: Apply T1 changes (yaml_contract.yaml)</step>
+        <step>GREEN: Apply T2 changes (create europe_a100_fallback.yaml)</step>
+        <step>GREEN: Apply T3 changes (gcp_spot.yaml)</step>
+        <step>VERIFY: Run all YAML contract tests — should pass</step>
+      </tdd-sequence>
+    </phase>
+
+    <phase id="2" name="Test Suite Updates" tasks="T5">
+      <description>
+        Update the test suite to reflect the authorized A100 addition.
+        Replace blocking tests with verification tests.
+      </description>
+      <tdd-sequence>
+        <step>RED: Run test_contract_gcp_does_not_include_a100 — it will FAIL (A100 now in contract)</step>
+        <step>GREEN: Replace with test_contract_gcp_includes_authorized_a100</step>
+        <step>GREEN: Add test_a100_fallback_ordering_in_region_configs</step>
+        <step>GREEN: Add test_no_unauthorized_gpus_in_region_configs</step>
+        <step>VERIFY: make test-staging — 0 failures, 0 unexpected skips</step>
+      </tdd-sequence>
+    </phase>
+
+    <phase id="3" name="Preflight and Validator Updates" tasks="T4,T6">
+      <description>
+        Update preflight checks and the pre-commit validator to handle A100.
+        Add A100 quota check.
+      </description>
+      <tdd-sequence>
+        <step>RED: Write test for check_gcp_a100_gpu_quota function — it will FAIL (function not yet written)</step>
+        <step>GREEN: Implement check_gcp_a100_gpu_quota in preflight_gcp.py</step>
+        <step>GREEN: Update check_cost_estimate to show A100 fallback cost</step>
+        <step>VERIFY: Run preflight script — should show A100 quota check in output</step>
+        <step>VERIFY: Run validate_yaml_contract.py — should accept A100 in ordered: blocks</step>
+      </tdd-sequence>
+    </phase>
+
+    <phase id="4" name="Knowledge Graph Update" tasks="T7">
+      <description>
+        Update cloud.yaml KG domain with the A100 fallback decision.
+        Documentation-level change, lowest risk.
+      </description>
+      <tdd-sequence>
+        <step>GREEN: Add a100_capacity_fallback decision to cloud.yaml</step>
+        <step>GREEN: Update environment descriptions</step>
+        <step>VERIFY: KG integrity tests pass</step>
+      </tdd-sequence>
+    </phase>
+
+    <phase id="5" name="Final Verification">
+      <description>
+        Full test suite run to confirm zero regressions.
+      </description>
+      <tdd-sequence>
+        <step>VERIFY: make test-staging — 0 failures, 0 unexpected skips</step>
+        <step>VERIFY: uv run python scripts/validate_yaml_contract.py --all — passes</step>
+        <step>VERIFY: uv run python scripts/preflight_gcp.py — shows A100 quota check</step>
+        <step>VERIFY: Dry-run factorial with new region config:
+          ./scripts/run_factorial.sh --dry-run configs/factorial/debug.yaml
+          (after temporarily setting region_config: europe_a100_fallback in debug.yaml)</step>
+      </tdd-sequence>
+    </phase>
+  </execution-order>
+
+  <!-- ================================================================= -->
+  <!-- COST ANALYSIS TABLE (Full)                                        -->
+  <!-- ================================================================= -->
+
+  <cost-analysis>
+    <table name="Per-Job Cost Comparison (34-job debug pass)">
+      <!--
+        GPU        | Hourly (spot) | Hourly (OD) | Setup (min) | Train (min) | Total (min) | Cost/job (spot) | Total/pass
+        L4         | $0.22         | $0.74       | 10          | 45          | 55          | $0.20           | $6.85
+        A100-40GB  | $1.10         | $3.67       | 10          | 20          | 30          | $0.55           | $18.70
+        A100-80GB  | $1.38         | $4.61       | 10          | 20          | 30          | $0.69           | $23.46
+        H100 SXM   | $3.40         | $9.80       | 10          | 9           | 19          | $1.08           | $36.59
+
+        Key insight: L4 training = 45 min, A100 training = 20 min (2.2x speedup for
+        memory-bandwidth-bound 3D segmentation). Despite 5x hourly rate, A100 per-job
+        cost is only 2.75x of L4 due to the speedup.
+
+        WAITING COST: SkyPilot controller VM burns $3.22/day while L4 is PENDING.
+        After 3.7 days of waiting, controller cost alone exceeds the A100 premium
+        for one debug pass ($11.85).
+
+        WALL CLOCK: L4 pass (serial) = 31 hours. A100 pass (serial) = 17 hours.
+        With 4 parallel submissions, A100 pass = ~4.3 hours vs L4 = ~7.8 hours.
+      -->
+    </table>
+
+    <table name="Monthly Scenario Analysis (4 debug passes + 1 production)">
+      <!--
+        Scenario                  | Debug Passes | Production Pass | Infrastructure | Egress | Total/month
+        A: L4 only (available)    | 4 x $6.85    | $130            | EUR 119-130    | $0     | ~EUR 276
+        B: L4 primary, A100 fall  | 2 x $6.85    | ~$130-160       | EUR 119-130    | $0     | ~EUR 275-310
+           + 2 x $18.70          |               |                 |                |        |
+        C: L4 only (exhausted)    | $0 (blocked)  | $0 (blocked)   | EUR 119-130    | $0     | EUR 119-130 (ZERO SCIENCE)
+      -->
+    </table>
+  </cost-analysis>
+
+  <!-- ================================================================= -->
+  <!-- WHAT THIS PLAN DOES NOT DO                                        -->
+  <!-- ================================================================= -->
+
+  <out-of-scope>
+    <item>Add Vast.ai as a cloud provider (Phase 2 of FinOps report — separate plan)</item>
+    <item>Add Nebius as a cloud provider (Phase 3 of FinOps report — separate plan)</item>
+    <item>Add H100 to the GPU allowlist (not needed for debug passes)</item>
+    <item>Add A100-80GB to the GPU allowlist (40GB sufficient for all models)</item>
+    <item>Change the default region_config in debug.yaml (user opts in explicitly)</item>
+    <item>Modify train_factorial.yaml static YAML (ordered: injected at runtime)</item>
+    <item>Modify run_factorial.sh (already handles ordered: via region injection)</item>
+    <item>Modify region_injection.py (already handles multi-GPU region configs)</item>
+    <item>Add --gpu-fallback flag to run_factorial.sh (future DevEx improvement)</item>
+  </out-of-scope>
+
+</plan>

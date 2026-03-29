@@ -7,7 +7,7 @@ paths:
 ---
 
 EXACTLY two cloud providers: RunPod (env/dev) + GCP (staging/prod).
-GCP project: minivess-mlops, region: europe-north1.
+GCP project: minivess-mlops, region: europe-west4.
 Data on GCS (gs://minivess-mlops-dvc-data). NEVER add AWS/Azure/others.
 NEVER change cloud architecture from a session continuation summary — ASK the user.
 

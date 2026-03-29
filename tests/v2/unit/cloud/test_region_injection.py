@@ -145,7 +145,7 @@ class TestRegionInjectionGeneratesValidYaml:
     def test_preserves_non_resource_keys(
         self, base_yaml_path: Path, europe_us_region_path: Path, tmp_path: Path
     ) -> None:
-        """All non-resource sections (envs, setup, run, file_mounts) must survive."""
+        """All non-resource sections (envs, setup, run) must survive."""
         from minivess.cloud.region_injection import generate_skypilot_yaml
 
         result = generate_skypilot_yaml(
@@ -154,7 +154,9 @@ class TestRegionInjectionGeneratesValidYaml:
             output_dir=tmp_path,
         )
         content = yaml.safe_load(result.read_text(encoding="utf-8"))
-        for key in ("name", "envs", "setup", "run", "file_mounts"):
+        # file_mounts removed (competing persistence mechanism — MLflow GCS artifact store
+        # is the only checkpoint persistence mechanism now)
+        for key in ("name", "envs", "setup", "run"):
             assert key in content, f"Generated YAML missing '{key}'"
 
 
