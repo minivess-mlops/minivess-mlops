@@ -73,7 +73,9 @@ help:
 # ---------------------------------------------------------------------------
 # Staging: gate for PRs → main. No model loading, no slow. Target: <3 min.
 test-staging:
-	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
+	MINIVESS_ALLOW_HOST=1 MINIVESS_ALLOW_CPU=1 \
+	MLFLOW_TRACKING_URI= MLFLOW_TRACKING_USERNAME= MLFLOW_TRACKING_PASSWORD= DAGSHUB_TOKEN= \
+	uv run pytest tests/ -x -q \
 	  -m "not model_loading and not slow and not integration and not cloud_mlflow and not skypilot_cloud and not gpu" \
 	  --ignore=tests/v2/quasi_e2e/ \
 	  --ignore=tests/v2/cloud/ \

@@ -5,7 +5,7 @@
 # 2 losses (dice_ce, cbdice_cldice) × 3 folds × 20 epochs on local GPU.
 #
 # This is the ONLY supported way to run the mini-experiment.
-# DO NOT bypass this script with MINIVESS_ALLOW_HOST=1 or direct Python invocation.
+# DO NOT bypass Docker+Prefect with escape hatches or direct Python invocation.
 #
 # Prerequisites:
 #   - .env file with DagsHub credentials (MLFLOW_TRACKING_URI, DAGSHUB_TOKEN)
@@ -109,11 +109,11 @@ fi
 # The training flow handles all folds internally (num_folds=3 → trains fold 0,1,2).
 # Each loss function has its own Hydra experiment config in configs/experiment/.
 # We loop over experiment names — one Docker invocation per loss function.
-EXPERIMENTS=("smoke_mini_dice_ce" "smoke_mini_cbdice_cldice")
+EXPERIMENTS=("mini_experiment_dice_ce" "mini_experiment_cbdice_cldice")
 
 # Apply filters
 if [[ -n "${LOSS_FILTER}" ]]; then
-    EXPERIMENTS=("smoke_mini_${LOSS_FILTER}")
+    EXPERIMENTS=("mini_experiment_${LOSS_FILTER}")
 fi
 
 TOTAL=${#EXPERIMENTS[@]}
