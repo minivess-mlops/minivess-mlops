@@ -148,6 +148,12 @@ services:
     volumes:
       - raw_data:/app/data/raw
       - logs_data:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -168,6 +174,12 @@ services:
       - data_cache:/app/data/processed
       - configs_splits:/app/configs/splits
       - mlruns_data:/app/mlruns
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -227,6 +239,12 @@ services:
     # CDI GPU access — SWA/calibration need GPU for model weight operations
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
@@ -254,6 +272,12 @@ services:
     # CDI GPU access — model evaluation uses sliding_window_inference on GPU
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
@@ -275,6 +299,12 @@ services:
       - mlruns_data:/app/mlruns:ro
       - outputs_deploy:/app/outputs/deploy
       - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
@@ -294,6 +324,12 @@ services:
       - mlruns_data:/app/mlruns:ro
       - outputs_analysis:/app/outputs/analysis:ro
       - outputs_dashboard:/app/outputs/dashboard
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
@@ -352,6 +388,12 @@ services:
       - mlruns_data:/app/mlruns:ro
       - outputs_biostatistics:/app/outputs/biostatistics
       - configs_biostatistics:/app/configs/biostatistics:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -376,6 +418,12 @@ services:
       - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}:ro
       - data_cache:/app/data:ro
       - mlruns_data:/app/mlruns
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
@@ -425,6 +473,12 @@ services:
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
