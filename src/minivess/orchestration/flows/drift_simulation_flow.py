@@ -26,6 +26,7 @@ from prefect import flow, task
 from minivess.data.feature_extraction import extract_batch_features
 from minivess.observability.drift import FeatureDriftDetector
 from minivess.orchestration.constants import FLOW_NAME_DRIFT_SIMULATION
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)

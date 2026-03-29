@@ -24,6 +24,7 @@ from minivess.config.acquisition_config import (
 from minivess.data.downloaders import get_downloader
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_ACQUISITION
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)

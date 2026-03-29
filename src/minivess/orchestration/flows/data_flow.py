@@ -23,6 +23,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_DATA,
     resolve_experiment_name,
 )
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.flow_contract import (
     FlowContract,  # noqa: F401  # used via log_completion_safe

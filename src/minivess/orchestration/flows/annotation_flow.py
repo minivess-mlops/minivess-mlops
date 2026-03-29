@@ -19,6 +19,7 @@ from numpy.typing import NDArray  # noqa: TC002
 from prefect import flow, task
 
 from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.serving.api_models import SegmentationRequest
 

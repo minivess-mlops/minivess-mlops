@@ -21,6 +21,7 @@ from minivess.orchestration.constants import (
     EXPERIMENT_TRAINING,
     FLOW_NAME_MAINTENANCE,
 )
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)

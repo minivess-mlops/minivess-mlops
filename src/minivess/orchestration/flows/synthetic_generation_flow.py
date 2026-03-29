@@ -21,6 +21,7 @@ from prefect import flow, task
 
 from minivess.data.synthetic import generate_stack, list_generators
 from minivess.orchestration.constants import FLOW_NAME_SYNTHETIC_GENERATION
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)

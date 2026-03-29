@@ -106,3 +106,27 @@ class TestGpuFlowsHeartbeat:
             f"{flow_file} MUST import gpu_flow_observability_context "
             f"for GPU heartbeat monitoring"
         )
+
+
+# CPU flows that must have flow_observability_context
+_CPU_FLOWS = [
+    f.name for f in _FLOWS_DIR.glob("*_flow.py")
+    if f.name not in _GPU_FLOWS
+    and _has_flow_decorator(f)
+]
+
+
+class TestAllFlowsObservability:
+    """EVERY flow file must import some form of observability context."""
+
+    @pytest.mark.parametrize("flow_file", _GPU_FLOWS)
+    def test_gpu_flow_has_observability(self, flow_file: str) -> None:
+        path = _FLOWS_DIR / flow_file
+        has = _file_contains_string(path, "flow_observability_context")
+        assert has, f"{flow_file} MUST use flow_observability_context or gpu_flow_observability_context"
+
+    @pytest.mark.parametrize("flow_file", _CPU_FLOWS)
+    def test_cpu_flow_has_observability(self, flow_file: str) -> None:
+        path = _FLOWS_DIR / flow_file
+        has = _file_contains_string(path, "flow_observability_context")
+        assert has, f"{flow_file} MUST import flow_observability_context"

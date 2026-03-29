@@ -21,6 +21,7 @@ from prefect import flow, task
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
 from minivess.observability.tracking import resolve_tracking_uri
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 # QA was merged into the dashboard health adapter (#342, PR #567).

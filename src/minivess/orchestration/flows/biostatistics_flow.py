@@ -22,6 +22,7 @@ from prefect import flow, task
 from minivess.config.biostatistics_config import BiostatisticsConfig
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.pipeline.biostatistics_discovery import (
     discover_source_runs,
