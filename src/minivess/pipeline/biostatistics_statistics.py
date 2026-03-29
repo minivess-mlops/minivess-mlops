@@ -25,6 +25,7 @@ from scipy import stats
 from minivess.pipeline.biostatistics_types import (
     FactorialAnovaResult,
     PairwiseResult,
+    StratifiedPermutationResult,
     VarianceDecompositionResult,
 )
 from minivess.pipeline.comparison import (
@@ -292,9 +293,150 @@ def compute_variance_decomposition(
 
 
 def _pool_scores(fold_data: dict[int, np.ndarray]) -> np.ndarray:
-    """Pool per-volume scores across all folds into a single array."""
+    """Pool per-volume scores across all folds into a single array.
+
+    WARNING: Pooling destroys fold structure. Use stratified_permutation_test()
+    for pairwise significance testing, which respects within-fold pairing.
+    This function is retained for effect size computation where pooling is valid.
+    """
     arrays = [fold_data[k] for k in sorted(fold_data.keys())]
     return np.concatenate(arrays)
+
+
+def stratified_permutation_test(
+    fold_data_a: dict[int, np.ndarray],
+    fold_data_b: dict[int, np.ndarray],
+    n_permutations: int = 999,
+    *,
+    seed: int = 42,
+) -> StratifiedPermutationResult:
+    """Stratified within-fold permutation test for paired comparisons.
+
+    Primary analysis: shuffles condition labels WITHIN each fold stratum,
+    preserving the (fold_id, volume_id) pairing. Combines per-stratum
+    Wilcoxon statistics via Stouffer's Z method.
+
+    This is the correct approach when volumes within a fold share the same
+    trained model — they are NOT independent across folds.
+
+    Parameters
+    ----------
+    fold_data_a:
+        {fold_id: np.ndarray} for condition A.
+    fold_data_b:
+        {fold_id: np.ndarray} for condition B.
+    n_permutations:
+        Number of permutation resamples.
+    seed:
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    StratifiedPermutationResult with p_value, observed_statistic, etc.
+    """
+    rng = np.random.default_rng(seed)
+    fold_ids = sorted(set(fold_data_a.keys()) & set(fold_data_b.keys()))
+
+    if not fold_ids:
+        return StratifiedPermutationResult(
+            p_value=1.0,
+            observed_statistic=0.0,
+            n_permutations=n_permutations,
+            n_folds=0,
+            n_volumes_per_fold=[],
+        )
+
+    # Compute observed stratified statistic
+    observed = _stratified_stouffer_z(fold_data_a, fold_data_b, fold_ids)
+    n_volumes_per_fold = [
+        min(len(fold_data_a[f]), len(fold_data_b[f])) for f in fold_ids
+    ]
+
+    # Permutation null distribution: within each fold, randomly swap
+    # condition labels for each volume (paired permutation)
+    n_extreme = 0
+    for _ in range(n_permutations):
+        perm_a: dict[int, np.ndarray] = {}
+        perm_b: dict[int, np.ndarray] = {}
+
+        for fold_id in fold_ids:
+            a = fold_data_a[fold_id]
+            b = fold_data_b[fold_id]
+            n = min(len(a), len(b))
+            a_aligned = a[:n]
+            b_aligned = b[:n]
+
+            # For each volume, randomly swap A and B labels
+            swap_mask = rng.random(n) < 0.5
+            pa = np.where(swap_mask, b_aligned, a_aligned)
+            pb = np.where(swap_mask, a_aligned, b_aligned)
+            perm_a[fold_id] = pa
+            perm_b[fold_id] = pb
+
+        perm_stat = _stratified_stouffer_z(perm_a, perm_b, fold_ids)
+        if abs(perm_stat) >= abs(observed):
+            n_extreme += 1
+
+    # Two-sided p-value (include the observed itself per Phipson & Smyth 2010)
+    p_value = (n_extreme + 1) / (n_permutations + 1)
+
+    return StratifiedPermutationResult(
+        p_value=p_value,
+        observed_statistic=float(observed),
+        n_permutations=n_permutations,
+        n_folds=len(fold_ids),
+        n_volumes_per_fold=n_volumes_per_fold,
+    )
+
+
+def _stratified_stouffer_z(
+    fold_data_a: dict[int, np.ndarray],
+    fold_data_b: dict[int, np.ndarray],
+    fold_ids: list[int],
+) -> float:
+    """Combine within-fold Wilcoxon test statistics via Stouffer's Z.
+
+    For each fold, compute the Wilcoxon signed-rank Z-statistic on paired
+    volumes, then combine: Z_combined = sum(Z_i * sqrt(n_i)) / sqrt(sum(n_i)).
+    """
+    z_values = []
+    weights = []
+
+    for fold_id in fold_ids:
+        a = fold_data_a[fold_id]
+        b = fold_data_b[fold_id]
+        n = min(len(a), len(b))
+        if n < 2:
+            continue
+        a_aligned = a[:n]
+        b_aligned = b[:n]
+
+        diff = a_aligned - b_aligned
+        # Remove zero differences (Wilcoxon convention)
+        diff = diff[diff != 0.0]
+        if len(diff) < 2:
+            continue
+
+        try:
+            result = stats.wilcoxon(a_aligned, b_aligned, alternative="two-sided")
+            # Convert to z-score via normal approximation
+            z = stats.norm.isf(result.pvalue / 2)
+            if np.mean(diff) < 0:
+                z = -z
+        except ValueError:
+            continue
+
+        z_values.append(z)
+        weights.append(np.sqrt(n))
+
+    if not z_values:
+        return 0.0
+
+    # Stouffer's weighted Z combination
+    z_arr = np.array(z_values)
+    w_arr = np.array(weights)
+    combined = float(np.sum(z_arr * w_arr) / np.sqrt(np.sum(w_arr**2)))
+    return combined
 
 
 def _bh_fdr_correction(

@@ -85,6 +85,17 @@ class PairwiseResult:
 
 
 @dataclass
+class StratifiedPermutationResult:
+    """Result of a stratified within-fold permutation test."""
+
+    p_value: float
+    observed_statistic: float
+    n_permutations: int
+    n_folds: int
+    n_volumes_per_fold: list[int]
+
+
+@dataclass
 class VarianceDecompositionResult:
     """Result of Friedman test + ICC analysis for one metric."""
 
