@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -167,45 +168,47 @@ def drift_simulation_flow(
     """
     require_docker_context("drift-simulation")
 
-    if reference_volumes is None or batches is None:
-        logger.warning("No data provided — returning empty result")
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("drift-simulation", logs_dir=logs_dir) as event_logger:
+        if reference_volumes is None or batches is None:
+            logger.warning("No data provided — returning empty result")
+            return {
+                "status": "completed",
+                "n_batches": 0,
+                "batch_results": [],
+                "summary_path": None,
+            }
+
+        # Step 1: Extract reference features
+        ref_result = extract_reference_features_task(reference_volumes)
+
+        # Step 2: Run drift detection on each batch
+        batch_results: list[dict[str, Any]] = []
+        for i, batch in enumerate(batches):
+            result = run_batch_drift_task(
+                batch_volumes=batch,
+                reference_features=ref_result["features"],
+                batch_id=i,
+            )
+            batch_results.append(result)
+
+        # Step 3: Save summary
+        summary_path = save_drift_summary_task(batch_results, output_dir)
+
+        n_drifted_batches = sum(1 for r in batch_results if r["drift_detected"])
+        logger.info(
+            "Drift simulation complete: %d/%d batches drifted",
+            n_drifted_batches,
+            len(batches),
+        )
+
         return {
             "status": "completed",
-            "n_batches": 0,
-            "batch_results": [],
-            "summary_path": None,
+            "n_batches": len(batches),
+            "n_drifted_batches": n_drifted_batches,
+            "batch_results": batch_results,
+            "summary_path": summary_path,
         }
-
-    # Step 1: Extract reference features
-    ref_result = extract_reference_features_task(reference_volumes)
-
-    # Step 2: Run drift detection on each batch
-    batch_results: list[dict[str, Any]] = []
-    for i, batch in enumerate(batches):
-        result = run_batch_drift_task(
-            batch_volumes=batch,
-            reference_features=ref_result["features"],
-            batch_id=i,
-        )
-        batch_results.append(result)
-
-    # Step 3: Save summary
-    summary_path = save_drift_summary_task(batch_results, output_dir)
-
-    n_drifted_batches = sum(1 for r in batch_results if r["drift_detected"])
-    logger.info(
-        "Drift simulation complete: %d/%d batches drifted",
-        n_drifted_batches,
-        len(batches),
-    )
-
-    return {
-        "status": "completed",
-        "n_batches": len(batches),
-        "n_drifted_batches": n_drifted_batches,
-        "batch_results": batch_results,
-        "summary_path": summary_path,
-    }
 
 
 if __name__ == "__main__":

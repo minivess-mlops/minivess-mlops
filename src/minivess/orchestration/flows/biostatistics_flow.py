@@ -400,204 +400,206 @@ def run_biostatistics_flow(
     """
     require_docker_context("biostatistics")
 
-    logger.info("Starting biostatistics flow (source: %s)", trigger_source)
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("biostatistics", logs_dir=logs_dir) as event_logger:
+        logger.info("Starting biostatistics flow (source: %s)", trigger_source)
 
-    # Load config
-    config = _load_config(config_path)
+        # Load config
+        config = _load_config(config_path)
 
-    mlruns_dir_str = str(config.mlruns_dir)
-    output_dir_str = str(config.output_dir)
+        mlruns_dir_str = str(config.mlruns_dir)
+        output_dir_str = str(config.output_dir)
 
-    # Phase 2: Discovery + validation
-    manifest: Any = task_discover_source_runs(
-        mlruns_dir=mlruns_dir_str,
-        experiment_names=config.experiment_names,
-    )
-    _validation = task_validate_source_completeness(
-        manifest=manifest,
-        min_folds=config.min_folds_per_condition,
-        min_conditions=config.min_conditions,
-    )
-
-    # Phase 2: DuckDB
-    db_path = task_build_duckdb(
-        manifest=manifest,
-        mlruns_dir=mlruns_dir_str,
-        output_dir=output_dir_str,
-    )
-
-    # Build per-volume data from manifest for statistics
-    per_volume_data = _build_per_volume_data(manifest, Path(mlruns_dir_str))
-
-    # Build test split data (DeepVess external test evaluation).
-    # This is separate from trainval because test/ prefix metrics come from
-    # external test datasets, not from cross-validated MiniVess splits.
-    per_volume_data_test = _build_per_volume_data(
-        manifest, Path(mlruns_dir_str), split="test"
-    )
-    if per_volume_data_test:
-        # Merge test data into main dict with "test/" prefix to distinguish
-        for metric, conditions in per_volume_data_test.items():
-            per_volume_data[f"test/{metric}"] = conditions
-        logger.info(
-            "Added %d test-split metrics from external datasets",
-            len(per_volume_data_test),
+        # Phase 2: Discovery + validation
+        manifest: Any = task_discover_source_runs(
+            mlruns_dir=mlruns_dir_str,
+            experiment_names=config.experiment_names,
+        )
+        _validation = task_validate_source_completeness(
+            manifest=manifest,
+            min_folds=config.min_folds_per_condition,
+            min_conditions=config.min_conditions,
         )
 
-    # Derive higher_is_better from metric names (lower is better for HD95, ASSD)
-    higher_is_better: dict[str, bool] = {}
-    for m in config.metrics:
-        higher_is_better[m] = m not in ("hd95", "assd", "be_0", "be_1")
+        # Phase 2: DuckDB
+        db_path = task_build_duckdb(
+            manifest=manifest,
+            mlruns_dir=mlruns_dir_str,
+            output_dir=output_dir_str,
+        )
 
-    # Phase 3: Statistical engine — layered ANOVA + pairwise + Bayesian
-    all_pairwise: list[Any] = []
-    all_variance: list[Any] = []
-    all_anova: list[Any] = []
+        # Build per-volume data from manifest for statistics
+        per_volume_data = _build_per_volume_data(manifest, Path(mlruns_dir_str))
 
-    # Layered factorial ANOVA (3-way → 5-way → 6-way)
-    all_factor_names = config.factor_names
-    for metric in config.metrics:
-        if metric in per_volume_data:
-            try:
-                anova_result = task_compute_factorial_anova(
-                    per_volume_data=per_volume_data,
+        # Build test split data (DeepVess external test evaluation).
+        # This is separate from trainval because test/ prefix metrics come from
+        # external test datasets, not from cross-validated MiniVess splits.
+        per_volume_data_test = _build_per_volume_data(
+            manifest, Path(mlruns_dir_str), split="test"
+        )
+        if per_volume_data_test:
+            # Merge test data into main dict with "test/" prefix to distinguish
+            for metric, conditions in per_volume_data_test.items():
+                per_volume_data[f"test/{metric}"] = conditions
+            logger.info(
+                "Added %d test-split metrics from external datasets",
+                len(per_volume_data_test),
+            )
+
+        # Derive higher_is_better from metric names (lower is better for HD95, ASSD)
+        higher_is_better: dict[str, bool] = {}
+        for m in config.metrics:
+            higher_is_better[m] = m not in ("hd95", "assd", "be_0", "be_1")
+
+        # Phase 3: Statistical engine — layered ANOVA + pairwise + Bayesian
+        all_pairwise: list[Any] = []
+        all_variance: list[Any] = []
+        all_anova: list[Any] = []
+
+        # Layered factorial ANOVA (3-way → 5-way → 6-way)
+        all_factor_names = config.factor_names
+        for metric in config.metrics:
+            if metric in per_volume_data:
+                try:
+                    anova_result = task_compute_factorial_anova(
+                        per_volume_data=per_volume_data,
+                        metric_name=metric,
+                        factor_names=all_factor_names,
+                    )
+                    all_anova.append(anova_result)
+                except Exception:
+                    logger.warning(
+                        "Factorial ANOVA failed for metric %s — continuing",
+                        metric,
+                        exc_info=True,
+                    )
+
+        for metric in config.metrics:
+            if metric in per_volume_data:
+                pairwise = task_compute_pairwise(
+                    per_volume_data=per_volume_data[metric],
                     metric_name=metric,
-                    factor_names=all_factor_names,
+                    alpha=config.alpha,
+                    primary_metric=config.primary_metric,
+                    n_bootstrap=config.n_bootstrap,
+                    seed=config.seed,
                 )
-                all_anova.append(anova_result)
-            except Exception:
-                logger.warning(
-                    "Factorial ANOVA failed for metric %s — continuing",
-                    metric,
-                    exc_info=True,
+                all_pairwise.extend(pairwise)
+
+                task_compute_bayesian(
+                    per_volume_data=per_volume_data[metric],
+                    metric_name=metric,
+                    rope=config.rope_values.get(metric, 0.01),
                 )
 
-    for metric in config.metrics:
-        if metric in per_volume_data:
-            pairwise = task_compute_pairwise(
-                per_volume_data=per_volume_data[metric],
-                metric_name=metric,
-                alpha=config.alpha,
-                primary_metric=config.primary_metric,
-                n_bootstrap=config.n_bootstrap,
-                seed=config.seed,
-            )
-            all_pairwise.extend(pairwise)
+                variance = task_compute_variance(
+                    per_volume_data=per_volume_data[metric],
+                    metric_name=metric,
+                    alpha=config.alpha,
+                )
+                all_variance.extend(variance)
 
-            task_compute_bayesian(
-                per_volume_data=per_volume_data[metric],
-                metric_name=metric,
-                rope=config.rope_values.get(metric, 0.01),
-            )
-
-            variance = task_compute_variance(
-                per_volume_data=per_volume_data[metric],
-                metric_name=metric,
-                alpha=config.alpha,
-            )
-            all_variance.extend(variance)
-
-    # Phase 3b: Specification curve analysis
-    # Factor names auto-derived from factorial YAML or config (Rule #29)
-    _factor_names = _resolve_factor_names(config)
-    spec_curve = task_compute_specification_curve(
-        per_volume_data=per_volume_data,
-        factor_names=_factor_names,
-        metric_names=config.metrics,
-        higher_is_better=higher_is_better,
-        n_permutations=config.n_bootstrap // 20,  # Scale with bootstrap
-        alpha=config.alpha,
-        seed=config.seed,
-    )
-    logger.info(
-        "Specification curve: %d specs, median effect=%.3f, %.1f%% significant",
-        len(spec_curve.specifications),
-        spec_curve.median_effect,
-        spec_curve.fraction_significant * 100,
-    )
-
-    # Phase 4a: Rank concordance (Kendall's tau between metrics)
-    rank_concordance = task_compute_rank_concordance(
-        per_volume_data=per_volume_data,
-        metric_names=config.metrics,
-        higher_is_better=higher_is_better,
-    )
-    if rank_concordance.n_inversions > 0:
+        # Phase 3b: Specification curve analysis
+        # Factor names auto-derived from factorial YAML or config (Rule #29)
+        _factor_names = _resolve_factor_names(config)
+        spec_curve = task_compute_specification_curve(
+            per_volume_data=per_volume_data,
+            factor_names=_factor_names,
+            metric_names=config.metrics,
+            higher_is_better=higher_is_better,
+            n_permutations=config.n_bootstrap // 20,  # Scale with bootstrap
+            alpha=config.alpha,
+            seed=config.seed,
+        )
         logger.info(
-            "Rank inversions detected: %d/%d metric pairs (DSC vs clDice inversion "
-            "IS a paper finding)",
-            rank_concordance.n_inversions,
-            rank_concordance.n_pairs,
+            "Specification curve: %d specs, median effect=%.3f, %.1f%% significant",
+            len(spec_curve.specifications),
+            spec_curve.median_effect,
+            spec_curve.fraction_significant * 100,
         )
 
-    # Phase 4b: Rankings
-    rankings = task_compute_rankings(
-        per_volume_data=per_volume_data,
-        metric_names=config.metrics,
-        higher_is_better=higher_is_better,
-        alpha=config.alpha,
-    )
-
-    # Phase 5: Figures (now includes ANOVA interaction plots + variance lollipops)
-    figures = task_generate_figures(
-        per_volume_data=per_volume_data,
-        pairwise=all_pairwise,
-        variance=all_variance,
-        rankings=rankings,
-        output_dir=output_dir_str,
-        anova_results=all_anova if all_anova else None,
-    )
-
-    # Phase 6: Tables (now includes ANOVA summary tables)
-    tables = task_generate_tables(
-        pairwise=all_pairwise,
-        variance=all_variance,
-        rankings=rankings,
-        output_dir=output_dir_str,
-        anova_results=all_anova if all_anova else None,
-    )
-
-    # Phase 7: Lineage + MLflow
-    lineage = task_build_lineage(
-        manifest=manifest,
-        figures=figures,
-        tables=tables,
-    )
-    mlflow_run_id = task_log_mlflow(
-        manifest=manifest,
-        lineage=lineage,
-        figures=figures,
-        tables=tables,
-        db_path=db_path,
-    )
-
-    logger.info("Biostatistics flow complete. MLflow run: %s", mlflow_run_id)
-
-    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
-    try:
-        _emitter = LineageEmitter(namespace="minivess")
-        emit_flow_lineage(
-            emitter=_emitter,
-            job_name="biostatistics-flow",
-            inputs=[{"namespace": "minivess", "name": "mlflow_runs"}],
-            outputs=[
-                {"namespace": "minivess", "name": "figures"},
-                {"namespace": "minivess", "name": "tables"},
-            ],
+        # Phase 4a: Rank concordance (Kendall's tau between metrics)
+        rank_concordance = task_compute_rank_concordance(
+            per_volume_data=per_volume_data,
+            metric_names=config.metrics,
+            higher_is_better=higher_is_better,
         )
-    except Exception:
-        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
+        if rank_concordance.n_inversions > 0:
+            logger.info(
+                "Rank inversions detected: %d/%d metric pairs (DSC vs clDice inversion "
+                "IS a paper finding)",
+                rank_concordance.n_inversions,
+                rank_concordance.n_pairs,
+            )
 
-    return BiostatisticsResult(
-        manifest=manifest,
-        db_path=db_path,
-        pairwise=all_pairwise,
-        variance=all_variance,
-        rankings=rankings,
-        figures=figures,
-        tables=tables,
-        mlflow_run_id=mlflow_run_id,
-    )
+        # Phase 4b: Rankings
+        rankings = task_compute_rankings(
+            per_volume_data=per_volume_data,
+            metric_names=config.metrics,
+            higher_is_better=higher_is_better,
+            alpha=config.alpha,
+        )
+
+        # Phase 5: Figures (now includes ANOVA interaction plots + variance lollipops)
+        figures = task_generate_figures(
+            per_volume_data=per_volume_data,
+            pairwise=all_pairwise,
+            variance=all_variance,
+            rankings=rankings,
+            output_dir=output_dir_str,
+            anova_results=all_anova if all_anova else None,
+        )
+
+        # Phase 6: Tables (now includes ANOVA summary tables)
+        tables = task_generate_tables(
+            pairwise=all_pairwise,
+            variance=all_variance,
+            rankings=rankings,
+            output_dir=output_dir_str,
+            anova_results=all_anova if all_anova else None,
+        )
+
+        # Phase 7: Lineage + MLflow
+        lineage = task_build_lineage(
+            manifest=manifest,
+            figures=figures,
+            tables=tables,
+        )
+        mlflow_run_id = task_log_mlflow(
+            manifest=manifest,
+            lineage=lineage,
+            figures=figures,
+            tables=tables,
+            db_path=db_path,
+        )
+
+        logger.info("Biostatistics flow complete. MLflow run: %s", mlflow_run_id)
+
+        # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+        try:
+            _emitter = LineageEmitter(namespace="minivess")
+            emit_flow_lineage(
+                emitter=_emitter,
+                job_name="biostatistics-flow",
+                inputs=[{"namespace": "minivess", "name": "mlflow_runs"}],
+                outputs=[
+                    {"namespace": "minivess", "name": "figures"},
+                    {"namespace": "minivess", "name": "tables"},
+                ],
+            )
+        except Exception:
+            logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
+
+        return BiostatisticsResult(
+            manifest=manifest,
+            db_path=db_path,
+            pairwise=all_pairwise,
+            variance=all_variance,
+            rankings=rankings,
+            figures=figures,
+            tables=tables,
+            mlflow_run_id=mlflow_run_id,
+        )
 
 
 # ---------------------------------------------------------------------------

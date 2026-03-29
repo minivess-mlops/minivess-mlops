@@ -55,6 +55,8 @@ def flow_observability_context(
         Directory for events.jsonl and heartbeat.json. If None, events go
         to Python logger only (no file output).
     """
+    if logs_dir is not None:
+        logs_dir.mkdir(parents=True, exist_ok=True)
     event_logger = StructuredEventLogger(output_dir=logs_dir)
     start_time = time.monotonic()
 

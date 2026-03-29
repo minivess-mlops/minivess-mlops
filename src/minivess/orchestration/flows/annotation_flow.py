@@ -7,12 +7,11 @@ session, and optionally computes agreement with a reference segmentation.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
@@ -187,18 +186,20 @@ def run_annotation_flow(
     """
     require_docker_context("annotation")
 
-    if config is None:
-        config = AnnotationFlowConfig()
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("annotation", logs_dir=logs_dir) as event_logger:
+        if config is None:
+            config = AnnotationFlowConfig()
 
-    client = _build_client(config)
-    response = inference_task(volume, config, client)
-    session_report, agreement = record_annotation_task(volume_id, response, reference)
+        client = _build_client(config)
+        response = inference_task(volume, config, client)
+        session_report, agreement = record_annotation_task(volume_id, response, reference)
 
-    return AnnotationFlowResult(
-        response=response.to_dict(),
-        session_report=session_report,
-        agreement_dice=agreement,
-    )
+        return AnnotationFlowResult(
+            response=response.to_dict(),
+            session_report=session_report,
+            agreement_dice=agreement,
+        )
 
 
 if __name__ == "__main__":

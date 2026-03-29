@@ -33,7 +33,6 @@ from minivess.orchestration.constants import (
     resolve_experiment_name,
 )
 from minivess.observability.flow_observability import gpu_flow_observability_context
-from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -261,175 +260,176 @@ def post_training_flow(
         What triggered this flow.
     """
     require_docker_context("post-training")
-    require_cuda_context("post_training")
 
-    log = get_run_logger()
-    log.info("Post-training flow started (trigger: %s)", trigger_source)
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with gpu_flow_observability_context("post-training", logs_dir=logs_dir) as event_logger:
+        log = get_run_logger()
+        log.info("Post-training flow started (trigger: %s)", trigger_source)
 
-    if config is None:
-        config = PostTrainingConfig()
-    if run_metadata is None:
-        run_metadata = []
-    if output_dir is None:
-        output_dir = Path(
-            os.environ.get("POST_TRAINING_OUTPUT_DIR", "/app/outputs/post_training")
-        )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Auto-discover upstream training run and checkpoints (#587).
-    tracking_uri = resolve_tracking_uri()
-    upstream_exp = os.environ.get(
-        "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
-    )
-
-    if upstream_training_run_id is None:
-        upstream = find_upstream_safely(
-            tracking_uri=tracking_uri,
-            experiment_name=upstream_exp,
-            upstream_flow=FLOW_NAME_TRAIN,
-        )
-        upstream_training_run_id = upstream["run_id"] if upstream else None
-
-    if checkpoint_paths is None or len(checkpoint_paths) == 0:
-        checkpoint_paths = resolve_checkpoint_paths_from_contract(
-            parent_run_id=upstream_training_run_id,
-            tracking_uri=tracking_uri,
-        )
-        if checkpoint_paths:
-            log.info(
-                "Auto-discovered %d checkpoint(s) from upstream run %s",
-                len(checkpoint_paths),
-                upstream_training_run_id,
-            )
-        else:
-            log.warning(
-                "No checkpoints found from upstream run %s — plugins may skip",
-                upstream_training_run_id,
+        if config is None:
+            config = PostTrainingConfig()
+        if run_metadata is None:
+            run_metadata = []
+        if output_dir is None:
+            output_dir = Path(
+                os.environ.get("POST_TRAINING_OUTPUT_DIR", "/app/outputs/post_training")
             )
 
-    enabled = config.enabled_plugin_names()
-    if not enabled:
-        log.info("No post-training plugins enabled")
-        return PostTrainingFlowResult(status="completed")
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    registry = _build_registry()
-    plugin_results: dict[str, dict[str, Any]] = {}
-
-    # --- Weight-based plugins ---
-    weight_enabled = [name for name in enabled if name in _WEIGHT_PLUGINS]
-    for plugin_name in weight_enabled:
-        plugin_cfg = _plugin_config_dict(config, plugin_name)
-        plugin_cfg["output_dir"] = str(output_dir / plugin_name)
-
-        pi = PluginInput(
-            checkpoint_paths=list(checkpoint_paths),
-            config=plugin_cfg,
-            run_metadata=list(run_metadata),
+        # Auto-discover upstream training run and checkpoints (#587).
+        tracking_uri = resolve_tracking_uri()
+        upstream_exp = os.environ.get(
+            "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
         )
+
+        if upstream_training_run_id is None:
+            upstream = find_upstream_safely(
+                tracking_uri=tracking_uri,
+                experiment_name=upstream_exp,
+                upstream_flow=FLOW_NAME_TRAIN,
+            )
+            upstream_training_run_id = upstream["run_id"] if upstream else None
+
+        if checkpoint_paths is None or len(checkpoint_paths) == 0:
+            checkpoint_paths = resolve_checkpoint_paths_from_contract(
+                parent_run_id=upstream_training_run_id,
+                tracking_uri=tracking_uri,
+            )
+            if checkpoint_paths:
+                log.info(
+                    "Auto-discovered %d checkpoint(s) from upstream run %s",
+                    len(checkpoint_paths),
+                    upstream_training_run_id,
+                )
+            else:
+                log.warning(
+                    "No checkpoints found from upstream run %s — plugins may skip",
+                    upstream_training_run_id,
+                )
+
+        enabled = config.enabled_plugin_names()
+        if not enabled:
+            log.info("No post-training plugins enabled")
+            return PostTrainingFlowResult(status="completed")
+
+        registry = _build_registry()
+        plugin_results: dict[str, dict[str, Any]] = {}
+
+        # --- Weight-based plugins ---
+        weight_enabled = [name for name in enabled if name in _WEIGHT_PLUGINS]
+        for plugin_name in weight_enabled:
+            plugin_cfg = _plugin_config_dict(config, plugin_name)
+            plugin_cfg["output_dir"] = str(output_dir / plugin_name)
+
+            pi = PluginInput(
+                checkpoint_paths=list(checkpoint_paths),
+                config=plugin_cfg,
+                run_metadata=list(run_metadata),
+            )
+
+            try:
+                plugin = registry.get(plugin_name)
+                result = run_plugin_task(plugin, pi)
+                plugin_results[plugin_name] = result
+            except Exception:
+                log.exception("Plugin %s failed", plugin_name)
+                log.error(
+                    "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
+                    plugin_name,
+                )
+                raise
+
+        # --- Data-dependent plugins ---
+        data_enabled = [name for name in enabled if name in _DATA_PLUGINS]
+        for plugin_name in data_enabled:
+            plugin_cfg = _plugin_config_dict(config, plugin_name)
+
+            pi = PluginInput(
+                checkpoint_paths=list(checkpoint_paths),
+                config=plugin_cfg,
+                calibration_data=calibration_data,
+                run_metadata=list(run_metadata),
+            )
+
+            try:
+                plugin = registry.get(plugin_name)
+                result = run_plugin_task(plugin, pi)
+                plugin_results[plugin_name] = result
+            except Exception:
+                log.exception("Plugin %s failed", plugin_name)
+                log.error(
+                    "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
+                    plugin_name,
+                )
+                raise
+
+        n_run = len(plugin_results)
+        log.info("Post-training flow complete: %d plugin(s) executed", n_run)
+
+        # Log results to MLflow
+        mlflow_run_id: str | None = None
+        log_exp = os.environ.get("EXPERIMENT", upstream_exp)
 
         try:
-            plugin = registry.get(plugin_name)
-            result = run_plugin_task(plugin, pi)
-            plugin_results[plugin_name] = result
+            import mlflow
+
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment(log_exp)
+            # MLflow tags must be strings — None causes TypeError in to_proto().
+            run_tags = {"flow_name": FLOW_NAME_POST_TRAINING}
+            if upstream_training_run_id is not None:
+                run_tags["upstream_training_run_id"] = upstream_training_run_id
+            with mlflow.start_run(tags=run_tags) as active_run:
+                mlflow_run_id = active_run.info.run_id
+                mlflow.log_metric("n_plugins_run", float(n_run))
+                # Log per-plugin metrics with post_ prefix
+                for plugin_name, plugin_result in plugin_results.items():
+                    for metric_name, metric_value in plugin_result.get(
+                        "metrics", {}
+                    ).items():
+                        if isinstance(metric_value, int | float):
+                            mlflow.log_metric(
+                                f"post_{plugin_name}_{metric_name}", float(metric_value)
+                            )
+
         except Exception:
-            log.exception("Plugin %s failed", plugin_name)
-            log.error(
-                "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
-                plugin_name,
-            )
-            raise
+            log.warning("Failed to log post_training_flow to MLflow", exc_info=True)
 
-    # --- Data-dependent plugins ---
-    data_enabled = [name for name in enabled if name in _DATA_PLUGINS]
-    for plugin_name in data_enabled:
-        plugin_cfg = _plugin_config_dict(config, plugin_name)
-
-        pi = PluginInput(
-            checkpoint_paths=list(checkpoint_paths),
-            config=plugin_cfg,
-            calibration_data=calibration_data,
-            run_metadata=list(run_metadata),
+        # Log flow completion (best-effort, non-blocking)
+        log_completion_safe(
+            flow_name="post-training-flow",
+            tracking_uri=tracking_uri,
+            run_id=mlflow_run_id,
         )
 
+        # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
         try:
-            plugin = registry.get(plugin_name)
-            result = run_plugin_task(plugin, pi)
-            plugin_results[plugin_name] = result
-        except Exception:
-            log.exception("Plugin %s failed", plugin_name)
-            log.error(
-                "Plugin %s FAILED — re-raising (Rule #25: loud failures)",
-                plugin_name,
+            _emitter = LineageEmitter(namespace="minivess")
+            emit_flow_lineage(
+                emitter=_emitter,
+                job_name="post-training-flow",
+                inputs=[{"namespace": "minivess", "name": "checkpoints"}],
+                outputs=[{"namespace": "minivess", "name": "averaged_checkpoints"}],
             )
-            raise
+        except Exception:
+            logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
-    n_run = len(plugin_results)
-    log.info("Post-training flow complete: %d plugin(s) executed", n_run)
-
-    # Log results to MLflow
-    mlflow_run_id: str | None = None
-    log_exp = os.environ.get("EXPERIMENT", upstream_exp)
-
-    try:
-        import mlflow
-
-        mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_experiment(log_exp)
-        # MLflow tags must be strings — None causes TypeError in to_proto().
-        run_tags = {"flow_name": FLOW_NAME_POST_TRAINING}
-        if upstream_training_run_id is not None:
-            run_tags["upstream_training_run_id"] = upstream_training_run_id
-        with mlflow.start_run(tags=run_tags) as active_run:
-            mlflow_run_id = active_run.info.run_id
-            mlflow.log_metric("n_plugins_run", float(n_run))
-            # Log per-plugin metrics with post_ prefix
-            for plugin_name, plugin_result in plugin_results.items():
-                for metric_name, metric_value in plugin_result.get(
-                    "metrics", {}
-                ).items():
-                    if isinstance(metric_value, int | float):
-                        mlflow.log_metric(
-                            f"post_{plugin_name}_{metric_name}", float(metric_value)
-                        )
-
-    except Exception:
-        log.warning("Failed to log post_training_flow to MLflow", exc_info=True)
-
-    # Log flow completion (best-effort, non-blocking)
-    log_completion_safe(
-        flow_name="post-training-flow",
-        tracking_uri=tracking_uri,
-        run_id=mlflow_run_id,
-    )
-
-    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
-    try:
-        _emitter = LineageEmitter(namespace="minivess")
-        emit_flow_lineage(
-            emitter=_emitter,
-            job_name="post-training-flow",
-            inputs=[{"namespace": "minivess", "name": "checkpoints"}],
-            outputs=[{"namespace": "minivess", "name": "averaged_checkpoints"}],
+        avg_ran = any(
+            k in plugin_results for k in ("checkpoint_averaging", "subsampled_ensemble")
         )
-    except Exception:
-        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
-
-    avg_ran = any(
-        k in plugin_results for k in ("checkpoint_averaging", "subsampled_ensemble")
-    )
-    calibration_ran = "calibration" in plugin_results
-    conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp_control"))
-    return PostTrainingFlowResult(
-        status="completed",
-        mlflow_run_id=mlflow_run_id,
-        upstream_training_run_id=upstream_training_run_id,
-        checkpoint_averaging_completed=avg_ran
-        and plugin_results.get("checkpoint_averaging", {}).get("status") == "success",
-        calibration_completed=calibration_ran
-        and plugin_results.get("calibration", {}).get("status") == "success",
-        conformal_completed=conformal_ran,
-    )
+        calibration_ran = "calibration" in plugin_results
+        conformal_ran = any(k in plugin_results for k in ("crc_conformal", "conseco_fp_control"))
+        return PostTrainingFlowResult(
+            status="completed",
+            mlflow_run_id=mlflow_run_id,
+            upstream_training_run_id=upstream_training_run_id,
+            checkpoint_averaging_completed=avg_ran
+            and plugin_results.get("checkpoint_averaging", {}).get("status") == "success",
+            calibration_completed=calibration_ran
+            and plugin_results.get("calibration", {}).get("status") == "success",
+            conformal_completed=conformal_ran,
+        )
 
 
 def run_factorial_post_training(

@@ -220,43 +220,45 @@ def qa_flow(
     """
     require_docker_context("qa")
 
-    if tracking_uri is None:
-        tracking_uri = resolve_tracking_uri()
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("qa", logs_dir=logs_dir) as event_logger:
+        if tracking_uri is None:
+            tracking_uri = resolve_tracking_uri()
 
-    checks: list[dict[str, Any]] = []
+        checks: list[dict[str, Any]] = []
 
-    # Check 1: Backend consistency
-    backend_check = check_backend_consistency(tracking_uri)
-    checks.append(backend_check)
+        # Check 1: Backend consistency
+        backend_check = check_backend_consistency(tracking_uri)
+        checks.append(backend_check)
 
-    # Check 2: Ghost runs (if experiment IDs provided)
-    if experiment_ids:
-        from mlflow.tracking import MlflowClient
+        # Check 2: Ghost runs (if experiment IDs provided)
+        if experiment_ids:
+            from mlflow.tracking import MlflowClient
 
-        client = MlflowClient(tracking_uri=tracking_uri)
-        ghost_check = check_ghost_runs(client, experiment_ids=experiment_ids)
-        checks.append(ghost_check)
+            client = MlflowClient(tracking_uri=tracking_uri)
+            ghost_check = check_ghost_runs(client, experiment_ids=experiment_ids)
+            checks.append(ghost_check)
 
-    # Generate report
-    report = generate_qa_report(checks)
-    summary = summarize_qa_results(checks)
+        # Generate report
+        report = generate_qa_report(checks)
+        summary = summarize_qa_results(checks)
 
-    logger.info("QA flow complete: %s", summary)
-    logger.info("\n%s", report)
+        logger.info("QA flow complete: %s", summary)
+        logger.info("\n%s", report)
 
-    # Persist report to disk
-    report_dir = Path(os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard"))
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / "qa_report.md"
-    report_path.write_text(report, encoding="utf-8")
-    logger.info("QA report saved: %s", report_path)
+        # Persist report to disk
+        report_dir = Path(os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard"))
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "qa_report.md"
+        report_path.write_text(report, encoding="utf-8")
+        logger.info("QA report saved: %s", report_path)
 
-    return {
-        "checks": checks,
-        "summary": summary,
-        "report": report,
-        "report_path": str(report_path),
-    }
+        return {
+            "checks": checks,
+            "summary": summary,
+            "report": report,
+            "report_path": str(report_path),
+        }
 
 
 if __name__ == "__main__":

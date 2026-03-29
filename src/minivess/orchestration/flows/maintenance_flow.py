@@ -10,6 +10,8 @@ Issue: #683
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from mlflow.tracking import MlflowClient
@@ -93,15 +95,18 @@ def maintenance_flow(
     Designed for Prefect scheduling (e.g., daily at 03:00 UTC).
     """
     require_docker_context("maintenance")
-    logger.info("Maintenance flow started (dry_run=%s)", dry_run)
 
-    result = cleanup_stale_runs_task(
-        experiment_name=experiment_name,
-        dry_run=dry_run,
-    )
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("maintenance", logs_dir=logs_dir) as event_logger:
+        logger.info("Maintenance flow started (dry_run=%s)", dry_run)
 
-    logger.info("Maintenance flow complete: %s", result)
-    return result
+        result = cleanup_stale_runs_task(
+            experiment_name=experiment_name,
+            dry_run=dry_run,
+        )
+
+        logger.info("Maintenance flow complete: %s", result)
+        return result
 
 
 if __name__ == "__main__":

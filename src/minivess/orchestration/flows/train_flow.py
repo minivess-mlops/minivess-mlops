@@ -44,7 +44,6 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAINING_SUBFLOW,
 )
 from minivess.observability.flow_observability import gpu_flow_observability_context
-from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -1461,131 +1460,129 @@ def training_flow(
     # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
     require_docker_context("train")
 
-    # Preflight: CUDA availability gate (prevents silent CPU fallback)
-    # See: .claude/metalearning/2026-03-29-silent-cpu-fallback-no-observability-4h-wasted.md
-    require_cuda_context("train")
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with gpu_flow_observability_context("train", logs_dir=logs_dir) as event_logger:
+        # Preflight: validate required environment variables
+        _validate_training_env()
 
-    # Preflight: validate required environment variables
-    _validate_training_env()
+        # Resolve environment variables
+        splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
+        checkpoint_base = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints"))
+        tracking_uri = resolve_tracking_uri()
 
-    # Resolve environment variables
-    splits_dir = Path(os.environ.get("SPLITS_DIR", "configs/splits"))
-    checkpoint_base = Path(os.environ.get("CHECKPOINT_DIR", "/app/checkpoints"))
-    tracking_uri = resolve_tracking_uri()
-
-    # Find upstream data run (explicit param takes priority over auto-discovery)
-    if upstream_data_run_id is None:
-        upstream = find_upstream_safely(
-            tracking_uri=tracking_uri,
-            experiment_name="minivess_data",
-            upstream_flow="data",
-        )
-        upstream_data_run_id = upstream["run_id"] if upstream else None
-    if upstream_data_run_id:
-        logger.info("Upstream data run: %s", upstream_data_run_id)
-
-    # Zero-shot early return: skip training, just log that evaluation is needed.
-    # The actual zero-shot evaluation will be done by the analysis flow.
-    if zero_shot and max_epochs == 0:
-        logger.info(
-            "Zero-shot mode: model=%s, eval_dataset=%s — skipping training loop. "
-            "Evaluation will be handled by the analysis flow.",
-            model_family,
-            eval_dataset,
-        )
-        return TrainingFlowResult(
-            status="ZERO_SHOT",
-            fold_results=[],
-            loss_name=loss_name,
-            model_family=model_family,
-            mlflow_run_id=None,
-        )
-
-    # Load fold splits (outside MLflow run — no side effects)
-    splits = load_fold_splits_task(splits_dir)
-    if fold_id is not None:
-        # Specific fold requested (e.g., --fold 2 → run only fold 2)
-        if fold_id >= len(splits):
-            msg = f"Requested fold_id={fold_id} but only {len(splits)} folds in splits file"
-            raise ValueError(msg)
-        folds_to_run = [splits[fold_id]]
-    else:
-        folds_to_run = splits[:num_folds]
-
-    # Build per-fold config dict
-    config: dict[str, Any] = {
-        "loss_name": loss_name,
-        "model_family": model_family,
-        "compute": compute,
-        "debug": debug,
-        "max_epochs": max_epochs,
-        "num_folds": num_folds,
-        "batch_size": batch_size,
-        "gradient_accumulation_steps": gradient_accumulation_steps,
-        "experiment_name": experiment_name,
-        "tracking_uri": tracking_uri,
-        # Factorial experiment parameters (Glitch #8/#9/#10/#12 fix)
-        "with_aux_calib": with_aux_calib,
-        "max_train_volumes": max_train_volumes if max_train_volumes > 0 else None,
-        "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
-        "zero_shot": zero_shot,
-        "eval_dataset": eval_dataset,
-        "gradient_checkpointing": gradient_checkpointing,
-        "fold_id": fold_id,
-        "post_training_method": post_training_method,
-    }
-
-    # Merge full Hydra config so train_one_fold_task can log it and use all keys
-    if config_dict is not None:
-        merged = dict(config_dict)
-        merged.update(config)  # individual params take precedence
-        config = merged
-
-    # --- Sub-flow 1: Training ---
-    result = training_subflow(
-        folds_to_run=folds_to_run,
-        config=config,
-        tracking_uri=tracking_uri,
-        checkpoint_base=checkpoint_base,
-        upstream_data_run_id=upstream_data_run_id,
-        fold_id=fold_id,
-    )
-
-    # --- Sub-flow 2: Post-training (iterate over comma-separated methods) ---
-    # post_training_method can be comma-separated: "none,swag"
-    # "none" cell is already produced by training sub-flow (free).
-    # Non-"none" methods run in post-training sub-flow (same GPU session).
-    pt_methods = [m.strip() for m in post_training_method.split(",")]
-    pt_run_ids: list[str | None] = []
-    for pt_method in pt_methods:
-        if pt_method != "none":
-            pt_run_id = post_training_subflow(
-                post_training_method=pt_method,
-                training_result=result,
-                config=config,
+        # Find upstream data run (explicit param takes priority over auto-discovery)
+        if upstream_data_run_id is None:
+            upstream = find_upstream_safely(
                 tracking_uri=tracking_uri,
+                experiment_name="minivess_data",
+                upstream_flow="data",
             )
-            pt_run_ids.append(pt_run_id)
+            upstream_data_run_id = upstream["run_id"] if upstream else None
+        if upstream_data_run_id:
+            logger.info("Upstream data run: %s", upstream_data_run_id)
 
-    # Store the methods and run IDs in result
-    result.post_training_method = ",".join(pt_methods)
-    # T19 fix: ",".join(... if rid) can produce "" when all entries are None,
-    # and "" is truthy, misleading downstream checks. Use `or None` to normalize.
-    result.post_training_run_id = (
-        pt_run_ids[0]
-        if len(pt_run_ids) == 1
-        else (",".join(str(rid) for rid in pt_run_ids if rid) or None)
-        if pt_run_ids
-        else None
-    )
+        # Zero-shot early return: skip training, just log that evaluation is needed.
+        # The actual zero-shot evaluation will be done by the analysis flow.
+        if zero_shot and max_epochs == 0:
+            logger.info(
+                "Zero-shot mode: model=%s, eval_dataset=%s — skipping training loop. "
+                "Evaluation will be handled by the analysis flow.",
+                model_family,
+                eval_dataset,
+            )
+            return TrainingFlowResult(
+                status="ZERO_SHOT",
+                fold_results=[],
+                loss_name=loss_name,
+                model_family=model_family,
+                mlflow_run_id=None,
+            )
 
-    logger.info(
-        "Training flow complete: %d folds, run_id=%s, post_training=%s",
-        result.n_folds,
-        result.mlflow_run_id,
-        result.post_training_method,
-    )
-    return result
+        # Load fold splits (outside MLflow run — no side effects)
+        splits = load_fold_splits_task(splits_dir)
+        if fold_id is not None:
+            # Specific fold requested (e.g., --fold 2 → run only fold 2)
+            if fold_id >= len(splits):
+                msg = f"Requested fold_id={fold_id} but only {len(splits)} folds in splits file"
+                raise ValueError(msg)
+            folds_to_run = [splits[fold_id]]
+        else:
+            folds_to_run = splits[:num_folds]
+
+        # Build per-fold config dict
+        config: dict[str, Any] = {
+            "loss_name": loss_name,
+            "model_family": model_family,
+            "compute": compute,
+            "debug": debug,
+            "max_epochs": max_epochs,
+            "num_folds": num_folds,
+            "batch_size": batch_size,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "experiment_name": experiment_name,
+            "tracking_uri": tracking_uri,
+            # Factorial experiment parameters (Glitch #8/#9/#10/#12 fix)
+            "with_aux_calib": with_aux_calib,
+            "max_train_volumes": max_train_volumes if max_train_volumes > 0 else None,
+            "max_val_volumes": max_val_volumes if max_val_volumes > 0 else None,
+            "zero_shot": zero_shot,
+            "eval_dataset": eval_dataset,
+            "gradient_checkpointing": gradient_checkpointing,
+            "fold_id": fold_id,
+            "post_training_method": post_training_method,
+        }
+
+        # Merge full Hydra config so train_one_fold_task can log it and use all keys
+        if config_dict is not None:
+            merged = dict(config_dict)
+            merged.update(config)  # individual params take precedence
+            config = merged
+
+        # --- Sub-flow 1: Training ---
+        result = training_subflow(
+            folds_to_run=folds_to_run,
+            config=config,
+            tracking_uri=tracking_uri,
+            checkpoint_base=checkpoint_base,
+            upstream_data_run_id=upstream_data_run_id,
+            fold_id=fold_id,
+        )
+
+        # --- Sub-flow 2: Post-training (iterate over comma-separated methods) ---
+        # post_training_method can be comma-separated: "none,swag"
+        # "none" cell is already produced by training sub-flow (free).
+        # Non-"none" methods run in post-training sub-flow (same GPU session).
+        pt_methods = [m.strip() for m in post_training_method.split(",")]
+        pt_run_ids: list[str | None] = []
+        for pt_method in pt_methods:
+            if pt_method != "none":
+                pt_run_id = post_training_subflow(
+                    post_training_method=pt_method,
+                    training_result=result,
+                    config=config,
+                    tracking_uri=tracking_uri,
+                )
+                pt_run_ids.append(pt_run_id)
+
+        # Store the methods and run IDs in result
+        result.post_training_method = ",".join(pt_methods)
+        # T19 fix: ",".join(... if rid) can produce "" when all entries are None,
+        # and "" is truthy, misleading downstream checks. Use `or None` to normalize.
+        result.post_training_run_id = (
+            pt_run_ids[0]
+            if len(pt_run_ids) == 1
+            else (",".join(str(rid) for rid in pt_run_ids if rid) or None)
+            if pt_run_ids
+            else None
+        )
+
+        logger.info(
+            "Training flow complete: %d folds, run_id=%s, post_training=%s",
+            result.n_folds,
+            result.mlflow_run_id,
+            result.post_training_method,
+        )
+        return result
 
 
 if __name__ == "__main__":

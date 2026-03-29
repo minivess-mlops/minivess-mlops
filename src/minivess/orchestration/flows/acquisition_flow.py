@@ -8,11 +8,10 @@ Uses Prefect @flow and @task decorators for orchestration.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from prefect import flow, task
 
@@ -294,108 +293,110 @@ def run_acquisition_flow(
     """
     require_docker_context("acquisition")
 
-    from minivess.config.acquisition_config import AcquisitionConfig
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("acquisition", logs_dir=logs_dir) as event_logger:
+        from minivess.config.acquisition_config import AcquisitionConfig
 
-    if config is None:
-        config = AcquisitionConfig()
+        if config is None:
+            config = AcquisitionConfig()
 
-    logger.info(
-        "Starting acquisition flow (trigger: %s, datasets: %s)",
-        trigger_source,
-        config.datasets,
-    )
-
-    datasets_acquired: dict[str, DatasetAcquisitionStatus] = {}
-    conversion_log: list[str] = []
-    manual_needed: list[str] = []
-
-    for dataset_name in config.datasets:
-        dataset_dir = config.output_dir / dataset_name
-
-        # Step 1: Check if already available
-        status = check_dataset_status_task(
-            dataset_name=dataset_name, output_dir=dataset_dir
+        logger.info(
+            "Starting acquisition flow (trigger: %s, datasets: %s)",
+            trigger_source,
+            config.datasets,
         )
 
-        if status == DatasetAcquisitionStatus.READY and config.skip_existing:
-            datasets_acquired[dataset_name] = DatasetAcquisitionStatus.READY
-        else:
-            # Step 2: Try automated download
-            status = download_dataset_task(
+        datasets_acquired: dict[str, DatasetAcquisitionStatus] = {}
+        conversion_log: list[str] = []
+        manual_needed: list[str] = []
+
+        for dataset_name in config.datasets:
+            dataset_dir = config.output_dir / dataset_name
+
+            # Step 1: Check if already available
+            status = check_dataset_status_task(
                 dataset_name=dataset_name, output_dir=dataset_dir
             )
-            datasets_acquired[dataset_name] = status
 
-            if status == DatasetAcquisitionStatus.MANUAL_REQUIRED:
-                manual_needed.append(dataset_name)
+            if status == DatasetAcquisitionStatus.READY and config.skip_existing:
+                datasets_acquired[dataset_name] = DatasetAcquisitionStatus.READY
+            else:
+                # Step 2: Try automated download
+                status = download_dataset_task(
+                    dataset_name=dataset_name, output_dir=dataset_dir
+                )
+                datasets_acquired[dataset_name] = status
 
-        # Step 3: Convert formats if needed (runs for READY and DOWNLOADED)
-        effective_status = datasets_acquired[dataset_name]
-        if config.convert_formats and effective_status in (
-            DatasetAcquisitionStatus.DOWNLOADED,
-            DatasetAcquisitionStatus.READY,
-        ):
-            log_entries = convert_formats_task(
-                dataset_name=dataset_name,
-                input_dir=dataset_dir,
-                output_dir=dataset_dir,
-            )
-            conversion_log.extend(log_entries)
+                if status == DatasetAcquisitionStatus.MANUAL_REQUIRED:
+                    manual_needed.append(dataset_name)
 
-    # Step 4: Print manual instructions
-    if manual_needed:
-        print_manual_instructions_task(manual_datasets=manual_needed)
+            # Step 3: Convert formats if needed (runs for READY and DOWNLOADED)
+            effective_status = datasets_acquired[dataset_name]
+            if config.convert_formats and effective_status in (
+                DatasetAcquisitionStatus.DOWNLOADED,
+                DatasetAcquisitionStatus.READY,
+            ):
+                log_entries = convert_formats_task(
+                    dataset_name=dataset_name,
+                    input_dir=dataset_dir,
+                    output_dir=dataset_dir,
+                )
+                conversion_log.extend(log_entries)
 
-    # Step 5: Compute provenance
-    total_volumes = sum(
-        1
-        for s in datasets_acquired.values()
-        if s in (DatasetAcquisitionStatus.READY, DatasetAcquisitionStatus.DOWNLOADED)
-    )
-    provenance = log_acquisition_provenance_task(
-        datasets_acquired=datasets_acquired,
-        total_volumes=total_volumes,
-    )
+        # Step 4: Print manual instructions
+        if manual_needed:
+            print_manual_instructions_task(manual_datasets=manual_needed)
 
-    logger.info(
-        "Acquisition flow complete: %d/%d datasets acquired",
-        total_volumes,
-        len(config.datasets),
-    )
-
-    # --- MLflow logging ---
-    _tracking_uri = resolve_tracking_uri()
-    mlflow_run_id: str | None = None
-    try:
-        import mlflow
-
-        from minivess.orchestration.flow_contract import FlowContract
-
-        mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment("minivess_acquisition")
-        with mlflow.start_run(tags={"flow_name": "acquisition"}) as active_run:
-            mlflow_run_id = active_run.info.run_id
-            mlflow.log_param("acq_n_datasets", len(config.datasets))
-            mlflow.log_param("acq_total_volumes", total_volumes)
-            for key, value in provenance.items():
-                if isinstance(value, str | int | float | bool):
-                    mlflow.log_param(key, value)
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        contract.log_flow_completion(
-            flow_name="acquisition",
-            run_id=mlflow_run_id,
+        # Step 5: Compute provenance
+        total_volumes = sum(
+            1
+            for s in datasets_acquired.values()
+            if s in (DatasetAcquisitionStatus.READY, DatasetAcquisitionStatus.DOWNLOADED)
         )
-    except Exception:
-        logger.warning("Failed to log acquisition_flow to MLflow", exc_info=True)
+        provenance = log_acquisition_provenance_task(
+            datasets_acquired=datasets_acquired,
+            total_volumes=total_volumes,
+        )
 
-    return AcquisitionResult(
-        datasets_acquired=datasets_acquired,
-        total_volumes=total_volumes,
-        conversion_log=conversion_log,
-        provenance=provenance,
-        mlflow_run_id=mlflow_run_id,
-    )
+        logger.info(
+            "Acquisition flow complete: %d/%d datasets acquired",
+            total_volumes,
+            len(config.datasets),
+        )
+
+        # --- MLflow logging ---
+        _tracking_uri = resolve_tracking_uri()
+        mlflow_run_id: str | None = None
+        try:
+            import mlflow
+
+            from minivess.orchestration.flow_contract import FlowContract
+
+            mlflow.set_tracking_uri(_tracking_uri)
+            mlflow.set_experiment("minivess_acquisition")
+            with mlflow.start_run(tags={"flow_name": "acquisition"}) as active_run:
+                mlflow_run_id = active_run.info.run_id
+                mlflow.log_param("acq_n_datasets", len(config.datasets))
+                mlflow.log_param("acq_total_volumes", total_volumes)
+                for key, value in provenance.items():
+                    if isinstance(value, str | int | float | bool):
+                        mlflow.log_param(key, value)
+
+            contract = FlowContract(tracking_uri=_tracking_uri)
+            contract.log_flow_completion(
+                flow_name="acquisition",
+                run_id=mlflow_run_id,
+            )
+        except Exception:
+            logger.warning("Failed to log acquisition_flow to MLflow", exc_info=True)
+
+        return AcquisitionResult(
+            datasets_acquired=datasets_acquired,
+            total_volumes=total_volumes,
+            conversion_log=conversion_log,
+            provenance=provenance,
+            mlflow_run_id=mlflow_run_id,
+        )
 
 
 if __name__ == "__main__":

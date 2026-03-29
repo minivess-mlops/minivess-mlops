@@ -801,97 +801,99 @@ def run_data_flow(
     """
     require_docker_context("data")
 
-    import mlflow
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("data", logs_dir=logs_dir) as event_logger:
+        import mlflow
 
-    logger.info("Starting data flow → %s", data_dir)
+        logger.info("Starting data flow → %s", data_dir)
 
-    # Step 0: DVC pull (optional — skipped if dvc binary not available)
-    data_dvc_commit: str | None = None
-    active_remote = dvc_remote or os.environ.get("DVC_REMOTE")
-    try:
-        data_dvc_commit = dvc_pull_task(data_dir, dvc_rev=dvc_rev, remote=active_remote)
-        logger.info("DVC pull complete, commit=%s", data_dvc_commit)
-    except Exception:
-        logger.warning("DVC pull skipped (dvc not installed or data already present)")
+        # Step 0: DVC pull (optional — skipped if dvc binary not available)
+        data_dvc_commit: str | None = None
+        active_remote = dvc_remote or os.environ.get("DVC_REMOTE")
+        try:
+            data_dvc_commit = dvc_pull_task(data_dir, dvc_rev=dvc_rev, remote=active_remote)
+            logger.info("DVC pull complete, commit=%s", data_dvc_commit)
+        except Exception:
+            logger.warning("DVC pull skipped (dvc not installed or data already present)")
 
-    # Step 1: Discover
-    pairs = discover_data_task(data_dir=data_dir)
+        # Step 1: Discover
+        pairs = discover_data_task(data_dir=data_dir)
 
-    # Step 2: Validate (basic key-presence check)
-    report = validate_data_task(pairs=pairs)
+        # Step 2: Validate (basic key-presence check)
+        report = validate_data_task(pairs=pairs)
 
-    # Step 3: Quality gate (legacy — basic error count check)
-    quality_passed = data_quality_gate(report=report)
+        # Step 3: Quality gate (legacy — basic error count check)
+        quality_passed = data_quality_gate(report=report)
 
-    # Step 3.5: Advanced quality gates (NEW — PR-2)
-    if quality_passed and pairs:
-        quality_passed = _run_quality_gates(pairs)
+        # Step 3.5: Advanced quality gates (NEW — PR-2)
+        if quality_passed and pairs:
+            quality_passed = _run_quality_gates(pairs)
 
-    # Step 4: Split (only if quality gate passed)
-    splits: list[FoldSplit] | None = None
-    splits_path: Path | None = None
-    if quality_passed and len(pairs) >= n_folds:
-        splits = split_data_task(pairs=pairs, n_folds=n_folds, seed=seed)
-        # Step 4b: Serialize splits to JSON for inter-flow handoff
-        from pathlib import Path as _Path
+        # Step 4: Split (only if quality gate passed)
+        splits: list[FoldSplit] | None = None
+        splits_path: Path | None = None
+        if quality_passed and len(pairs) >= n_folds:
+            splits = split_data_task(pairs=pairs, n_folds=n_folds, seed=seed)
+            # Step 4b: Serialize splits to JSON for inter-flow handoff
+            from pathlib import Path as _Path
 
-        splits_dir = _Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
-        splits_path = serialize_splits_task(splits, splits_dir)
+            splits_dir = _Path(os.environ.get("SPLITS_OUTPUT_DIR", "/app/configs/splits"))
+            splits_path = serialize_splits_task(splits, splits_dir)
 
-    # Step 5: External datasets
-    external_datasets: dict[str, list[dict[str, str]]] = {}
-    if external_dirs:
-        for name, ext_dir in external_dirs.items():
-            external_datasets[name] = validate_external_data_task(
-                dataset_name=name, data_dir=ext_dir
-            )
+        # Step 5: External datasets
+        external_datasets: dict[str, list[dict[str, str]]] = {}
+        if external_dirs:
+            for name, ext_dir in external_dirs.items():
+                external_datasets[name] = validate_external_data_task(
+                    dataset_name=name, data_dir=ext_dir
+                )
 
-    # Step 6: Provenance
-    dataset_hash = _compute_dataset_hash(pairs)
-    provenance = log_data_provenance_task(
-        n_volumes=len(pairs),
-        n_folds=n_folds,
-        dataset_hash=dataset_hash,
-    )
+        # Step 6: Provenance
+        dataset_hash = _compute_dataset_hash(pairs)
+        provenance = log_data_provenance_task(
+            n_volumes=len(pairs),
+            n_folds=n_folds,
+            dataset_hash=dataset_hash,
+        )
 
-    # Open MLflow run for data engineering provenance (always — not conditional on DVC)
-    mlflow_run_id: str | None = None
-    tracking_uri = resolve_tracking_uri()
-    try:
-        mlflow.set_tracking_uri(tracking_uri)
-        mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_DATA))
-        with mlflow.start_run(tags={"flow_name": "data-flow"}) as active_run:
-            mlflow_run_id = active_run.info.run_id
-            mlflow.log_param("data_n_volumes", len(pairs))
-            mlflow.log_param("data_n_folds", n_folds)
-            mlflow.log_param("data_hash", dataset_hash)
-            if data_dvc_commit is not None:
-                mlflow.log_param("data_dvc_commit", data_dvc_commit)
-            if splits_path is not None:
-                mlflow.set_tag("splits_path", str(splits_path))
-            logger.info("MLflow data run opened: %s", mlflow_run_id)
-    except Exception:
-        logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
+        # Open MLflow run for data engineering provenance (always — not conditional on DVC)
+        mlflow_run_id: str | None = None
+        tracking_uri = resolve_tracking_uri()
+        try:
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_DATA))
+            with mlflow.start_run(tags={"flow_name": "data-flow"}) as active_run:
+                mlflow_run_id = active_run.info.run_id
+                mlflow.log_param("data_n_volumes", len(pairs))
+                mlflow.log_param("data_n_folds", n_folds)
+                mlflow.log_param("data_hash", dataset_hash)
+                if data_dvc_commit is not None:
+                    mlflow.log_param("data_dvc_commit", data_dvc_commit)
+                if splits_path is not None:
+                    mlflow.set_tag("splits_path", str(splits_path))
+                logger.info("MLflow data run opened: %s", mlflow_run_id)
+        except Exception:
+            logger.warning("Failed to open/finalize MLflow data run", exc_info=True)
 
-    # Log flow completion (best-effort, non-blocking)
-    log_completion_safe(
-        flow_name="data-flow",
-        tracking_uri=tracking_uri,
-        run_id=mlflow_run_id,
-    )
+        # Log flow completion (best-effort, non-blocking)
+        log_completion_safe(
+            flow_name="data-flow",
+            tracking_uri=tracking_uri,
+            run_id=mlflow_run_id,
+        )
 
-    logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
-    return DataFlowResult(
-        pairs=pairs,
-        validation_report=report,
-        quality_passed=quality_passed,
-        n_folds=n_folds,
-        splits=splits,
-        external_datasets=external_datasets,
-        provenance=provenance,
-        mlflow_run_id=mlflow_run_id,
-        splits_path=splits_path,
-    )
+        logger.info("Data flow complete: %d pairs, quality=%s", len(pairs), quality_passed)
+        return DataFlowResult(
+            pairs=pairs,
+            validation_report=report,
+            quality_passed=quality_passed,
+            n_folds=n_folds,
+            splits=splits,
+            external_datasets=external_datasets,
+            provenance=provenance,
+            mlflow_run_id=mlflow_run_id,
+            splits_path=splits_path,
+        )
 
 
 if __name__ == "__main__":
