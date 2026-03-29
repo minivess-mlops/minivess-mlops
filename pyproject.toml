@@ -30,7 +30,7 @@ classifiers = [
 
 dependencies = [
     # ML Core
-    "torch>=2.5,<3.0",
+    "torch>=2.10.0,<2.11",  # Pin to 2.10.x — cu128 compatible with host driver 560.35 (CUDA 12.6)
     "monai>=1.4,<2.0",
     "peft>=0.14,<1.0",
     "torchio>=0.20,<1.0",
