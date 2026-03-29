@@ -107,15 +107,16 @@ fi
 
 # ─── Launch training jobs ─────────────────────────────────────────────
 # The training flow handles all folds internally (num_folds=3 → trains fold 0,1,2).
-# We loop only over LOSSES — one Docker invocation per loss function.
-LOSSES=("dice_ce" "cbdice_cldice")
+# Each loss function has its own Hydra experiment config in configs/experiment/.
+# We loop over experiment names — one Docker invocation per loss function.
+EXPERIMENTS=("smoke_mini_dice_ce" "smoke_mini_cbdice_cldice")
 
 # Apply filters
 if [[ -n "${LOSS_FILTER}" ]]; then
-    LOSSES=("${LOSS_FILTER}")
+    EXPERIMENTS=("smoke_mini_${LOSS_FILTER}")
 fi
 
-TOTAL=${#LOSSES[@]}
+TOTAL=${#EXPERIMENTS[@]}
 CURRENT=0
 
 echo ""
@@ -124,18 +125,17 @@ echo "  Config: ${FACTORIAL_YAML}"
 echo "  MLflow: ${MLFLOW_URI}"
 echo ""
 
-for loss in "${LOSSES[@]}"; do
+for experiment in "${EXPERIMENTS[@]}"; do
     CURRENT=$((CURRENT + 1))
-    echo "[${CURRENT}/${TOTAL}] Training: loss=${loss}, 3 folds × 20 epochs"
+    echo "[${CURRENT}/${TOTAL}] Training: experiment=${experiment}, 3 folds × 20 epochs"
 
     docker compose --env-file "${ENV_FILE}" \
         -f "${COMPOSE_FILE}" \
         run --rm \
-        -e EXPERIMENT=smoke_mini \
-        -e HYDRA_OVERRIDES="loss_name=${loss},max_epochs=20,model_family=dynunet,num_folds=3" \
+        -e EXPERIMENT="${experiment}" \
         train
 
-    echo "[${CURRENT}/${TOTAL}] ✓ Completed: loss=${loss} (all 3 folds)"
+    echo "[${CURRENT}/${TOTAL}] ✓ Completed: ${experiment} (all 3 folds)"
     echo ""
 done
 
