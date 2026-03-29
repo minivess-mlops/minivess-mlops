@@ -17,7 +17,7 @@
 #   ./scripts/run_smoke_mini.sh                    # Run all 6 training jobs
 #   ./scripts/run_smoke_mini.sh --dry-run          # Validate config without training
 #   ./scripts/run_smoke_mini.sh --loss dice_ce     # Run one loss only
-#   ./scripts/run_smoke_mini.sh --fold 0           # Run one fold only
+#   # Note: folds are handled internally by the training flow (num_folds=3)
 #
 # Config:
 #   Factorial:     configs/factorial/smoke_mini.yaml
@@ -36,13 +36,11 @@ FACTORIAL_YAML="configs/factorial/smoke_mini.yaml"
 # ─── Parse arguments ──────────────────────────────────────────────────
 DRY_RUN=false
 LOSS_FILTER=""
-FOLD_FILTER=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run)    DRY_RUN=true; shift ;;
         --loss)       LOSS_FILTER="$2"; shift 2 ;;
-        --fold)       FOLD_FILTER="$2"; shift 2 ;;
         *)            echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
@@ -108,48 +106,43 @@ if [[ "${DRY_RUN}" == true ]]; then
 fi
 
 # ─── Launch training jobs ─────────────────────────────────────────────
+# The training flow handles all folds internally (num_folds=3 → trains fold 0,1,2).
+# We loop only over LOSSES — one Docker invocation per loss function.
 LOSSES=("dice_ce" "cbdice_cldice")
-FOLDS=(0 1 2)
 
 # Apply filters
 if [[ -n "${LOSS_FILTER}" ]]; then
     LOSSES=("${LOSS_FILTER}")
 fi
-if [[ -n "${FOLD_FILTER}" ]]; then
-    FOLDS=("${FOLD_FILTER}")
-fi
 
-TOTAL=$((${#LOSSES[@]} * ${#FOLDS[@]}))
+TOTAL=${#LOSSES[@]}
 CURRENT=0
 
 echo ""
-echo "=== Launching ${TOTAL} training jobs ==="
+echo "=== Launching ${TOTAL} training jobs (each trains 3 folds internally) ==="
 echo "  Config: ${FACTORIAL_YAML}"
 echo "  MLflow: ${MLFLOW_URI}"
 echo ""
 
 for loss in "${LOSSES[@]}"; do
-    for fold in "${FOLDS[@]}"; do
-        CURRENT=$((CURRENT + 1))
-        echo "[${CURRENT}/${TOTAL}] Training: loss=${loss}, fold=${fold}, epochs=20"
+    CURRENT=$((CURRENT + 1))
+    echo "[${CURRENT}/${TOTAL}] Training: loss=${loss}, 3 folds × 20 epochs"
 
-        docker compose --env-file "${ENV_FILE}" \
-            -f "${COMPOSE_FILE}" \
-            run --rm \
-            --shm-size 8g \
-            -e EXPERIMENT=smoke_mini \
-            -e HYDRA_OVERRIDES="loss_name=${loss},fold_id=${fold},max_epochs=20,model_family=dynunet,num_folds=3" \
-            train
+    docker compose --env-file "${ENV_FILE}" \
+        -f "${COMPOSE_FILE}" \
+        run --rm \
+        -e EXPERIMENT=smoke_mini \
+        -e HYDRA_OVERRIDES="loss_name=${loss},max_epochs=20,model_family=dynunet,num_folds=3" \
+        train
 
-        echo "[${CURRENT}/${TOTAL}] ✓ Completed: loss=${loss}, fold=${fold}"
-        echo ""
-    done
+    echo "[${CURRENT}/${TOTAL}] ✓ Completed: loss=${loss} (all 3 folds)"
+    echo ""
 done
 
-echo "=== All ${TOTAL} training jobs completed ==="
+echo "=== All ${TOTAL} loss functions trained (${TOTAL}×3 = $((TOTAL*3)) fold runs) ==="
 echo "Results logged to: ${MLFLOW_URI}"
 echo ""
 echo "Next steps:"
-echo "  1. Run post-training: ./scripts/run_smoke_mini_post_training.sh"
-echo "  2. Run analysis:      ./scripts/run_smoke_mini_analysis.sh"
-echo "  3. Run biostatistics:  ./scripts/run_smoke_mini_biostatistics.sh"
+echo "  1. Run post-training: docker compose --env-file .env -f ${COMPOSE_FILE} run --rm post_training"
+echo "  2. Run analysis:      docker compose --env-file .env -f ${COMPOSE_FILE} run --rm analyze"
+echo "  3. Run biostatistics: docker compose --env-file .env -f ${COMPOSE_FILE} run --rm biostatistics"
