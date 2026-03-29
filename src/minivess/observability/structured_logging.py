@@ -147,6 +147,84 @@ class StructuredEventLogger:
             json.dumps(data, separators=(",", ":")), encoding="utf-8"
         )
 
+    def log_epoch_complete(
+        self,
+        *,
+        epoch: int,
+        max_epochs: int,
+        train_loss: float,
+        val_loss: float,
+        val_dice: float,
+        lr: float,
+        epoch_wall_s: float,
+        gpu_util_pct: int = 0,
+        vram_used_mb: int = 0,
+    ) -> None:
+        """Log epoch completion event + update heartbeat + force-flush stdout.
+
+        This is the primary training progress signal visible in Docker logs,
+        Prefect UI, and events.jsonl.
+        """
+        # Compute ETA from average epoch time
+        remaining = max_epochs - epoch
+        eta_s = remaining * epoch_wall_s if epoch > 0 else 0.0
+
+        self.log_event("epoch_complete", {
+            "epoch": epoch,
+            "max_epochs": max_epochs,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "val_dice": val_dice,
+            "lr": lr,
+            "epoch_wall_s": epoch_wall_s,
+            "gpu_util_pct": gpu_util_pct,
+            "vram_used_mb": vram_used_mb,
+            "eta_s": eta_s,
+        })
+
+        self.update_heartbeat(
+            epoch=epoch,
+            max_epochs=max_epochs,
+            train_loss=train_loss,
+            val_dice=val_dice,
+            eta_s=eta_s,
+        )
+
+        # Force-flush for Docker log visibility (defense-in-depth over PYTHONUNBUFFERED=1)
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+    def log_training_start(
+        self,
+        *,
+        model_family: str,
+        loss_name: str,
+        num_folds: int,
+        max_epochs: int,
+    ) -> None:
+        """Log training start event."""
+        self.log_event("training_start", {
+            "model_family": model_family,
+            "loss_name": loss_name,
+            "num_folds": num_folds,
+            "max_epochs": max_epochs,
+        })
+
+    def log_training_end(
+        self,
+        *,
+        status: str,
+        total_wall_s: float,
+        folds_completed: int,
+    ) -> None:
+        """Log training end event."""
+        self.log_event("training_end", {
+            "status": status,
+            "total_wall_s": total_wall_s,
+            "folds_completed": folds_completed,
+        })
+
 
 class StructuredLogger:
     """Convenience wrapper that emits FlowEvents via Python logging."""
