@@ -54,6 +54,13 @@ x-common-env: &common-env
   # Setting these avoids re-downloading multi-GB weights on every container restart.
   HF_HOME: /model_cache/huggingface
   TORCH_HOME: /model_cache/torch
+  # Observability: heartbeat, stall detection, OTel export
+  GPU_HEARTBEAT_INTERVAL_S: ${GPU_HEARTBEAT_INTERVAL_S:-30}
+  GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT: ${GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT:-5}
+  GPU_HEARTBEAT_ALERT_AFTER_S: ${GPU_HEARTBEAT_ALERT_AFTER_S:-120}
+  STALL_THRESHOLD_MINUTES: ${STALL_THRESHOLD_MINUTES:-30}
+  HEALTH_GRACE_PERIOD_MINUTES: ${HEALTH_GRACE_PERIOD_MINUTES:-10}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
   # DG1.7: Suppress non-actionable ONNX Runtime GPU discovery warning.
   # ORT C++ layer reads this env var before Python code can set it.
   ORT_LOGGING_LEVEL: ${ORT_LOGGING_LEVEL:-3}
@@ -188,6 +195,12 @@ services:
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]

@@ -439,6 +439,43 @@ services:
       - minivess
     restart: "no"
 
+  # ── Observability: Grafana LGTM (OTel Collector + Prometheus + Tempo + Loki + Grafana)
+  # Single container providing full-stack observability backend.
+  # Activate: docker compose --profile observability up grafana-lgtm
+  # See: docs/planning/grafana-lgtm-compose-stanza.md
+  grafana-lgtm:
+    image: grafana/otel-lgtm:latest
+    container_name: minivess-grafana-lgtm
+    profiles: ["observability"]
+    ports:
+      - "${GRAFANA_LGTM_PORT:-3001}:3000"
+      - "${OTEL_GRPC_PORT:-4317}:4317"
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+    volumes:
+      - grafana_lgtm_data:/data
+    networks:
+      - minivess
+    restart: unless-stopped
+    <<: *common-labels
+
+  # ── Observability: NVIDIA DCGM Exporter (GPU hardware metrics → Prometheus)
+  # Activate: docker compose --profile observability up dcgm-exporter
+  # See: docs/planning/dcgm-exporter-compose-stanza.md
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+    container_name: minivess-dcgm-exporter
+    profiles: ["observability"]
+    devices:
+      - "nvidia.com/gpu=all"
+    ports:
+      - "${DCGM_EXPORTER_PORT:-9400}:9400"
+    networks:
+      - minivess
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    <<: *common-labels
+
 volumes:
   postgres_data:
     driver: local
@@ -447,6 +484,8 @@ volumes:
   mlflow_artifacts:
     driver: local
   grafana_data:
+    driver: local
+  grafana_lgtm_data:
     driver: local
   label_studio_data:
     driver: local
