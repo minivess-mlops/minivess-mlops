@@ -412,6 +412,10 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
 
 ## What AI Must NEVER Do
 
+- Recommend switching to a fresh session between planning and execution. Context amnesia
+  on session switch is a PROVEN failure pattern (14+ metalearning docs). Execute plans in
+  the SAME session that created them. Use context compaction if needed, not session breaks.
+  See: `.claude/metalearning/2026-03-28-context-amnesia-deferred-deepvess-whac-a-mole.md`
 - Confabulate — web-search instead. Hardcode task names, cloud providers, GPU types.
 - Use `import re` for structured data. Use pip/conda/poetry. Skip pre-commit hooks.
 - Suggest `python scripts/*.py` for training — use Prefect flows in Docker.

@@ -1,0 +1,1785 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DagsHub + RunPod Migration Plan
+  ================================
+  Executable plan for pivoting from GCP to RunPod + DagsHub.
+  Produced by 5-expert iterated LLM council with convergence.
+
+  Context: GCP fully torn down after 26+ hours GPU drought.
+  DagsHub repo: https://dagshub.com/petteriTeikari/vascadia
+  User decisions: DagsHub storage, Direct DagsHub MLflow, Public repo, RunPod RTX 4090.
+
+  Date: 2026-03-28
+  Branch: fix/10th-pass-production-readiness
+  Skill: /self-learning-iterative-coder for implementation phases
+-->
+
+<plan id="dagshub-runpod-migration" version="1.0" date="2026-03-28">
+  <metadata>
+    <title>DagsHub + RunPod: Full Infrastructure Migration Plan</title>
+    <status>ready-for-execution</status>
+    <branch>fix/10th-pass-production-readiness</branch>
+    <predecessor>docs/planning/v0-2_archive/original_docs/reassess-runpod-for-staging-and-prod.md</predecessor>
+    <dagshub_repo>https://dagshub.com/petteriTeikari/vascadia</dagshub_repo>
+    <estimated_duration>4-6 hours (Phases 0-3), 1-2 hours (Phases 4-5)</estimated_duration>
+    <estimated_cost>~$2 for smoke test, ~$5-6 for debug factorial pass</estimated_cost>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       EXPERT COUNCIL — 5 Perspectives, 3 Rounds of Iteration
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <council>
+    <round number="1" topic="Individual expert assessments">
+      <expert id="E1" role="DagsHub Platform Expert">
+        <assessment>
+          DagsHub provides a free individual tier with 20 GB storage, unlimited public
+          repo experiments, and an MLflow server at https://dagshub.com/USER/REPO.mlflow.
+          The DVC remote uses S3-compatible API at https://dagshub.com/USER/REPO.s3.
+          GitHub mirror sync via webhooks (auto-sync on push, 24h periodic).
+          Key limitation: GitHub connection requires web UI (no programmatic API).
+          dagshub.init() is the recommended Python integration — sets MLflow URI + auth
+          in one call. Auth via MLFLOW_TRACKING_USERNAME + MLFLOW_TRACKING_PASSWORD
+          env vars (token works as both username and password).
+        </assessment>
+        <recommendation>
+          Use DagsHub as primary MLflow tracking server (zero infra cost).
+          Use DagsHub storage as DVC remote for MiniVess + DeepVess (~5 GB, well within 20 GB).
+          Do NOT store SAM3/VesselFM checkpoints on DagsHub (900 MB per run eats storage fast).
+          Connect GitHub mirror via web UI (one-time manual step, then auto-syncs).
+        </recommendation>
+      </expert>
+
+      <expert id="E2" role="RunPod Training Expert">
+        <assessment>
+          RunPod container-native execution with SkyPilot is proven (11 passes of experience).
+          RTX 4090 at $0.34/hr community cloud is the cost-efficiency winner.
+          Network Volume at /opt/vol persists data, weights, and mlruns across jobs.
+          Key change: MLFLOW_TRACKING_URI shifts from /opt/vol/mlruns (file-based) to
+          https://dagshub.com/petteriTeikari/vascadia.mlflow (remote server).
+          This ELIMINATES the mandatory sky rsync down step for MLflow data.
+          Model weights still cached on Network Volume (SAM3 9 GB, VesselFM 2 GB).
+          DVC data can come from DagsHub storage OR Network Volume (both valid).
+        </assessment>
+        <recommendation>
+          Update smoke_test_gpu.yaml and train_factorial.yaml: MLFLOW_TRACKING_URI to DagsHub.
+          Add MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD to SkyPilot envs.
+          Keep Network Volume for weight caching (saves 15-20 min per job setup).
+          DVC pull from DagsHub storage in setup block (replaces GCS DVC pull).
+          Data already on Network Volume should be detected and reused (existing logic works).
+        </recommendation>
+      </expert>
+
+      <expert id="E3" role="MLOps Integration Architect">
+        <assessment>
+          End-to-end flow: Laptop -> SkyPilot -> RunPod RTX 4090 -> DagsHub MLflow.
+          Three integration points: (1) MLflow tracking URI, (2) DVC remote, (3) Git mirror.
+          MLflow artifacts stored on DagsHub (mlflow-artifacts:/ scheme, auto-configured).
+          DVC data stored on DagsHub S3-compatible endpoint.
+          No Cloud SQL, no Cloud Run, no Pulumi, no GCS buckets needed.
+          The resolve_tracking_uri() function in src/minivess must handle DagsHub URLs.
+          Docker image still pulled from Docker Hub (petteriteikari/minivess-base:latest).
+          Prefect remains local orchestration (PREFECT_DISABLED=1 on RunPod, as before).
+        </assessment>
+        <recommendation>
+          The architecture simplifies dramatically. Three components:
+          (1) Docker Hub (image registry) -- already working
+          (2) RunPod (compute) -- already working
+          (3) DagsHub (tracking + data) -- NEW, replaces GCS + Cloud Run MLflow + Cloud SQL
+          Update .env.example with DAGSHUB_TOKEN, DAGSHUB_REPO_OWNER, DAGSHUB_REPO_NAME.
+          Update resolve_tracking_uri() to validate DagsHub MLflow URLs.
+          MLflow artifact size awareness: log only metrics/params to DagsHub, keep large
+          checkpoint files on Network Volume or use DagsHub Connect GCS for overflow.
+        </recommendation>
+      </expert>
+
+      <expert id="E4" role="Cost Engineer">
+        <assessment>
+          GCP was costing $53-131/month in always-on infrastructure (Cloud SQL, Cloud Run,
+          SkyPilot controller, GAR storage, GCS). Now torn down = $0/month.
+          DagsHub free tier: $0/month (public repo, unlimited experiments).
+          RunPod Network Volume 25 GB: $1.75/month.
+          RunPod RTX 4090 compute: $0.34/hr, ~$4.21 per 34-job debug pass.
+          Total debug pass cost: ~$4.21 compute + $1.75 storage = ~$5.96/pass.
+          20 GB DagsHub storage: MiniVess (~1.5 GB) + DeepVess (~0.5 GB) = ~2 GB DVC data.
+          MLflow artifacts (metrics/params only, no checkpoints): ~50 MB per pass.
+          Headroom: ~17 GB free for future datasets, experiments.
+          Break-even vs GCP: DagsHub+RunPod saves $50-130/month MINIMUM.
+        </assessment>
+        <recommendation>
+          DagsHub free tier is sufficient for this project's lifetime.
+          Do NOT log large artifacts (checkpoints, model files) to DagsHub MLflow --
+          they eat the 20 GB fast. Log metrics, params, tags only. Keep checkpoints
+          on Network Volume and/or local filesystem.
+          If 20 GB becomes tight, connect external GCS bucket ($0.02/GB/month) via
+          DagsHub Connect External Storage feature.
+          RTX 4090 remains the cost-efficiency champion. No change needed.
+        </recommendation>
+      </expert>
+
+      <expert id="E5" role="Reproducibility Expert">
+        <assessment>
+          For Nature Protocols, a reviewer needs to reproduce results from scratch.
+          New setup steps: (1) Create RunPod account, (2) Create DagsHub account,
+          (3) Clone repo, (4) sky check runpod, (5) sky jobs launch.
+          DagsHub MLflow means reviewer can VIEW experiment results in browser
+          without running anything (public repo = public MLflow UI).
+          DagsHub DVC means reviewer can pull data with standard DVC commands.
+          No GCP project, no Pulumi, no Cloud SQL, no IAM service accounts.
+          Consumer GPU path: RTX 4090 at $0.34/hr, credit card only.
+          Local GPU path: RTX 2070+ with 8 GB VRAM for DynUNet, local MLflow.
+          The file-based MLflow fallback (MLFLOW_TRACKING_URI=mlruns) still works
+          for fully offline/local execution.
+        </assessment>
+        <recommendation>
+          Document three tiers in the paper:
+          Tier 0 ($0): Local GPU, local MLflow, local data. Zero external dependencies.
+          Tier 1 (~$5/pass): RunPod RTX 4090, DagsHub MLflow, DagsHub DVC.
+          Tier 2 (~$50/month): Full managed stack (GCP, for labs that want it -- documented
+            but not the default path).
+          The DagsHub public MLflow UI is a huge win for open science -- reviewers
+          and readers can browse all experiments without running a single command.
+          Include DagsHub experiment URLs in the paper supplementary materials.
+        </recommendation>
+      </expert>
+    </round>
+
+    <round number="2" topic="Cross-expert debate and convergence">
+      <debate>
+        E1 and E4 debated artifact storage strategy. E4 warned that logging checkpoints
+        to DagsHub MLflow would exhaust 20 GB in ~20 runs. E1 confirmed that DagsHub
+        auto-configures mlflow-artifacts:/ location, but large files count against storage.
+        RESOLUTION: Log metrics/params/tags to DagsHub MLflow. Keep checkpoints on
+        Network Volume. If a researcher wants checkpoint sharing, use DagsHub Connect
+        with external GCS bucket (pay-as-you-go).
+
+        E2 and E3 debated DVC data source on RunPod. E2 preferred Network Volume cache
+        (already uploaded, zero latency). E3 preferred DagsHub DVC pull (reproducible,
+        no manual upload step). RESOLUTION: Dual path. Check Network Volume first
+        (fast path). If data not present, DVC pull from DagsHub remote (reproducible path).
+        This is the same pattern as the current smoke_test_gpu.yaml but with DagsHub
+        instead of GCS.
+
+        E5 raised concern about DagsHub being a smaller company -- longevity risk.
+        E3 countered that all DagsHub data is standard MLflow + DVC, fully exportable.
+        E1 confirmed DagsHub repos can be exported via git clone + dvc pull at any time.
+        RESOLUTION: Acceptable risk. File-based MLflow remains the offline fallback.
+        DagsHub is an OVERLAY, not a hard dependency.
+      </debate>
+    </round>
+
+    <round number="3" topic="Final convergence and executable plan">
+      <consensus>
+        All 5 experts converge on: DagsHub as primary MLflow + DVC backend, RunPod as
+        primary compute, with file-based MLflow as offline fallback. The architecture
+        is: Laptop (control plane) -> SkyPilot -> RunPod RTX 4090 -> DagsHub MLflow.
+        DVC data on DagsHub storage (primary) + Network Volume cache (fast path).
+        Model weights on Network Volume only (not on DagsHub, too large).
+        GitHub mirror via web UI (one-time manual step).
+        Total monthly cost: ~$1.75 (Network Volume) + compute-on-demand.
+        Zero always-on infrastructure. Pay only for what you compute.
+      </consensus>
+    </round>
+  </council>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       ARCHITECTURE DIAGRAM
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <architecture>
+    <diagram><![CDATA[
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │  DagsHub (free individual tier, public repo)                        │
+    │  https://dagshub.com/petteriTeikari/vascadia                       │
+    │  ├── MLflow Tracking Server (.mlflow endpoint)                     │
+    │  │   └── Experiment metrics, params, tags (unlimited for public)   │
+    │  ├── DVC Storage (.s3 endpoint, 20 GB)                             │
+    │  │   └── MiniVess + DeepVess data (~2 GB)                          │
+    │  ├── Git Mirror (webhook sync from GitHub)                         │
+    │  └── MLflow Artifacts (mlflow-artifacts:/ scheme)                  │
+    │      └── Small artifacts only (plots, configs) — NO checkpoints    │
+    └────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 │ HTTPS (MLflow tracking + DVC pull)
+                                 │
+    ┌────────────────────────────┼────────────────────────────────────────┐
+    │  Researcher's Laptop       │      (Control Plane)                   │
+    │  ├── SkyPilot CLI ─────────┼──→ RunPod API                         │
+    │  ├── mlruns/ (local backup)│                                       │
+    │  ├── DVC data/ (local)     │                                       │
+    │  └── Docker images (build) │                                       │
+    └────────────────────────────┼────────────────────────────────────────┘
+                                 │
+                                 │ SkyPilot SSH + Docker image pull
+                                 │
+    ┌────────────────────────────┼────────────────────────────────────────┐
+    │  RunPod RTX 4090 ($0.34/hr)│      (Compute)                        │
+    │  ├── Docker: petteriteikari/minivess-base:latest                   │
+    │  ├── MLFLOW_TRACKING_URI=https://dagshub.com/.../vascadia.mlflow   │
+    │  └── Network Volume (/opt/vol/)                                    │
+    │      ├── weights/ (SAM3 9 GB, VesselFM 2 GB) — cached forever     │
+    │      ├── data/ (MiniVess ~1.5 GB) — cache, DVC pull fallback      │
+    │      └── checkpoints/ (training outputs, local persistence)        │
+    └─────────────────────────────────────────────────────────────────────┘
+    ]]></diagram>
+
+    <cost_model>
+      <monthly_fixed>
+        <item name="RunPod Network Volume (25 GB)">$1.75</item>
+        <item name="DagsHub (free individual tier)">$0.00</item>
+        <item name="Docker Hub (public images)">$0.00</item>
+        <item name="GitHub (public repo)">$0.00</item>
+        <item name="TOTAL monthly fixed">$1.75</item>
+      </monthly_fixed>
+      <per_pass type="debug" jobs="34">
+        <item name="RTX 4090 compute (34 x 22 min avg)">$4.21</item>
+        <item name="TOTAL per debug pass">$4.21</item>
+      </per_pass>
+      <per_pass type="production" jobs="640">
+        <item name="RTX 4090 compute (~1280 GPU-hours)">~$435</item>
+        <item name="TOTAL per production pass">~$435</item>
+      </per_pass>
+    </cost_model>
+  </architecture>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 0: DagsHub Configuration (Programmatic)
+       Estimated time: 45-60 minutes
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="0" name="DagsHub Configuration" priority="P0-critical">
+    <description>
+      Configure DagsHub as the MLflow tracking server and DVC remote.
+      The DagsHub repo already exists at https://dagshub.com/petteriTeikari/vascadia.
+      This phase makes it functional: MLflow endpoint, DVC storage, GitHub mirror.
+    </description>
+
+    <task id="T0.1" name="Install dagshub Python SDK">
+      <description>Add dagshub client library as a project dependency.</description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+# Add dagshub as a dependency (agents extra group — lightweight integration tooling)
+uv add dagshub
+
+# Verify installation
+uv run python -c "import dagshub; print(f'dagshub version: {dagshub.__version__}')"
+      ]]></commands>
+      <verification>dagshub imports successfully, version printed.</verification>
+      <files_changed>
+        <file>pyproject.toml</file>
+        <file>uv.lock</file>
+      </files_changed>
+    </task>
+
+    <task id="T0.2" name="Authenticate with DagsHub">
+      <description>
+        Login to DagsHub CLI to cache credentials locally.
+        This generates a token stored in ~/.dagshub/token.
+      </description>
+      <commands><![CDATA[
+# Option A: Interactive login (opens browser)
+uv run dagshub login
+
+# Option B: If you already have a token, set it directly
+# export DAGSHUB_TOKEN=your_token_here
+# uv run python -c "
+# import dagshub.auth
+# dagshub.auth.add_app_token(token='your_token_here')
+# "
+
+# Verify authentication
+uv run python -c "
+import dagshub
+dagshub.init(repo_owner='petteriTeikari', repo_name='vascadia')
+print('DagsHub authentication OK')
+"
+      ]]></commands>
+      <verification>dagshub.init() succeeds without authentication errors.</verification>
+      <notes>
+        The dagshub login command opens a browser for OAuth. After login, a token
+        is cached at ~/.dagshub/token. This token is used for MLflow auth and DVC auth.
+        For CI/cloud environments, use DAGSHUB_TOKEN env var instead.
+      </notes>
+    </task>
+
+    <task id="T0.3" name="Connect GitHub mirror via DagsHub web UI">
+      <description>
+        Connect the existing GitHub repo (github.com/petteriTeikari/vascadia) to the
+        DagsHub repo. This enables automatic webhook-based sync on every push.
+        NOTE: This step requires the DagsHub web UI — no programmatic API exists.
+      </description>
+      <commands><![CDATA[
+# This is a MANUAL step via the DagsHub web UI:
+# 1. Go to https://dagshub.com/petteriTeikari/vascadia
+# 2. If the repo was created as "Connect A Repo" from GitHub, sync is already active.
+# 3. If created as empty repo:
+#    a. Click "Settings" (gear icon)
+#    b. Look for "Git Integration" or "Connected Services"
+#    c. Click "Connect GitHub" → Authorize → Select petteriTeikari/vascadia
+# 4. Verify: Push to GitHub, check DagsHub shows the commit within minutes.
+#
+# Sync frequency: Webhook-based (instant on push) + 24h periodic backup sync.
+# Manual sync: Click sync button next to project name on DagsHub.
+      ]]></commands>
+      <verification>
+        Push a test commit to GitHub, verify it appears on DagsHub within 5 minutes.
+        Check: https://dagshub.com/petteriTeikari/vascadia/commits/
+      </verification>
+      <is_manual>true</is_manual>
+      <notes>
+        DagsHub GitHub integration uses webhooks. Once connected, PRs created on
+        GitHub appear on DagsHub and vice versa. Issues sync bidirectionally.
+        The connection is one-time; subsequent syncs are automatic.
+      </notes>
+    </task>
+
+    <task id="T0.4" name="Configure DagsHub as DVC remote">
+      <description>
+        Add DagsHub S3-compatible storage as a DVC remote. DagsHub provides an
+        S3-compatible endpoint at https://dagshub.com/USER/REPO.s3 for each repo.
+        Authentication uses the DagsHub token as both access_key_id and secret_access_key.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+# Add DagsHub as a DVC remote (S3-compatible endpoint)
+dvc remote add dagshub s3://dvc
+dvc remote modify dagshub endpointurl https://dagshub.com/petteriTeikari/vascadia.s3
+
+# Set authentication LOCALLY (--local flag keeps creds out of git)
+# Use your DagsHub token for both access_key_id and secret_access_key
+dvc remote modify dagshub --local access_key_id YOUR_DAGSHUB_TOKEN
+dvc remote modify dagshub --local secret_access_key YOUR_DAGSHUB_TOKEN
+
+# Set dagshub as the default remote for this project
+dvc remote default dagshub
+
+# Verify configuration (public part — no secrets)
+cat .dvc/config
+
+# Verify local config has credentials (not committed to git)
+cat .dvc/config.local
+      ]]></commands>
+      <verification>
+        .dvc/config shows dagshub remote with endpointurl.
+        .dvc/config.local shows access_key_id and secret_access_key.
+        dvc remote default returns "dagshub".
+      </verification>
+      <files_changed>
+        <file>.dvc/config</file>
+        <file>.dvc/config.local (gitignored)</file>
+      </files_changed>
+      <notes>
+        IMPORTANT: The --local flag stores credentials in .dvc/config.local which is
+        gitignored by default. NEVER put tokens in .dvc/config (tracked by git).
+        The S3 bucket name is literally "dvc" — DagsHub maps it to the repo's storage.
+        Endpoint URL format: https://dagshub.com/OWNER/REPO.s3
+      </notes>
+    </task>
+
+    <task id="T0.5" name="Configure MLflow tracking URI for DagsHub">
+      <description>
+        Set MLFLOW_TRACKING_URI to the DagsHub MLflow endpoint. This is the
+        central change that routes all experiment tracking to DagsHub.
+        Auth via MLFLOW_TRACKING_USERNAME + MLFLOW_TRACKING_PASSWORD env vars.
+      </description>
+      <commands><![CDATA[
+# Test MLflow connectivity from local machine
+export MLFLOW_TRACKING_URI="https://dagshub.com/petteriTeikari/vascadia.mlflow"
+export MLFLOW_TRACKING_USERNAME="petteriTeikari"
+export MLFLOW_TRACKING_PASSWORD="YOUR_DAGSHUB_TOKEN"
+
+# Verify connection
+uv run python -c "
+import mlflow
+import os
+
+# Set tracking URI
+mlflow.set_tracking_uri(os.environ['MLFLOW_TRACKING_URI'])
+
+# List experiments (should succeed if auth is correct)
+client = mlflow.MlflowClient()
+experiments = client.search_experiments(max_results=5)
+print(f'MLflow connected to DagsHub: {len(experiments)} experiments found')
+for exp in experiments:
+    print(f'  - {exp.name} (id={exp.experiment_id})')
+"
+      ]]></commands>
+      <verification>
+        MLflow client connects to DagsHub and lists experiments (at minimum the Default experiment).
+      </verification>
+      <notes>
+        DagsHub MLflow URI format: https://dagshub.com/OWNER/REPO.mlflow
+        Auth: MLFLOW_TRACKING_USERNAME (DagsHub username) + MLFLOW_TRACKING_PASSWORD (token).
+        Alternative: dagshub.init() sets these automatically, but env vars are more
+        portable for SkyPilot YAML (where Python code doesn't run during env setup).
+      </notes>
+    </task>
+
+    <task id="T0.6" name="Test MLflow logging end-to-end">
+      <description>
+        Create a test MLflow run on DagsHub to verify full write path:
+        log_param, log_metric, log_artifact (small file).
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+uv run python -c "
+import dagshub
+import mlflow
+import tempfile
+import os
+
+# Initialize DagsHub (auto-configures MLflow URI + auth)
+dagshub.init(repo_owner='petteriTeikari', repo_name='vascadia')
+
+# Create a test experiment
+mlflow.set_experiment('dagshub-connectivity-test')
+
+with mlflow.start_run(run_name='connectivity-test-001'):
+    # Log parameters
+    mlflow.log_param('test_param', 'dagshub_migration')
+    mlflow.log_param('model', 'dynunet')
+
+    # Log metrics
+    mlflow.log_metric('test_loss', 0.42)
+    mlflow.log_metric('test_dice', 0.85)
+
+    # Log a small artifact (text file)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        f.write('DagsHub connectivity test artifact\n')
+        f.write('If you can read this, artifact upload works.\n')
+        tmp_path = f.name
+    mlflow.log_artifact(tmp_path, artifact_path='test')
+    os.unlink(tmp_path)
+
+    run = mlflow.active_run()
+    print(f'Run ID: {run.info.run_id}')
+    print(f'Experiment: dagshub-connectivity-test')
+    print(f'Artifact URI: {run.info.artifact_uri}')
+    print('SUCCESS: MLflow logging to DagsHub works!')
+    print(f'View at: https://dagshub.com/petteriTeikari/vascadia/experiments')
+"
+      ]]></commands>
+      <verification>
+        Run completes without errors.
+        Visit https://dagshub.com/petteriTeikari/vascadia/experiments to see the test run.
+        Verify: params (test_param, model), metrics (test_loss, test_dice), artifact (test.txt).
+      </verification>
+      <rollback>
+        Delete the test experiment via MLflow UI on DagsHub if needed.
+        This is a non-destructive test — no permanent changes.
+      </rollback>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 1: Environment Variable Updates
+       Estimated time: 30 minutes
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="1" name="Environment Variable Updates" priority="P0-critical">
+    <description>
+      Update .env.example (single source of truth) and .env (local secrets) with
+      DagsHub configuration. This phase follows CLAUDE.md Rule #22: all configurable
+      values MUST be in .env.example FIRST.
+    </description>
+
+    <task id="T1.1" name="Update .env.example with DagsHub variables">
+      <description>
+        Add DagsHub-specific environment variables to .env.example.
+        Update MLFLOW_TRACKING_URI default to DagsHub.
+        Update cloud provider documentation comments.
+      </description>
+      <changes><![CDATA[
+# In .env.example, ADD a new DagsHub section and UPDATE the MLflow section:
+
+# ─── DagsHub (MLflow + DVC hosting — free for public repos) ──────────────
+# DagsHub provides a hosted MLflow server and DVC storage for every repository.
+# Free individual tier: 20 GB storage, unlimited experiments for public repos.
+# Auth: your DagsHub token works for both MLflow and DVC authentication.
+#
+# WHO NEEDS THIS: Everyone (default tracking + data backend since 2026-03-28).
+# WHO CAN SKIP: Anyone using local-only MLflow (MLFLOW_TRACKING_URI=mlruns).
+#
+# Get your token: https://dagshub.com/user/settings/tokens
+# Docs: https://dagshub.com/docs/integration_guide/mlflow_tracking/
+DAGSHUB_TOKEN=
+DAGSHUB_REPO_OWNER=petteriTeikari
+DAGSHUB_REPO_NAME=vascadia
+
+# UPDATE the existing MLFLOW_TRACKING_URI line:
+# Old: MLFLOW_TRACKING_URI=http://localhost:5000
+# New:
+MLFLOW_TRACKING_URI=https://dagshub.com/petteriTeikari/vascadia.mlflow
+
+# UPDATE MLFLOW_TRACKING_USERNAME/PASSWORD comments:
+# DagsHub auth: username = DagsHub username, password = DagsHub token.
+# These env vars are read by MLflow client automatically (no code changes).
+MLFLOW_TRACKING_USERNAME=petteriTeikari
+MLFLOW_TRACKING_PASSWORD=  # Set to your DAGSHUB_TOKEN value
+
+# UPDATE SKYPILOT_DEFAULT_CLOUD:
+# Old: SKYPILOT_DEFAULT_CLOUD=gcp
+# New:
+SKYPILOT_DEFAULT_CLOUD=runpod
+
+# UPDATE DVC_REMOTE:
+# Old: DVC_REMOTE=upcloud
+# New:
+DVC_REMOTE=dagshub
+      ]]></changes>
+      <verification>
+        grep -c "DAGSHUB" .env.example returns >= 3 lines.
+        grep "MLFLOW_TRACKING_URI" .env.example shows DagsHub URL.
+        grep "SKYPILOT_DEFAULT_CLOUD" .env.example shows runpod.
+      </verification>
+      <files_changed>
+        <file>.env.example</file>
+      </files_changed>
+      <notes>
+        CLAUDE.md Rule #22: .env.example is the single source of truth.
+        The GCP section in .env.example should be marked as OPTIONAL/ARCHIVED
+        but NOT removed (some researchers may still use GCP).
+        The UpCloud/Hetzner/Oracle sections should be marked ARCHIVED.
+      </notes>
+    </task>
+
+    <task id="T1.2" name="Update .env with actual credentials">
+      <description>
+        Update the local .env file with actual DagsHub token and credentials.
+        This file is gitignored — never committed.
+      </description>
+      <commands><![CDATA[
+# .env is gitignored — edit manually or via script
+# The user should:
+# 1. Get their DagsHub token from https://dagshub.com/user/settings/tokens
+# 2. Set in .env:
+#    DAGSHUB_TOKEN=your_actual_token
+#    MLFLOW_TRACKING_URI=https://dagshub.com/petteriTeikari/vascadia.mlflow
+#    MLFLOW_TRACKING_USERNAME=petteriTeikari
+#    MLFLOW_TRACKING_PASSWORD=your_actual_token  (same as DAGSHUB_TOKEN)
+#    SKYPILOT_DEFAULT_CLOUD=runpod
+#    DVC_REMOTE=dagshub
+
+# Verify .env has the right values (redacted)
+grep "DAGSHUB_TOKEN" .env | head -1 | cut -c1-20
+grep "MLFLOW_TRACKING_URI" .env | head -1
+      ]]></commands>
+      <verification>.env contains non-empty DAGSHUB_TOKEN and DagsHub MLFLOW_TRACKING_URI.</verification>
+      <is_manual>true</is_manual>
+    </task>
+
+    <task id="T1.3" name="Update resolve_tracking_uri() for DagsHub URLs">
+      <description>
+        The resolve_tracking_uri() function validates MLFLOW_TRACKING_URI.
+        It must accept DagsHub HTTPS URLs (https://dagshub.com/...) in addition
+        to existing patterns (localhost, file paths, Cloud Run URLs).
+      </description>
+      <commands><![CDATA[
+# Find the resolve_tracking_uri function
+grep -rn "resolve_tracking_uri" src/minivess/ --include="*.py"
+
+# The function should already handle HTTPS URLs, but verify it doesn't
+# reject dagshub.com specifically. If it does, update the validation.
+      ]]></commands>
+      <verification>
+        resolve_tracking_uri() returns the DagsHub URL when MLFLOW_TRACKING_URI
+        is set to https://dagshub.com/petteriTeikari/vascadia.mlflow.
+        No hardcoded URL patterns that would reject DagsHub.
+      </verification>
+      <files_changed>
+        <file>src/minivess/observability/mlflow_utils.py (or wherever resolve_tracking_uri lives)</file>
+      </files_changed>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 2: RunPod SkyPilot YAML Updates
+       Estimated time: 45-60 minutes
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="2" name="RunPod SkyPilot YAML Updates" priority="P0-critical">
+    <description>
+      Update SkyPilot YAML files to use DagsHub MLflow instead of file-based
+      or GCP Cloud Run MLflow. Create a RunPod-primary train_factorial.yaml variant.
+      NOTE: CLAUDE.md Rule #31 — YAML configs are SPECIFICATIONS. Only change
+      what the user has explicitly authorized (MLflow URI, DVC remote, cloud target).
+    </description>
+
+    <task id="T2.1" name="Update smoke_test_gpu.yaml for DagsHub MLflow">
+      <description>
+        Update the RunPod smoke test YAML to log to DagsHub MLflow instead of
+        file-based /opt/vol/mlruns. This is the first cloud integration test.
+      </description>
+      <changes><![CDATA[
+# In deployment/skypilot/smoke_test_gpu.yaml, UPDATE the envs section:
+
+envs:
+  # ... (MODEL_FAMILY, etc. unchanged)
+
+  # MLflow: DagsHub hosted server (replaces file-based /opt/vol/mlruns)
+  # Auth: MLFLOW_TRACKING_USERNAME + MLFLOW_TRACKING_PASSWORD from --env-file .env
+  MLFLOW_TRACKING_URI: https://dagshub.com/petteriTeikari/vascadia.mlflow
+  MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME}
+  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD}
+
+  # MLflow client resilience — retry on transient network failures
+  MLFLOW_HTTP_REQUEST_MAX_RETRIES: "10"
+  MLFLOW_HTTP_REQUEST_TIMEOUT: "300"
+      ]]></changes>
+      <verification>
+        grep "dagshub.com" deployment/skypilot/smoke_test_gpu.yaml returns the MLflow URI.
+        MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD are present in envs.
+      </verification>
+      <files_changed>
+        <file>deployment/skypilot/smoke_test_gpu.yaml</file>
+      </files_changed>
+      <notes>
+        The --env-file .env flag in the launch command passes MLFLOW_TRACKING_USERNAME
+        and MLFLOW_TRACKING_PASSWORD from the local .env to the SkyPilot job.
+        SkyPilot resolves ${VAR} from --env-file, not from intra-envs references.
+      </notes>
+    </task>
+
+    <task id="T2.2" name="Create train_factorial_runpod.yaml">
+      <description>
+        Create a RunPod-targeted variant of train_factorial.yaml. This replaces the
+        GCP-specific YAML for the factorial experiment. Uses DagsHub MLflow and
+        DagsHub DVC (with Network Volume cache fallback for data).
+      </description>
+      <changes><![CDATA[
+# Create: deployment/skypilot/train_factorial_runpod.yaml
+# Based on train_factorial.yaml but targeting RunPod + DagsHub.
+# Key differences from GCP version:
+#   - cloud: runpod (not gcp)
+#   - image_id: docker:petteriteikari/minivess-base:latest (Docker Hub, not GAR)
+#   - MLFLOW_TRACKING_URI: DagsHub (not Cloud Run)
+#   - DVC: DagsHub remote (not GCS)
+#   - Network Volume for weight caching
+#   - No spot recovery (RunPod community cloud doesn't support it well)
+
+# resources:
+#   image_id: docker:petteriteikari/minivess-base:latest
+#   accelerators: {RTX4090: 1, RTX5090: 1, RTX3090: 1}
+#   cloud: runpod
+#   use_spot: false  # On-demand for reliability on community cloud
+#   disk_size: 60
+
+# volumes:
+#   /opt/vol: minivess-dev
+
+# envs:
+#   MLFLOW_TRACKING_URI: https://dagshub.com/petteriTeikari/vascadia.mlflow
+#   MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME}
+#   MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD}
+#   ... (all factorial env vars same as train_factorial.yaml)
+
+# setup:
+#   1. HuggingFace login (same as current)
+#   2. Check Network Volume for data (fast path)
+#   3. If no data on volume: DVC pull from DagsHub remote
+#   4. Weight caching on Network Volume (HF_HOME, TORCH_HOME)
+#   5. Pre-flight checks (GPU, MLflow connectivity, data)
+
+# run: (identical to train_factorial.yaml)
+      ]]></changes>
+      <verification>
+        sky.Task.from_yaml('deployment/skypilot/train_factorial_runpod.yaml') parses OK.
+        All env vars from train_factorial.yaml are present.
+      </verification>
+      <files_changed>
+        <file>deployment/skypilot/train_factorial_runpod.yaml (NEW)</file>
+      </files_changed>
+      <notes>
+        The GCP train_factorial.yaml is PRESERVED for labs that want GCP.
+        The RunPod version is the NEW DEFAULT for the project owner.
+        run_factorial.sh should be updated to select the correct YAML based on
+        SKYPILOT_DEFAULT_CLOUD or a --cloud flag.
+      </notes>
+    </task>
+
+    <task id="T2.3" name="Update setup block for DagsHub DVC + Network Volume data">
+      <description>
+        The setup block in the RunPod factorial YAML needs a dual-path data strategy:
+        1. Check Network Volume first (fast path, zero network cost)
+        2. If data not present, DVC pull from DagsHub remote
+        This replaces the GCS DVC pull in the GCP version.
+      </description>
+      <changes><![CDATA[
+# In the setup: block of train_factorial_runpod.yaml:
+
+setup: |
+  set -ex
+  cd /app
+
+  # HuggingFace login (same as current, with retry)
+  # ... (unchanged from train_factorial.yaml)
+
+  # Data: Network Volume cache-first, DagsHub DVC fallback.
+  # Network Volume path: /opt/vol/data/raw/minivess/imagesTr/
+  # DagsHub DVC path: dvc pull -r dagshub
+  DATA_DIR=/opt/vol/data/raw/minivess/imagesTr
+  if [ -d "${DATA_DIR}" ] && [ "$(ls "${DATA_DIR}" 2>/dev/null | wc -l)" -gt 10 ]; then
+    echo "Training data found on Network Volume ($(ls ${DATA_DIR} | wc -l) files)"
+    mkdir -p data/raw
+    ln -sf /opt/vol/data/raw/minivess data/raw/minivess
+  else
+    echo "Data not on Network Volume — pulling from DagsHub DVC..."
+    dvc init --no-scm -f 2>/dev/null || true
+    dvc remote add -f dagshub s3://dvc
+    dvc remote modify dagshub endpointurl https://dagshub.com/petteriTeikari/vascadia.s3
+    # Auth: use DAGSHUB_TOKEN env var (passed via --env-file .env)
+    dvc remote modify dagshub --local access_key_id "${DAGSHUB_TOKEN}"
+    dvc remote modify dagshub --local secret_access_key "${DAGSHUB_TOKEN}"
+
+    dvc_pull_ok=false
+    for attempt in 1 2 3; do
+      if timeout 600 dvc pull data/raw/minivess -r dagshub; then
+        dvc_pull_ok=true
+        break
+      else
+        echo "DVC pull attempt ${attempt} failed" && sleep $((30 * attempt))
+      fi
+    done
+    if [ "${dvc_pull_ok}" = "false" ]; then
+      echo "FATAL: DVC pull from DagsHub failed after 3 attempts."
+      exit 33
+    fi
+  fi
+
+  # Weight caching: Network Volume (download once, reuse forever)
+  export HF_HOME=/opt/vol/.cache/huggingface
+  export TORCH_HOME=/opt/vol/.cache/torch
+  mkdir -p $HF_HOME $TORCH_HOME
+
+  # Pre-cache model weights (same logic as current, with retry)
+  # ... (unchanged from train_factorial.yaml)
+
+  # MLflow connectivity check (UPDATED for DagsHub)
+  echo "Checking DagsHub MLflow connectivity..."
+  timeout 30 python -c "
+import os, sys
+uri = os.environ['MLFLOW_TRACKING_URI']
+from mlflow.tracking import MlflowClient
+client = MlflowClient(tracking_uri=uri)
+exps = client.search_experiments(max_results=1)
+print(f'MLflow OK: {uri} ({len(exps)} experiments)')
+" || {
+    echo "FATAL: DagsHub MLflow server is not reachable."
+    echo "Check: MLFLOW_TRACKING_URI, MLFLOW_TRACKING_USERNAME, MLFLOW_TRACKING_PASSWORD"
+    exit 1
+  }
+      ]]></changes>
+      <verification>
+        Setup block handles both paths: Network Volume data (fast) and DagsHub DVC pull (fallback).
+        MLflow connectivity check passes against DagsHub endpoint.
+      </verification>
+    </task>
+
+    <task id="T2.4" name="Test smoke test on RunPod with DagsHub MLflow">
+      <description>
+        Launch the updated smoke test YAML on RunPod to verify end-to-end:
+        Docker image pull -> DagsHub MLflow logging -> Training -> Results on DagsHub.
+      </description>
+      <commands><![CDATA[
+# Launch smoke test (DynUNet, 2 epochs, 1 fold, 4 volumes)
+sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+  --env-file .env \
+  --env MODEL_FAMILY=dynunet \
+  -y
+
+# Monitor job
+sky jobs logs -f
+
+# After completion, verify on DagsHub:
+# 1. Visit https://dagshub.com/petteriTeikari/vascadia/experiments
+# 2. Look for the smoke test run with metrics (loss, dice, etc.)
+# 3. Verify params logged correctly (model_family=dynunet, etc.)
+      ]]></commands>
+      <verification>
+        Job completes with exit code 0.
+        MLflow run visible on DagsHub experiment tracking UI.
+        Metrics (loss, dice) and params (model_family, etc.) logged correctly.
+        No "mlruns is file-based" warnings — everything goes to DagsHub.
+      </verification>
+      <estimated_cost>~$0.12 (RTX 4090, ~22 min)</estimated_cost>
+      <rollback>
+        If DagsHub MLflow fails, fall back to file-based:
+        MLFLOW_TRACKING_URI=/opt/vol/mlruns (the previous working configuration).
+      </rollback>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 3: DVC Data Migration
+       Estimated time: 30-45 minutes
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="3" name="DVC Data Migration" priority="P0-critical">
+    <description>
+      Push DVC-tracked data to DagsHub storage. This makes data available for
+      DVC pull from any machine (RunPod, collaborator laptops, CI).
+      Currently data is on local filesystem and GCS (now torn down).
+    </description>
+
+    <task id="T3.1" name="Push MiniVess data to DagsHub">
+      <description>
+        Push the MiniVess training dataset (~1.5 GB) to DagsHub DVC storage.
+        The data is already DVC-tracked locally.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+# Verify DVC remote is configured
+dvc remote list
+dvc remote default
+
+# Check what data is tracked
+dvc status
+
+# Push MiniVess data to DagsHub
+dvc push data/raw/minivess -r dagshub
+
+# Verify push (file count and sizes)
+echo "Local file count:"
+find data/raw/minivess -type f | wc -l
+echo "DVC cache status:"
+dvc status -c -r dagshub
+      ]]></commands>
+      <verification>
+        dvc push completes without errors.
+        dvc status -c -r dagshub shows all files are up to date.
+      </verification>
+      <estimated_time>5-15 min (depends on upload speed, ~1.5 GB)</estimated_time>
+    </task>
+
+    <task id="T3.2" name="Push DeepVess data to DagsHub">
+      <description>
+        Push the DeepVess external test dataset (~0.5 GB) to DagsHub storage.
+        Used for zero-shot evaluation and generalization testing.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+# Push DeepVess data
+dvc push data/raw/deepvess -r dagshub 2>/dev/null || \
+  dvc push data/raw/deepvess.dvc -r dagshub
+
+# Verify
+echo "DeepVess files:"
+find data/raw/deepvess -type f 2>/dev/null | wc -l || echo "No deepvess dir"
+      ]]></commands>
+      <verification>DeepVess data push completes. dvc status shows up to date.</verification>
+      <estimated_time>2-5 min (~0.5 GB)</estimated_time>
+    </task>
+
+    <task id="T3.3" name="Verify data integrity on DagsHub">
+      <description>
+        Verify that data pushed to DagsHub can be pulled back correctly.
+        Test from a clean DVC state to simulate a new collaborator.
+      </description>
+      <commands><![CDATA[
+cd /tmp
+mkdir -p dagshub-dvc-test && cd dagshub-dvc-test
+
+# Clone repo (or init minimal DVC project)
+git clone https://dagshub.com/petteriTeikari/vascadia.git test-pull
+cd test-pull
+
+# Configure DVC remote
+dvc remote add dagshub s3://dvc
+dvc remote modify dagshub endpointurl https://dagshub.com/petteriTeikari/vascadia.s3
+dvc remote modify dagshub --local access_key_id "$DAGSHUB_TOKEN"
+dvc remote modify dagshub --local secret_access_key "$DAGSHUB_TOKEN"
+
+# Pull data
+dvc pull data/raw/minivess -r dagshub
+
+# Verify file counts match
+echo "Pulled file count:"
+find data/raw/minivess -type f | wc -l
+
+# Cleanup
+cd /tmp && rm -rf dagshub-dvc-test
+      ]]></commands>
+      <verification>
+        File count matches local repo. No corruption or missing files.
+        A fresh clone + dvc pull reproduces the exact dataset.
+      </verification>
+    </task>
+
+    <task id="T3.4" name="Update .dvc/config to reflect new remote hierarchy">
+      <description>
+        Update .dvc/config to show dagshub as default, minio for local,
+        and GCS as archived/optional. Remove any stale remote references.
+      </description>
+      <changes><![CDATA[
+# .dvc/config should look like:
+[core]
+    remote = dagshub
+['remote "dagshub"']
+    url = s3://dvc
+    endpointurl = https://dagshub.com/petteriTeikari/vascadia.s3
+['remote "minio"']
+    url = s3://dvc-data
+    endpointurl = http://localhost:9000
+    access_key_id = minioadmin
+    secret_access_key = minioadmin
+# GCS remote preserved for labs that use GCP (OPTIONAL)
+['remote "gcs"']
+    url = gs://minivess-mlops-dvc-data
+      ]]></changes>
+      <verification>
+        dvc remote default returns "dagshub".
+        dvc remote list shows dagshub, minio, gcs.
+      </verification>
+      <files_changed>
+        <file>.dvc/config</file>
+      </files_changed>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 4: Knowledge Graph and Config Updates
+       Estimated time: 45-60 minutes
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="4" name="Knowledge Graph and Config Updates" priority="P1-important">
+    <description>
+      Update all configuration files, knowledge graph, and documentation to reflect
+      the new architecture: RunPod primary + DagsHub for tracking/data.
+      GCP preserved as optional/documented alternative.
+    </description>
+
+    <task id="T4.1" name="Update knowledge-graph/domains/cloud.yaml">
+      <description>
+        Update the cloud domain YAML to reflect: RunPod as primary compute for ALL
+        environments, DagsHub as primary MLflow + DVC backend, GCP as archived/optional.
+      </description>
+      <changes><![CDATA[
+# Key updates to cloud.yaml:
+
+# 1. cloud_provider_selection: update winner
+decisions:
+  cloud_provider_selection:
+    status: resolved
+    winner: runpod_dagshub
+    rationale: >
+      TWO providers: RunPod (primary compute, all environments) + DagsHub
+      (MLflow tracking + DVC storage, free for public repos).
+      GCP fully torn down 2026-03-28 after 26+ hour GPU drought.
+      GCP preserved as documented optional path for well-funded labs.
+    implementation: [configs/cloud/runpod_dev.yaml, .env.example]
+
+# 2. dvc_remote_strategy: update to dagshub
+  dvc_remote_strategy:
+    status: resolved
+    winner: dagshub_primary_minio_local
+    rationale: >
+      DagsHub S3-compatible storage for cloud DVC remote (free, 20 GB).
+      MinIO for local Docker Compose dev (unchanged).
+      GCS preserved as optional for labs with GCP infrastructure.
+    implementation: [.dvc/config]
+
+# 3. Add dagshub provider entry
+providers:
+  dagshub:
+    environment: "all"
+    role: "MLflow tracking server + DVC storage + Git mirror"
+    status: active
+    mlflow_uri: "https://dagshub.com/petteriTeikari/vascadia.mlflow"
+    dvc_endpoint: "https://dagshub.com/petteriTeikari/vascadia.s3"
+    storage_limit: "20 GB (free individual tier, unlimited experiments for public)"
+    pricing: "$0/month (free for public repos)"
+
+# 4. Update RunPod provider
+  runpod:
+    environment: "all (primary compute for debug + staging + production)"
+    role: "Primary GPU compute for all experiment passes"
+    status: active
+    mlflow: "DagsHub hosted (https://dagshub.com/.../vascadia.mlflow)"
+
+# 5. Archive GCP
+  gcp:
+    environment: "archived-optional"
+    role: "Optional for well-funded labs. Fully torn down 2026-03-28."
+    status: archived
+      ]]></changes>
+      <files_changed>
+        <file>knowledge-graph/domains/cloud.yaml</file>
+      </files_changed>
+    </task>
+
+    <task id="T4.2" name="Update CLAUDE.md two-provider architecture">
+      <description>
+        Update the two-provider architecture table in CLAUDE.md.
+        RunPod becomes primary compute (all environments).
+        DagsHub becomes the tracking/data backend.
+        GCP becomes archived/optional.
+      </description>
+      <changes><![CDATA[
+# Update the Two-Provider Cloud Architecture table:
+
+| Provider | Environment | Role | Data Storage | MLflow |
+|----------|------------|------|--------------|--------|
+| **RunPod** | all (primary) | Primary compute — RTX 4090 for all experiment passes | Network Volume (weight cache) | DagsHub hosted |
+| **DagsHub** | all (tracking) | MLflow tracking server + DVC storage (free, public) | DagsHub Storage (20 GB free) | https://dagshub.com/petteriTeikari/vascadia.mlflow |
+| ~~GCP~~ | archived | Optional for well-funded labs — torn down 2026-03-28 | GCS (if re-enabled) | Cloud Run (if re-enabled) |
+
+# Update the Three-Environment Model:
+| Environment | Docker | Compute | Data | MLflow | Purpose |
+|-------------|--------|---------|------|--------|---------|
+| **local** | Docker Compose | Local GPU | MinIO (local) | DagsHub or mlruns/ | Fast iteration |
+| **dev/staging** | Docker via SkyPilot | RunPod RTX 4090 | Network Volume + DagsHub DVC | DagsHub | Experiments |
+| **production** | Docker via SkyPilot | RunPod RTX 4090 | Network Volume + DagsHub DVC | DagsHub | Paper results |
+      ]]></changes>
+      <files_changed>
+        <file>CLAUDE.md</file>
+      </files_changed>
+      <notes>
+        CLAUDE.md is the constitution (L0). Changes here propagate to all sessions.
+        The two-provider model changes from RunPod+GCP to RunPod+DagsHub.
+        GCP references should be kept but marked as archived/optional.
+      </notes>
+    </task>
+
+    <task id="T4.3" name="Update deployment/CLAUDE.md">
+      <description>
+        Update deployment CLAUDE.md with DagsHub MLflow configuration details.
+        Update Docker image registry references (Docker Hub primary, GAR archived).
+      </description>
+      <changes><![CDATA[
+# Add DagsHub section to deployment/CLAUDE.md:
+
+## DagsHub Integration (Primary Tracking Backend)
+
+MLflow tracking: https://dagshub.com/petteriTeikari/vascadia.mlflow
+DVC storage: https://dagshub.com/petteriTeikari/vascadia.s3
+Free tier: 20 GB storage, unlimited experiments (public repo).
+
+Auth env vars (in .env):
+  MLFLOW_TRACKING_URI=https://dagshub.com/petteriTeikari/vascadia.mlflow
+  MLFLOW_TRACKING_USERNAME=petteriTeikari
+  MLFLOW_TRACKING_PASSWORD=<DAGSHUB_TOKEN>
+
+# Update Docker registry section:
+Docker Hub is the PRIMARY registry (RunPod pulls without auth).
+GAR is ARCHIVED (GCP torn down 2026-03-28).
+      ]]></changes>
+      <files_changed>
+        <file>deployment/CLAUDE.md</file>
+      </files_changed>
+    </task>
+
+    <task id="T4.4" name="Update configs/cloud/runpod_dev.yaml">
+      <description>
+        Update the RunPod cloud config to reflect DagsHub MLflow (not file-based).
+        This config is referenced by SkyPilot YAML files and run_factorial.sh.
+      </description>
+      <changes><![CDATA[
+# In configs/cloud/runpod_dev.yaml, UPDATE:
+
+# MLflow: DagsHub hosted (replaces file-based on Network Volume)
+mlflow_tracking_uri: https://dagshub.com/petteriTeikari/vascadia.mlflow
+mlflow_env_var: MLFLOW_TRACKING_URI
+
+# DVC remote: DagsHub (replaces GCS/file-based)
+dvc_remote: dagshub
+      ]]></changes>
+      <files_changed>
+        <file>configs/cloud/runpod_dev.yaml</file>
+      </files_changed>
+    </task>
+
+    <task id="T4.5" name="Update preflight checks for RunPod + DagsHub">
+      <description>
+        Update scripts/preflight_gcp.py (or create scripts/preflight_runpod.py)
+        to check DagsHub connectivity instead of GCP infrastructure.
+      </description>
+      <changes><![CDATA[
+# The preflight script should check:
+# 1. RunPod API key configured (sky check runpod)
+# 2. Network Volume exists (sky storage ls | grep minivess-dev)
+# 3. DagsHub MLflow reachable (curl -s https://dagshub.com/.../vascadia.mlflow/api/2.0/mlflow/experiments/list)
+# 4. DagsHub DVC reachable (dvc status -r dagshub)
+# 5. Docker image exists on Docker Hub (docker manifest inspect petteriteikari/minivess-base:latest)
+# 6. .env has required variables (DAGSHUB_TOKEN, MLFLOW_TRACKING_URI, HF_TOKEN)
+      ]]></changes>
+      <files_changed>
+        <file>scripts/preflight_runpod.py (NEW or updated from preflight_gcp.py)</file>
+      </files_changed>
+    </task>
+
+    <task id="T4.6" name="Update run_factorial.sh for RunPod + DagsHub">
+      <description>
+        Update the factorial launch script to use the RunPod YAML by default
+        and pass DagsHub credentials via --env-file.
+      </description>
+      <changes><![CDATA[
+# In scripts/run_factorial.sh:
+# 1. Default YAML: deployment/skypilot/train_factorial_runpod.yaml (was train_factorial.yaml)
+# 2. Add --cloud runpod flag support
+# 3. Pass --env-file .env for DagsHub credentials
+# 4. Update the --env overrides to include MLFLOW_TRACKING_USERNAME/PASSWORD
+# 5. Update parallel submission config from configs/cloud/runpod_dev.yaml
+      ]]></changes>
+      <files_changed>
+        <file>scripts/run_factorial.sh</file>
+      </files_changed>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       PHASE 5: Verification and Launch
+       Estimated time: 60-90 minutes (includes waiting for RunPod jobs)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <phase id="5" name="Verification and Launch" priority="P0-critical">
+    <description>
+      End-to-end verification of the new architecture. Run tests locally,
+      then launch a validation job on RunPod with DagsHub MLflow.
+    </description>
+
+    <task id="T5.1" name="Run make test-staging">
+      <description>
+        Verify all local tests pass with the new configuration.
+        This catches any broken imports, config references, or test assumptions.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+make test-staging
+      ]]></commands>
+      <verification>All tests pass. Zero failures, zero unexpected skips.</verification>
+      <gate>true</gate>
+    </task>
+
+    <task id="T5.2" name="Run preflight checks">
+      <description>
+        Run the updated preflight script to verify all infrastructure is ready.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+# Manual preflight checks (until script is updated)
+echo "=== Preflight Check: RunPod + DagsHub ==="
+
+# 1. RunPod API key
+sky check runpod 2>&1 | tail -3
+
+# 2. Network Volume
+sky storage ls 2>&1 | grep minivess-dev || echo "WARNING: Network Volume not found"
+
+# 3. DagsHub MLflow
+curl -s -o /dev/null -w "%{http_code}" \
+  -u "${MLFLOW_TRACKING_USERNAME}:${MLFLOW_TRACKING_PASSWORD}" \
+  "https://dagshub.com/petteriTeikari/vascadia.mlflow/api/2.0/mlflow/experiments/list"
+echo " (200 = OK)"
+
+# 4. Docker image
+docker manifest inspect petteriteikari/minivess-base:latest > /dev/null 2>&1 \
+  && echo "Docker image: OK" || echo "Docker image: NOT FOUND"
+
+# 5. .env variables
+for var in DAGSHUB_TOKEN MLFLOW_TRACKING_URI MLFLOW_TRACKING_USERNAME HF_TOKEN; do
+  if grep -q "^${var}=.\+" .env 2>/dev/null; then
+    echo "${var}: SET"
+  else
+    echo "${var}: MISSING"
+  fi
+done
+      ]]></commands>
+      <verification>
+        All 5 checks pass: RunPod OK, Network Volume found, DagsHub MLflow returns 200,
+        Docker image exists, all env vars set.
+      </verification>
+      <gate>true</gate>
+    </task>
+
+    <task id="T5.3" name="Launch Phase 1 validation job (DynUNet on RTX 4090)">
+      <description>
+        Launch a single DynUNet training job on RunPod RTX 4090 with DagsHub MLflow.
+        This is the simplest model — validates the full pipeline without SAM3 weight
+        download complexity.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+# Launch single DynUNet smoke test
+sky jobs launch deployment/skypilot/smoke_test_gpu.yaml \
+  --env-file .env \
+  --env MODEL_FAMILY=dynunet \
+  -y
+
+# Monitor
+sky jobs logs -f
+
+# After completion:
+echo "=== Verification ==="
+echo "1. Check DagsHub: https://dagshub.com/petteriTeikari/vascadia/experiments"
+echo "2. Verify metrics: loss, dice, hausdorff logged"
+echo "3. Verify params: model_family=dynunet, epochs=2, etc."
+      ]]></commands>
+      <verification>
+        Job completes with exit code 0.
+        DagsHub shows the experiment run with all expected metrics and params.
+      </verification>
+      <estimated_cost>~$0.12</estimated_cost>
+    </task>
+
+    <task id="T5.4" name="Verify MLflow run appears on DagsHub">
+      <description>
+        Programmatically verify the MLflow run from T5.3 is visible on DagsHub.
+      </description>
+      <commands><![CDATA[
+cd /home/petteri/Dropbox/knowledge-hub/repositories/vascadia
+
+uv run python -c "
+import dagshub
+import mlflow
+
+dagshub.init(repo_owner='petteriTeikari', repo_name='vascadia')
+
+client = mlflow.MlflowClient()
+
+# List all experiments
+experiments = client.search_experiments()
+print(f'Total experiments: {len(experiments)}')
+for exp in experiments:
+    print(f'  {exp.name} (id={exp.experiment_id})')
+
+# Find the most recent run
+runs = client.search_runs(
+    experiment_ids=[exp.experiment_id for exp in experiments],
+    max_results=5,
+    order_by=['start_time DESC']
+)
+print(f'\nMost recent runs:')
+for run in runs:
+    metrics = {k: f'{v:.4f}' for k, v in run.data.metrics.items()}
+    print(f'  {run.info.run_name}: {metrics}')
+    print(f'    params: {run.data.params}')
+"
+      ]]></commands>
+      <verification>
+        The DynUNet smoke test run is visible with metrics and params.
+        At least one run has model_family=dynunet in params.
+      </verification>
+    </task>
+
+    <task id="T5.5" name="Verify DVC data accessible from RunPod">
+      <description>
+        Verify that a RunPod job can DVC pull data from DagsHub storage.
+        This tests the fallback path (when data is NOT on Network Volume).
+      </description>
+      <commands><![CDATA[
+# This is tested implicitly by T5.3 if Network Volume already has data.
+# To test the DVC pull path explicitly, temporarily rename the data dir:
+
+# SSH into RunPod pod (if still running):
+# sky exec minivess-smoke-test -- "mv /opt/vol/data/raw/minivess /opt/vol/data/raw/minivess_backup"
+
+# Then re-run with DVC pull path:
+# sky exec minivess-smoke-test -- "cd /app && dvc pull data/raw/minivess -r dagshub"
+
+# Or test locally:
+cd /tmp && mkdir dvc-pull-test && cd dvc-pull-test
+git clone https://dagshub.com/petteriTeikari/vascadia.git .
+dvc remote add dagshub s3://dvc
+dvc remote modify dagshub endpointurl https://dagshub.com/petteriTeikari/vascadia.s3
+dvc remote modify dagshub --local access_key_id "$DAGSHUB_TOKEN"
+dvc remote modify dagshub --local secret_access_key "$DAGSHUB_TOKEN"
+dvc pull data/raw/minivess -r dagshub
+ls data/raw/minivess/imagesTr/ | wc -l
+cd /tmp && rm -rf dvc-pull-test
+      ]]></commands>
+      <verification>
+        DVC pull from DagsHub succeeds. File count matches expected (~47 training volumes).
+      </verification>
+    </task>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       APPENDIX A: Multi-Hypothesis Decision Matrix
+       Evidence-based evaluation of the decisions already made.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <appendix id="A" name="Multi-Hypothesis Decision Matrix">
+    <description>
+      Open-ended evaluation of the user's decisions against alternative hypotheses.
+      All decisions have been MADE by the user — this appendix provides the evidence
+      base and documents the reasoning for future reference.
+    </description>
+
+    <!-- DECISION 1: DagsHub vs Alternatives for MLflow Tracking -->
+    <decision id="D1" name="MLflow Tracking Backend">
+      <user_choice>DagsHub hosted MLflow</user_choice>
+      <hypotheses>
+        <hypothesis id="D1.H1" name="DagsHub Hosted MLflow" selected="true">
+          <description>
+            MLflow tracking at https://dagshub.com/petteriTeikari/vascadia.mlflow.
+            Free for public repos, unlimited experiments, 20 GB artifact storage.
+          </description>
+          <pros>
+            - Zero cost for public repos
+            - Zero infrastructure management
+            - Web UI for team/reviewer experiment browsing
+            - MLflow 3.x compatible (confirmed by DagsHub blog post)
+            - Standard MLflow API — zero code changes to tracking calls
+            - DVC integration in same platform
+            - Open science: public MLflow UI for paper readers
+          </pros>
+          <cons>
+            - 20 GB artifact storage limit (tight for SAM3 checkpoints ~900 MB each)
+            - Vendor dependency (DagsHub is a smaller company)
+            - Internet required (no offline training with tracking)
+            - Latency: network round-trip for every mlflow.log_metric() call
+            - 100 experiment limit in private repos (irrelevant — repo is public)
+          </cons>
+          <mitigations>
+            - Artifact size: Log metrics/params only, keep checkpoints on Network Volume
+            - Vendor risk: All data exportable via standard MLflow API + DVC commands
+            - Offline: File-based fallback (MLFLOW_TRACKING_URI=mlruns) always works
+            - Latency: MLflow batches writes; minimal impact on training speed
+          </mitigations>
+          <score>4.4/5</score>
+        </hypothesis>
+
+        <hypothesis id="D1.H2" name="File-Based MLflow (Ephemeral Sync)">
+          <description>
+            MLflow writes to /opt/vol/mlruns on Network Volume.
+            Post-job: sky rsync down to local mlruns/.
+          </description>
+          <pros>
+            - Zero external dependencies
+            - Zero latency (local filesystem writes)
+            - Works offline
+            - Maximum reproducibility (no service dependency)
+          </pros>
+          <cons>
+            - No web UI for sharing experiments
+            - Must remember sky rsync down after every job
+            - Local-only access (no collaboration)
+            - No public experiment URLs for paper
+          </cons>
+          <score>4.6/5 (reproducibility) but 3.0/5 (collaboration)</score>
+          <verdict>Better for pure reproducibility, worse for open science narrative</verdict>
+        </hypothesis>
+
+        <hypothesis id="D1.H3" name="W&amp;B Academic Plan">
+          <description>
+            Weights &amp; Biases with free Academic plan (200 GB, 100 seats).
+          </description>
+          <pros>
+            - 200 GB storage (10x DagsHub)
+            - 100 team seats
+            - Best-in-class experiment visualization
+            - Largest ML community
+          </pros>
+          <cons>
+            - Requires .edu email (may not have one)
+            - NOT MLflow-native — requires code migration to wandb.log()
+            - Proprietary API (vendor lock-in)
+            - Closed-source server
+          </cons>
+          <score>4.0/5</score>
+          <verdict>Rejected: requires MLflow code migration, proprietary API</verdict>
+        </hypothesis>
+
+        <hypothesis id="D1.H4" name="Self-Hosted MLflow on VPS">
+          <description>
+            MLflow server on Hetzner CX22 (EUR 3.79/month) or similar VPS.
+          </description>
+          <pros>
+            - Full control
+            - Zero vendor lock-in
+            - Unlimited storage (VPS disk)
+          </pros>
+          <cons>
+            - $4-20/month ongoing cost
+            - Server maintenance burden
+            - Must handle TLS, auth, backups
+            - Reviewer must also set up or use your server
+          </cons>
+          <score>3.2/5</score>
+          <verdict>Rejected: unnecessary complexity for solo/small-team project</verdict>
+        </hypothesis>
+      </hypotheses>
+    </decision>
+
+    <!-- DECISION 2: DagsHub vs Alternatives for DVC Storage -->
+    <decision id="D2" name="DVC Storage Backend">
+      <user_choice>DagsHub Storage (with Connect GCS for overflow)</user_choice>
+      <hypotheses>
+        <hypothesis id="D2.H1" name="DagsHub Storage Primary" selected="true">
+          <description>
+            S3-compatible DVC remote at https://dagshub.com/USER/REPO.s3.
+            20 GB free, standard DVC push/pull commands.
+          </description>
+          <pros>
+            - Zero cost (free tier)
+            - Zero setup (auto-configured with repo)
+            - Standard DVC commands (no code changes)
+            - Same platform as MLflow (unified tooling)
+            - Public data access for collaborators
+          </pros>
+          <cons>
+            - 20 GB limit (~2 GB used now, headroom for growth)
+            - Upload speed depends on DagsHub servers
+            - Cannot host very large datasets (>20 GB need overflow)
+          </cons>
+          <storage_estimate>
+            MiniVess: ~1.5 GB
+            DeepVess: ~0.5 GB
+            VesselNN (drift): ~0.3 GB
+            Headroom: ~17.7 GB free
+          </storage_estimate>
+          <overflow_plan>
+            If 20 GB is reached: Connect external GCS bucket via DagsHub Connect
+            External Storage feature. GCS Standard Storage: $0.02/GB/month.
+            10 GB overflow = $0.20/month.
+          </overflow_plan>
+          <score>4.5/5</score>
+        </hypothesis>
+
+        <hypothesis id="D2.H2" name="GCS Direct (Current, Archived)">
+          <description>
+            DVC remote on gs://minivess-mlops-dvc-data (GCP europe-west4).
+          </description>
+          <pros>
+            - Unlimited storage ($0.02/GB/month)
+            - Enterprise-grade reliability
+            - Same-region as GCP compute (zero egress when on GCP)
+          </pros>
+          <cons>
+            - Requires GCP project + billing + IAM
+            - GCP fully torn down (would need re-provisioning)
+            - Egress fees from GCP to RunPod ($0.12/GB)
+            - Not accessible without GCP account
+          </cons>
+          <score>2.5/5 (given GCP teardown)</score>
+          <verdict>Archived: GCP infrastructure torn down, costly to maintain</verdict>
+        </hypothesis>
+
+        <hypothesis id="D2.H3" name="Network Volume Only (No DVC Remote)">
+          <description>
+            Data lives only on RunPod Network Volume and local filesystem.
+            No cloud DVC remote — rsync for transfer.
+          </description>
+          <pros>
+            - Simplest possible setup
+            - Zero cloud storage cost
+            - Fastest data access (local NVMe)
+          </pros>
+          <cons>
+            - No DVC pull for collaborators
+            - Single point of failure (volume loss = re-upload from local)
+            - Not reproducible without the specific Network Volume
+          </cons>
+          <score>3.5/5</score>
+          <verdict>Too fragile for an open-source academic project</verdict>
+        </hypothesis>
+      </hypotheses>
+    </decision>
+
+    <!-- DECISION 3: RunPod RTX 4090 vs Alternatives -->
+    <decision id="D3" name="Primary GPU Compute">
+      <user_choice>RunPod RTX 4090</user_choice>
+      <hypotheses>
+        <hypothesis id="D3.H1" name="RunPod RTX 4090" selected="true">
+          <description>
+            Community Cloud on-demand at $0.34/hr, 24 GB VRAM,
+            82.6 BF16 TFLOPS, 1008 GB/s memory bandwidth.
+          </description>
+          <evidence>
+            - 11 experiment passes of empirical data
+            - Instant provisioning (vs 26h GCP drought)
+            - Cost-efficiency champion for this workload
+            - Consumer GPU narrative for Nature Protocols
+            - All models fit in 24 GB (DynUNet ~2 GB, SAM3 Hybrid ~7.5 GB, VesselFM ~10 GB)
+          </evidence>
+          <cost_per_debug_pass>$4.21 (34 jobs x 22 min avg x $0.34/hr)</cost_per_debug_pass>
+          <cost_per_production_pass>~$435 (1280 GPU-hours x $0.34/hr)</cost_per_production_pass>
+          <score>4.8/5</score>
+        </hypothesis>
+
+        <hypothesis id="D3.H2" name="RunPod RTX 5090">
+          <description>$0.58/hr, 32 GB VRAM, ~1.5x speedup over 4090.</description>
+          <cost_per_debug_pass>$4.93 (17% more than 4090)</cost_per_debug_pass>
+          <verdict>Higher throughput but 70% higher hourly cost for 50% speedup. Not cost-efficient.</verdict>
+          <score>3.8/5</score>
+        </hypothesis>
+
+        <hypothesis id="D3.H3" name="GCP L4 Spot">
+          <description>$0.22/hr spot, but 26+ hours of zero availability in 3 regions.</description>
+          <cost_per_debug_pass>$2.75 (IF GPUs are available) + $53-131/month infra</cost_per_debug_pass>
+          <verdict>Cheapest per-GPU-hour but unreliable and heavy infra overhead.</verdict>
+          <score>1.8/5</score>
+        </hypothesis>
+
+        <hypothesis id="D3.H4" name="RunPod A100">
+          <description>$1.33/hr, 40/80 GB VRAM, ~2.2x speedup over 4090.</description>
+          <cost_per_debug_pass>$7.55 (79% more than 4090)</cost_per_debug_pass>
+          <verdict>Overkill for single-GPU 3D segmentation. 4090 is sufficient.</verdict>
+          <score>3.0/5</score>
+        </hypothesis>
+      </hypotheses>
+    </decision>
+
+    <!-- DECISION 4: Public vs Private Repo -->
+    <decision id="D4" name="DagsHub Repository Visibility">
+      <user_choice>Public</user_choice>
+      <rationale>
+        Public repo on DagsHub = unlimited experiments + unlimited tracked metrics.
+        Private repos limited to 100 experiments and 2 collaborators.
+        Open science alignment: Nature Protocols paper = open data, open code, open results.
+        Public MLflow UI means reviewers can browse experiments in browser.
+        Zero downside for an academic project intended for publication.
+      </rationale>
+      <score>5.0/5 (no contest)</score>
+    </decision>
+
+    <!-- DECISION 5: Artifact Storage Strategy -->
+    <decision id="D5" name="Artifact Storage Strategy">
+      <user_choice>User decided: DagsHub for tracking, Network Volume for large artifacts</user_choice>
+      <hypotheses>
+        <hypothesis id="D5.H1" name="Metrics to DagsHub, Checkpoints to Network Volume" selected="true">
+          <description>
+            Log metrics, params, tags, small plots to DagsHub MLflow.
+            Keep model checkpoints (~900 MB per SAM3 run) on Network Volume.
+            Checkpoints synced to local via sky rsync down (existing pattern).
+          </description>
+          <pros>
+            - 20 GB DagsHub storage lasts for hundreds of experiment runs
+            - Network Volume provides fast local access to checkpoints
+            - No artifact upload bottleneck during training
+            - Separation of concerns: tracking (DagsHub) vs artifacts (local)
+          </pros>
+          <cons>
+            - Checkpoints not browsable on DagsHub web UI
+            - Must sky rsync down to get checkpoints locally
+            - Two storage locations instead of one
+          </cons>
+          <score>4.5/5</score>
+        </hypothesis>
+
+        <hypothesis id="D5.H2" name="Everything to DagsHub MLflow">
+          <description>Log ALL artifacts (including checkpoints) to DagsHub.</description>
+          <cons>
+            - 20 GB exhausted in ~20 SAM3 runs (900 MB checkpoints each)
+            - Slow artifact uploads over internet during training
+            - Would need paid tier ($99/month) within weeks
+          </cons>
+          <score>2.5/5</score>
+          <verdict>Rejected: storage limit too tight for checkpoint logging</verdict>
+        </hypothesis>
+      </hypotheses>
+    </decision>
+  </appendix>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       APPENDIX B: DagsHub Technical Reference
+       Exact API details gathered from web research.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <appendix id="B" name="DagsHub Technical Reference">
+    <section name="Pricing (verified 2026-03-28)">
+      <tier name="Individual (Free)">
+        <storage>20 GB DagsHub Storage</storage>
+        <private_repos>Unlimited (non-commercial use)</private_repos>
+        <public_repos>Unlimited</public_repos>
+        <collaborators>Up to 2 in private projects</collaborators>
+        <experiments_private>100 tracked experiments</experiments_private>
+        <experiments_public>Unlimited</experiments_public>
+        <data_points>2,000,000</data_points>
+        <annotation_projects>5</annotation_projects>
+        <cost>$0/month</cost>
+      </tier>
+      <tier name="Team">
+        <storage>Up to 1 TB or 2 million files</storage>
+        <team_members>Up to 10</team_members>
+        <experiments>Unlimited</experiments>
+        <cost>$99/month (yearly) or $119/month (monthly)</cost>
+      </tier>
+      <source>https://dagshub.com/pricing/</source>
+    </section>
+
+    <section name="MLflow Integration">
+      <tracking_uri>https://dagshub.com/{owner}/{repo}.mlflow</tracking_uri>
+      <auth_env_vars>
+        MLFLOW_TRACKING_USERNAME: DagsHub username
+        MLFLOW_TRACKING_PASSWORD: DagsHub token
+      </auth_env_vars>
+      <python_init>
+        import dagshub
+        dagshub.init(repo_owner="petteriTeikari", repo_name="vascadia")
+        # Auto-configures: mlflow.set_tracking_uri() + auth
+      </python_init>
+      <artifact_location>mlflow-artifacts:/{uuid} (auto-generated per experiment)</artifact_location>
+      <mlflow_version>MLflow 3.x supported (confirmed)</mlflow_version>
+      <source>https://dagshub.com/docs/integration_guide/mlflow_tracking/</source>
+    </section>
+
+    <section name="DVC Remote">
+      <remote_url>s3://dvc</remote_url>
+      <endpoint_url>https://dagshub.com/{owner}/{repo}.s3</endpoint_url>
+      <auth>
+        access_key_id: DagsHub token
+        secret_access_key: DagsHub token (same value for both)
+      </auth>
+      <commands>
+        dvc remote add dagshub s3://dvc
+        dvc remote modify dagshub endpointurl https://dagshub.com/{owner}/{repo}.s3
+        dvc remote modify dagshub --local access_key_id {token}
+        dvc remote modify dagshub --local secret_access_key {token}
+      </commands>
+      <source>https://dagshub.com/docs/integration_guide/dvc/</source>
+    </section>
+
+    <section name="GitHub Mirror">
+      <method>Web UI only (no programmatic API for initial connection)</method>
+      <sync_frequency>Webhook-based (instant on push) + 24h periodic backup</sync_frequency>
+      <features>
+        - PRs sync bidirectionally (GitHub to DagsHub and vice versa)
+        - Issues sync bidirectionally
+        - Git-tracked files stay on GitHub; DagsHub adds DVC storage + MLflow
+      </features>
+      <source>https://dagshub.com/docs/integration_guide/github/</source>
+    </section>
+
+    <section name="Connect External Storage (GCS Overflow)">
+      <description>
+        If 20 GB DagsHub storage is exceeded, connect an external GCS bucket.
+        DagsHub supports AWS S3, GCS, Azure Blob, and S3-compatible storage.
+      </description>
+      <method>Web UI (Settings -> Storage -> Connect External Storage)</method>
+      <gcs_url_format>gs://{bucket-name}/{path}</gcs_url_format>
+      <cost>GCS Standard Storage: $0.02/GB/month + $0.12/GB egress</cost>
+      <source>https://dagshub.com/docs/feature_guide/connect_external_storage/</source>
+    </section>
+  </appendix>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       APPENDIX C: Risk Register
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <appendix id="C" name="Risk Register">
+    <risk id="R1" probability="low" impact="medium">
+      <name>RunPod RTX 4090 shortage</name>
+      <mitigation>RTX 3090 ($0.40/hr) or RTX 5090 ($0.58/hr) as fallback. SkyPilot
+        accelerators list already includes all three.</mitigation>
+    </risk>
+    <risk id="R2" probability="very-low" impact="high">
+      <name>RunPod Network Volume data loss</name>
+      <mitigation>All data is DVC-versioned on DagsHub + local filesystem.
+        Re-upload from local in ~30 min. Network Volume is on NVMe SSD with
+        RunPod's infrastructure reliability.</mitigation>
+    </risk>
+    <risk id="R3" probability="medium" impact="low">
+      <name>DagsHub discontinues free tier or reduces limits</name>
+      <mitigation>File-based MLflow (MLFLOW_TRACKING_URI=mlruns) is the zero-dependency
+        fallback. All experiment data exportable via standard MLflow API.
+        DVC data portable to any S3-compatible storage.</mitigation>
+    </risk>
+    <risk id="R4" probability="low" impact="high">
+      <name>SkyPilot-RunPod integration breaks after upgrade</name>
+      <mitigation>Pin SkyPilot version in pyproject.toml. Test before each factorial
+        pass with smoke test. SkyPilot has active maintainers and RunPod integration
+        is officially supported.</mitigation>
+    </risk>
+    <risk id="R5" probability="medium" impact="low">
+      <name>RunPod community host goes offline mid-job</name>
+      <mitigation>SkyPilot auto-retries. Network Volume persists data across pod
+        restarts. MLflow metrics already logged to DagsHub (not lost with pod).
+        Use on-demand (not spot) for critical production runs.</mitigation>
+    </risk>
+    <risk id="R6" probability="low" impact="medium">
+      <name>DagsHub MLflow latency affects training speed</name>
+      <mitigation>MLflow client batches writes. Empirically, MLflow tracking overhead
+        is less than 1% of training time. If problematic, switch to async logging
+        or file-based fallback for the training loop, sync to DagsHub post-run.</mitigation>
+    </risk>
+    <risk id="R7" probability="low" impact="medium">
+      <name>20 GB DagsHub storage exhausted</name>
+      <mitigation>Current usage ~2 GB (MiniVess + DeepVess). Growth rate ~50 MB per
+        debug pass (metrics only, no checkpoints). Would take 360+ debug passes to
+        exhaust. If needed: connect external GCS bucket ($0.02/GB/month) or upgrade
+        to Team tier ($99/month).</mitigation>
+    </risk>
+  </appendix>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       APPENDIX D: Implementation Checklist (Quick Reference)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <appendix id="D" name="Implementation Checklist">
+    <checklist>
+      <item phase="0" task="T0.1" status="pending">Install dagshub SDK (uv add dagshub)</item>
+      <item phase="0" task="T0.2" status="pending">Authenticate with DagsHub (dagshub login)</item>
+      <item phase="0" task="T0.3" status="pending">Connect GitHub mirror via web UI (MANUAL)</item>
+      <item phase="0" task="T0.4" status="pending">Configure DagsHub as DVC remote</item>
+      <item phase="0" task="T0.5" status="pending">Configure MLflow tracking URI</item>
+      <item phase="0" task="T0.6" status="pending">Test MLflow logging end-to-end</item>
+      <item phase="1" task="T1.1" status="pending">Update .env.example with DagsHub vars</item>
+      <item phase="1" task="T1.2" status="pending">Update .env with actual credentials (MANUAL)</item>
+      <item phase="1" task="T1.3" status="pending">Update resolve_tracking_uri() for DagsHub</item>
+      <item phase="2" task="T2.1" status="pending">Update smoke_test_gpu.yaml</item>
+      <item phase="2" task="T2.2" status="pending">Create train_factorial_runpod.yaml</item>
+      <item phase="2" task="T2.3" status="pending">Update setup block for DagsHub DVC</item>
+      <item phase="2" task="T2.4" status="pending">Test smoke test on RunPod (~$0.12)</item>
+      <item phase="3" task="T3.1" status="pending">Push MiniVess data to DagsHub DVC</item>
+      <item phase="3" task="T3.2" status="pending">Push DeepVess data to DagsHub DVC</item>
+      <item phase="3" task="T3.3" status="pending">Verify data integrity (round-trip test)</item>
+      <item phase="3" task="T3.4" status="pending">Update .dvc/config remote hierarchy</item>
+      <item phase="4" task="T4.1" status="pending">Update cloud.yaml KG</item>
+      <item phase="4" task="T4.2" status="pending">Update CLAUDE.md architecture</item>
+      <item phase="4" task="T4.3" status="pending">Update deployment/CLAUDE.md</item>
+      <item phase="4" task="T4.4" status="pending">Update configs/cloud/runpod_dev.yaml</item>
+      <item phase="4" task="T4.5" status="pending">Update/create preflight checks</item>
+      <item phase="4" task="T4.6" status="pending">Update run_factorial.sh</item>
+      <item phase="5" task="T5.1" status="pending">make test-staging (GATE)</item>
+      <item phase="5" task="T5.2" status="pending">Preflight checks (GATE)</item>
+      <item phase="5" task="T5.3" status="pending">Launch DynUNet validation job (~$0.12)</item>
+      <item phase="5" task="T5.4" status="pending">Verify MLflow run on DagsHub</item>
+      <item phase="5" task="T5.5" status="pending">Verify DVC data from RunPod</item>
+    </checklist>
+  </appendix>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       APPENDIX E: Files Changed Summary
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <appendix id="E" name="Files Changed Summary">
+    <files_modified>
+      <file path=".env.example" reason="Add DagsHub vars, update MLflow URI, update default cloud"/>
+      <file path=".env" reason="Actual credentials (gitignored)"/>
+      <file path=".dvc/config" reason="Add dagshub remote, set as default"/>
+      <file path="pyproject.toml" reason="Add dagshub dependency"/>
+      <file path="uv.lock" reason="Lock file update"/>
+      <file path="deployment/skypilot/smoke_test_gpu.yaml" reason="MLflow URI to DagsHub"/>
+      <file path="deployment/skypilot/train_factorial_runpod.yaml" reason="NEW: RunPod factorial YAML"/>
+      <file path="knowledge-graph/domains/cloud.yaml" reason="Architecture update"/>
+      <file path="CLAUDE.md" reason="Two-provider architecture update"/>
+      <file path="deployment/CLAUDE.md" reason="DagsHub section added"/>
+      <file path="configs/cloud/runpod_dev.yaml" reason="MLflow URI + DVC remote update"/>
+      <file path="scripts/run_factorial.sh" reason="RunPod YAML default + DagsHub creds"/>
+      <file path="scripts/preflight_runpod.py" reason="NEW or updated preflight checks"/>
+      <file path="src/minivess/observability/mlflow_utils.py" reason="DagsHub URL validation"/>
+    </files_modified>
+    <files_preserved>
+      <file path="deployment/skypilot/train_factorial.yaml" reason="GCP version kept for labs"/>
+      <file path="deployment/skypilot/dev_runpod.yaml" reason="Dev path still valid"/>
+      <file path="configs/cloud/gcp_spot.yaml" reason="Archived but preserved"/>
+    </files_preserved>
+  </appendix>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       APPENDIX F: Sources
+       Web research citations from the council preparation.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <appendix id="F" name="Sources">
+    <source id="S1" url="https://dagshub.com/pricing/">DagsHub Pricing — Individual tier: 20 GB, unlimited public experiments</source>
+    <source id="S2" url="https://dagshub.com/docs/integration_guide/mlflow_tracking/">DagsHub MLflow Integration — URI format, auth, dagshub.init()</source>
+    <source id="S3" url="https://dagshub.com/docs/integration_guide/dvc/">DagsHub DVC Remote — S3-compatible endpoint, auth config</source>
+    <source id="S4" url="https://dagshub.com/docs/integration_guide/github/">DagsHub GitHub Integration — webhook sync, PR/issue mirroring</source>
+    <source id="S5" url="https://dagshub.com/docs/integration_guide/connect_a_git_server_to_dagshub/">DagsHub Git Mirror — 24h auto-sync, manual trigger</source>
+    <source id="S6" url="https://dagshub.com/docs/client/index.html">DagsHub Python Client — dagshub.init(), auth, upload</source>
+    <source id="S7" url="https://dagshub.com/docs/feature_guide/connect_external_storage/">DagsHub Connect External Storage — GCS, S3, Azure overflow</source>
+    <source id="S8" url="https://dagshub.com/blog/dagshub-now-supports-mlflow-3-x/">DagsHub MLflow 3.x Support (confirmed)</source>
+    <source id="S9" url="https://www.runpod.io/blog/runpod-skypilot-integration">RunPod SkyPilot Integration — official blog</source>
+    <source id="S10" url="https://docs.runpod.io/integrations/skypilot">RunPod SkyPilot Documentation — setup, limitations</source>
+    <source id="S11" url="https://docs.skypilot.co/en/latest/examples/docker-containers.html">SkyPilot Docker Containers — image_id: docker: usage</source>
+    <source id="S12" url="https://docs.skypilot.co/en/latest/reference/volumes.html">SkyPilot Volumes — RunPod Network Volume support</source>
+    <source id="S13" url="https://pypi.org/project/dagshub/">dagshub PyPI package</source>
+    <source id="S14" url="https://dagshub.com/docs/api/">DagsHub REST API documentation</source>
+    <source id="S15" url="https://dagshub.com/docs/feature_guide/dagshub_storage/">DagsHub Storage — zero-config DVC remote</source>
+  </appendix>
+</plan>

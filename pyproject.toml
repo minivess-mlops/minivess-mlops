@@ -79,6 +79,7 @@ dependencies = [
     "pingouin>=0.5",
     "baycomp>=1.0",
     "statsmodels>=0.14",
+    "dagshub>=0.6.9",
 ]
 
 [project.optional-dependencies]
