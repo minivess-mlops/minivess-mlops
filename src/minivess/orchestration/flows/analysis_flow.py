@@ -44,6 +44,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     resolve_experiment_name,
 )
+from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -1782,6 +1783,7 @@ def run_analysis_flow(
     Dict with keys: ``results``, ``comparison``, ``promotion``, ``report``.
     """
     require_docker_context("analysis")
+    require_cuda_context("analysis")
 
     log = get_run_logger()
     log.info("Starting analysis flow...")

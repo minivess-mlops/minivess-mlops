@@ -24,6 +24,7 @@ from prefect import flow, task
 from prefect.deployments import run_deployment
 
 from minivess.orchestration.constants import FLOW_NAME_HPO, FLOW_NAME_TRAIN
+from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 if TYPE_CHECKING:
@@ -163,6 +164,7 @@ def hpo_flow(
     Dict with ``best_params``, ``best_value``, ``n_trials``, ``study_name``.
     """
     require_docker_context("hpo")
+    require_cuda_context("hpo")
 
     from minivess.optimization.hpo_engine import AllocationStrategy, HPOEngine
 
