@@ -410,6 +410,23 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     just try this real quick."
     See: `.claude/metalearning/2026-03-24-reactive-rushing-instead-of-proactive-quality.md`
 
+33. **Docker+Prefect Execution Is Non-Negotiable — Zero Bypass on staging/prod (Non-Negotiable)** —
+    On ANY branch derived from `main` or `prod`, training and pipeline execution MUST go
+    through Docker containers orchestrated by Prefect. There are ZERO edge cases:
+    - `MINIVESS_ALLOW_HOST=1` is **pytest-only** — NEVER in scripts, suggestions, or AskUserQuestion options
+    - `PREFECT_DISABLED=1` is **pytest-only** — NEVER in production, staging, or development runs
+    - "Local launcher scripts" that call `training_flow()` directly are BANNED
+    - Framing Docker+Prefect as "heavy" or "slower" is BANNED — it IS the execution model
+    - The correct local training command is ALWAYS: `docker compose run --shm-size 8g train`
+    - All config comes from: `.env` (secrets/URIs) + YAML (experiment params) — never hardcoded
+    **Claude's recurring failure**: proposing `MINIVESS_ALLOW_HOST=1` shortcuts because LLM
+    training data is saturated with bare-metal `python train.py` patterns. This has been
+    documented 7+ times in metalearning. The "quick" path IS the Docker path.
+    See: `.claude/metalearning/2026-03-29-local-launcher-hack-proposed-instead-of-docker-prefect.md`
+    See: `.claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md`
+    See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
+    Guard: Issue #971, Issue #972
+
 ## What AI Must NEVER Do
 
 - Recommend switching to a fresh session between planning and execution. Context amnesia

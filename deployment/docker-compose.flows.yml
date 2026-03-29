@@ -17,7 +17,12 @@
 
 x-common-env: &common-env
   # All values derive from .env.example — never hardcode here (CLAUDE.md Rule #22).
-  MLFLOW_TRACKING_URI: http://minivess-mlflow:${MLFLOW_PORT:-5000}
+  # MLFLOW_TRACKING_URI: from .env (DagsHub, local, or any MLflow backend).
+  # Default falls back to local Docker MLflow infra stack if .env doesn't set it.
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://minivess-mlflow:${MLFLOW_PORT:-5000}}
+  MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME:-}
+  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD:-}
+  DAGSHUB_TOKEN: ${DAGSHUB_TOKEN:-}
   PREFECT_API_URL: http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}

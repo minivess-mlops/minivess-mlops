@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# run_smoke_mini.sh — Reproducible local mini-experiment launcher.
+#
+# Runs the smoke_mini factorial experiment through the Docker+Prefect pipeline.
+# 2 losses (dice_ce, cbdice_cldice) × 3 folds × 20 epochs on local GPU.
+#
+# This is the ONLY supported way to run the mini-experiment.
+# DO NOT bypass this script with MINIVESS_ALLOW_HOST=1 or direct Python invocation.
+#
+# Prerequisites:
+#   - .env file with DagsHub credentials (MLFLOW_TRACKING_URI, DAGSHUB_TOKEN)
+#   - Docker image built: make build-base && docker compose -f deployment/docker-compose.flows.yml build train
+#   - Data in Docker volumes: see deployment/CLAUDE.md "Data Population"
+#   - NVIDIA GPU with CDI support (Docker 25+)
+#
+# Usage:
+#   ./scripts/run_smoke_mini.sh                    # Run all 6 training jobs
+#   ./scripts/run_smoke_mini.sh --dry-run          # Validate config without training
+#   ./scripts/run_smoke_mini.sh --loss dice_ce     # Run one loss only
+#   ./scripts/run_smoke_mini.sh --fold 0           # Run one fold only
+#
+# Config:
+#   Factorial:     configs/factorial/smoke_mini.yaml
+#   Biostatistics: configs/biostatistics/smoke_mini.yaml
+#   Environment:   .env (DagsHub credentials, paths)
+#
+# See: docs/planning/v0-2_archive/original_docs/biostatistics-polishing-plan.xml Phase 3
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${REPO_ROOT}/.env"
+COMPOSE_FILE="${REPO_ROOT}/deployment/docker-compose.flows.yml"
+FACTORIAL_YAML="configs/factorial/smoke_mini.yaml"
+
+# ─── Parse arguments ──────────────────────────────────────────────────
+DRY_RUN=false
+LOSS_FILTER=""
+FOLD_FILTER=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run)    DRY_RUN=true; shift ;;
+        --loss)       LOSS_FILTER="$2"; shift 2 ;;
+        --fold)       FOLD_FILTER="$2"; shift 2 ;;
+        *)            echo "Unknown arg: $1"; exit 1 ;;
+    esac
+done
+
+# ─── Preflight checks ────────────────────────────────────────────────
+echo "=== Smoke Mini Preflight ==="
+
+# Check .env exists
+if [[ ! -f "${ENV_FILE}" ]]; then
+    echo "ERROR: .env not found at ${ENV_FILE}. Copy .env.example → .env and configure."
+    exit 1
+fi
+
+# Check DagsHub MLflow is configured
+MLFLOW_URI=$(grep "^MLFLOW_TRACKING_URI=" "${ENV_FILE}" | head -1 | cut -d= -f2-)
+if [[ -z "${MLFLOW_URI}" ]]; then
+    echo "ERROR: MLFLOW_TRACKING_URI not set in .env"
+    exit 1
+fi
+echo "  MLflow URI: ${MLFLOW_URI}"
+
+# Check Docker is running
+if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: Docker daemon not running"
+    exit 1
+fi
+
+# Check GPU is available
+if ! nvidia-smi >/dev/null 2>&1; then
+    echo "ERROR: NVIDIA GPU not available (nvidia-smi failed)"
+    exit 1
+fi
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+echo "  GPU: ${GPU_NAME}"
+
+# Check train image exists
+if ! docker image inspect minivess-train:latest >/dev/null 2>&1; then
+    echo "ERROR: minivess-train:latest not built. Run:"
+    echo "  make build-base"
+    echo "  docker compose --env-file ${ENV_FILE} -f ${COMPOSE_FILE} build train"
+    exit 1
+fi
+echo "  Docker image: minivess-train:latest ✓"
+
+# Check factorial config exists
+if [[ ! -f "${REPO_ROOT}/${FACTORIAL_YAML}" ]]; then
+    echo "ERROR: ${FACTORIAL_YAML} not found"
+    exit 1
+fi
+echo "  Factorial config: ${FACTORIAL_YAML} ✓"
+
+echo "=== Preflight PASSED ==="
+
+if [[ "${DRY_RUN}" == true ]]; then
+    echo ""
+    echo "DRY RUN — would launch these jobs:"
+    echo "  Losses: dice_ce, cbdice_cldice"
+    echo "  Folds: 0, 1, 2"
+    echo "  Epochs: 20"
+    echo "  Total: 6 training runs"
+    echo "  Estimated time: 2-4 hours on ${GPU_NAME}"
+    exit 0
+fi
+
+# ─── Launch training jobs ─────────────────────────────────────────────
+LOSSES=("dice_ce" "cbdice_cldice")
+FOLDS=(0 1 2)
+
+# Apply filters
+if [[ -n "${LOSS_FILTER}" ]]; then
+    LOSSES=("${LOSS_FILTER}")
+fi
+if [[ -n "${FOLD_FILTER}" ]]; then
+    FOLDS=("${FOLD_FILTER}")
+fi
+
+TOTAL=$((${#LOSSES[@]} * ${#FOLDS[@]}))
+CURRENT=0
+
+echo ""
+echo "=== Launching ${TOTAL} training jobs ==="
+echo "  Config: ${FACTORIAL_YAML}"
+echo "  MLflow: ${MLFLOW_URI}"
+echo ""
+
+for loss in "${LOSSES[@]}"; do
+    for fold in "${FOLDS[@]}"; do
+        CURRENT=$((CURRENT + 1))
+        echo "[${CURRENT}/${TOTAL}] Training: loss=${loss}, fold=${fold}, epochs=20"
+
+        docker compose --env-file "${ENV_FILE}" \
+            -f "${COMPOSE_FILE}" \
+            run --rm \
+            --shm-size 8g \
+            -e EXPERIMENT=smoke_mini \
+            -e HYDRA_OVERRIDES="loss_name=${loss},fold_id=${fold},max_epochs=20,model_family=dynunet,num_folds=3" \
+            train
+
+        echo "[${CURRENT}/${TOTAL}] ✓ Completed: loss=${loss}, fold=${fold}"
+        echo ""
+    done
+done
+
+echo "=== All ${TOTAL} training jobs completed ==="
+echo "Results logged to: ${MLFLOW_URI}"
+echo ""
+echo "Next steps:"
+echo "  1. Run post-training: ./scripts/run_smoke_mini_post_training.sh"
+echo "  2. Run analysis:      ./scripts/run_smoke_mini_analysis.sh"
+echo "  3. Run biostatistics:  ./scripts/run_smoke_mini_biostatistics.sh"
