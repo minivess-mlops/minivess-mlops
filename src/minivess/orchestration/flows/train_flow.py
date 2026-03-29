@@ -43,6 +43,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     FLOW_NAME_TRAINING_SUBFLOW,
 )
+from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -1458,6 +1459,10 @@ def training_flow(
 
     # Preflight: Docker context gate (CLAUDE.md Rule #19 — STOP Protocol)
     require_docker_context("train")
+
+    # Preflight: CUDA availability gate (prevents silent CPU fallback)
+    # See: .claude/metalearning/2026-03-29-silent-cpu-fallback-no-observability-4h-wasted.md
+    require_cuda_context("train")
 
     # Preflight: validate required environment variables
     _validate_training_env()
