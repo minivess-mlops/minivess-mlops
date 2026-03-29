@@ -1,0 +1,778 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Observability Third Pass: Complete Wiring
+  ===========================================
+  All 15 Prefect flows import flow_observability_context / gpu_flow_observability_context
+  but NONE actually call them inside their flow bodies. The prefect_hooks module exists
+  but no @task decorator uses on_completion/on_failure hooks. The StructuredEventLogger
+  has log_epoch_complete() but the SegmentationTrainer never calls it. Docker Compose
+  flow services have no HEALTHCHECK directives, LGTM/DCGM/OTel are not wired into the
+  flow compose file, and stall_detection.py is standalone with no flow integration.
+
+  This plan wires EVERYTHING together across 6 phases and 16 tasks.
+
+  Scope:
+    - 4 GPU flows: train, hpo, post_training, analysis (use gpu_flow_observability_context)
+    - 11 CPU flows: acquisition, data, deploy, dashboard, biostatistics, annotation,
+      drift_simulation, synthetic_generation, qa, maintenance, pipeline
+    - Docker Compose: docker-compose.flows.yml (HEALTHCHECK, OTel sidecar)
+    - Docker Compose: docker-compose.yml (LGTM stack, DCGM exporter)
+    - Trainer: SegmentationTrainer epoch loop integration with StructuredEventLogger
+    - Cross-cutting: stall detection, OTel dependency injection, Prefect task hooks
+
+  Preconditions:
+    - flow_observability.py context managers exist and are tested
+    - prefect_hooks.py create_task_timing_hooks() exists and is tested
+    - structured_logging.py StructuredEventLogger.log_epoch_complete() exists
+    - gpu_heartbeat.py GpuHeartbeatMonitor exists and is tested
+    - stall_detection.py detect_mlflow_metric_stall() exists and is tested
+    - telemetry.py TelemetryProvider with OTel span context exists
+
+  Created: 2026-03-29
+  Author: Claude Code (self-learning-iterative-coder)
+-->
+<plan id="observability-pass3-complete-wiring"
+      title="Observability Third Pass: Complete Wiring"
+      created="2026-03-29"
+      status="proposed"
+      branch="feat/observability-pass3-wiring">
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 1: Wire context managers into ALL flow bodies                    -->
+  <!--   Every flow imports the context manager but none invoke it.           -->
+  <!--   This phase adds `with ...context(...)` around each flow body.        -->
+  <!-- ===================================================================== -->
+  <phase id="1" title="Wire context managers into ALL flow bodies">
+    <description>
+      All 15 Prefect flow files import either flow_observability_context (CPU flows) or
+      gpu_flow_observability_context (GPU flows) but none actually wrap their flow body
+      in a `with` statement. This phase adds the one-line context manager invocation to
+      every flow, giving all flows structured JSONL logging, flow_start/flow_end events,
+      and (for GPU flows) CUDA guard + GPU heartbeat monitoring.
+
+      GPU flows (4): train_flow, hpo_flow, post_training_flow, analysis_flow
+      CPU flows (11): acquisition_flow, data_flow, deploy_flow, dashboard_flow,
+        biostatistics_flow, annotation_flow, drift_simulation_flow,
+        synthetic_generation_flow, qa_flow, maintenance_flow, pipeline_flow
+    </description>
+
+    <task id="1.1" title="Wire gpu_flow_observability_context into 4 GPU flows">
+      <description>
+        For each GPU flow (train, hpo, post_training, analysis), wrap the main flow
+        function body in:
+<![CDATA[
+        with gpu_flow_observability_context(
+            FLOW_NAME_TRAIN,
+            logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")),
+        ) as event_logger:
+            # ... existing flow body indented one level ...
+]]>
+        The event_logger is available for downstream use (e.g., passing to trainer).
+        Each GPU flow already imports gpu_flow_observability_context -- no new imports
+        needed. The LOGS_DIR env var is already set in docker-compose.flows.yml
+        x-common-env. The context manager calls require_cuda_context() and starts
+        GpuHeartbeatMonitor automatically.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_gpu_flow_observability_wiring.py</test>
+      </tests>
+      <acceptance>
+        Each GPU flow body is wrapped in gpu_flow_observability_context. Running the
+        flow (in Docker with MINIVESS_ALLOW_HOST=1 for test) produces flow_start and
+        flow_end events in LOGS_DIR/events.jsonl. GpuHeartbeatMonitor is active during
+        the flow execution.
+      </acceptance>
+    </task>
+
+    <task id="1.2" title="Wire flow_observability_context into 11 CPU flows">
+      <description>
+        For each CPU flow (acquisition, data, deploy, dashboard, biostatistics,
+        annotation, drift_simulation, synthetic_generation, qa, maintenance, pipeline),
+        wrap the main flow function body in:
+<![CDATA[
+        with flow_observability_context(
+            FLOW_NAME_BIOSTATISTICS,
+            logs_dir=Path(os.environ.get("LOGS_DIR", "/app/logs")),
+        ) as event_logger:
+            # ... existing flow body indented one level ...
+]]>
+        Each CPU flow already imports flow_observability_context. No CUDA guard or
+        heartbeat -- just structured JSONL event logging and stdout flush.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/acquisition_flow.py</file>
+        <file>src/minivess/orchestration/flows/data_flow.py</file>
+        <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file>src/minivess/orchestration/flows/annotation_flow.py</file>
+        <file>src/minivess/orchestration/flows/drift_simulation_flow.py</file>
+        <file>src/minivess/orchestration/flows/synthetic_generation_flow.py</file>
+        <file>src/minivess/orchestration/flows/qa_flow.py</file>
+        <file>src/minivess/orchestration/flows/maintenance_flow.py</file>
+        <file>src/minivess/orchestration/flows/pipeline_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_cpu_flow_observability_wiring.py</test>
+      </tests>
+      <acceptance>
+        All 11 CPU flows produce flow_start/flow_end JSONL events when run.
+        No flow body executes without the observability context wrapper.
+      </acceptance>
+    </task>
+
+    <task id="1.3" title="AST-based enforcement test: every @flow body uses context manager">
+      <description>
+        Write a structural test that parses all 15 flow files with ast.parse() and
+        verifies that every function decorated with @flow contains a `with` statement
+        whose context expression references either flow_observability_context or
+        gpu_flow_observability_context. This prevents regression -- any new flow added
+        without the context manager fails the test.
+
+        Uses ast.walk() to find FunctionDef nodes with @flow decorator, then checks
+        for ast.With nodes in the body whose context_expr calls the expected function.
+        Per CLAUDE.md Rule #16: use ast.parse(), never regex.
+      </description>
+      <files>
+        <file>tests/v2/unit/orchestration/test_flow_observability_enforcement.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_flow_observability_enforcement.py</test>
+      </tests>
+      <acceptance>
+        Test discovers all 15 flow files, finds all @flow-decorated functions, and
+        asserts each contains a `with` context manager call. Test fails if any flow
+        is missing the wrapper.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 2: Prefect task hooks on ALL @task decorators                    -->
+  <!--   create_task_timing_hooks() exists but is unused.                     -->
+  <!--   This phase wires hooks into every @task across all flow files.       -->
+  <!-- ===================================================================== -->
+  <phase id="2" title="Prefect task hooks on ALL @task decorators">
+    <description>
+      The prefect_hooks.py module provides create_task_timing_hooks() which returns
+      (on_completion, on_failure) callables compatible with Prefect 3.x @task hooks.
+      Currently, ZERO @task decorators in any flow file use these hooks. There are
+      approximately 70 @task-decorated functions across 15 flow files.
+
+      Strategy: define module-level hook tuple in each flow file, then add
+      on_completion=[_on_complete] and on_failure=[_on_fail] to every @task decorator.
+      This gives per-task timing and failure logging across the entire pipeline.
+    </description>
+
+    <task id="2.1" title="Add task timing hooks to all @task decorators">
+      <description>
+        In each flow file that contains @task decorators:
+        1. Add import: from minivess.observability.prefect_hooks import create_task_timing_hooks
+        2. Add module-level: _on_complete, _on_fail = create_task_timing_hooks()
+        3. Modify every @task(...) to include on_completion=[_on_complete], on_failure=[_on_fail]
+
+        Example transformation:
+<![CDATA[
+        # Before:
+        @task(name="train-one-fold")
+        def train_one_fold_task(...):
+
+        # After:
+        @task(name="train-one-fold", on_completion=[_on_complete], on_failure=[_on_fail])
+        def train_one_fold_task(...):
+]]>
+        This affects all flow files with @task decorators: train_flow (~4 tasks),
+        analysis_flow (~12 tasks), biostatistics_flow (~15 tasks), data_flow (~12 tasks),
+        deploy_flow (~5 tasks), dashboard_flow (~5 tasks), hpo_flow (~1 task),
+        acquisition_flow (~6 tasks), drift_simulation_flow (~3 tasks),
+        annotation_flow (~2 tasks), post_training_flow (~1 task), qa_flow (~3 tasks),
+        pipeline_flow (~1 task), maintenance_flow (~1 task),
+        synthetic_generation_flow (~1 task).
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file>src/minivess/orchestration/flows/data_flow.py</file>
+        <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+        <file>src/minivess/orchestration/flows/acquisition_flow.py</file>
+        <file>src/minivess/orchestration/flows/drift_simulation_flow.py</file>
+        <file>src/minivess/orchestration/flows/annotation_flow.py</file>
+        <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+        <file>src/minivess/orchestration/flows/qa_flow.py</file>
+        <file>src/minivess/orchestration/flows/pipeline_flow.py</file>
+        <file>src/minivess/orchestration/flows/maintenance_flow.py</file>
+        <file>src/minivess/orchestration/flows/synthetic_generation_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_task_hooks_wiring.py</test>
+      </tests>
+      <acceptance>
+        Every @task decorator across all 15 flow files includes on_completion and
+        on_failure hook lists referencing create_task_timing_hooks() output.
+      </acceptance>
+    </task>
+
+    <task id="2.2" title="AST-based enforcement test: every @task has hooks">
+      <description>
+        Write a structural test using ast.parse() that scans all flow files and verifies
+        every @task decorator includes both on_completion and on_failure keyword arguments.
+        This prevents regression when new tasks are added.
+
+        The test should:
+        1. Glob all *_flow.py files under src/minivess/orchestration/flows/
+        2. Parse each with ast.parse()
+        3. Find all FunctionDef nodes decorated with @task
+        4. Assert each @task call has on_completion and on_failure keyword arguments
+        5. Report which task in which file is missing hooks
+      </description>
+      <files>
+        <file>tests/v2/unit/orchestration/test_task_hooks_enforcement.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_task_hooks_enforcement.py</test>
+      </tests>
+      <acceptance>
+        Test discovers all ~70 @task decorators across 15 files and asserts each has
+        both hook keyword arguments. Test fails if any @task is missing hooks.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 3: Trainer integration (epoch logging)                           -->
+  <!--   StructuredEventLogger.log_epoch_complete() exists but is never       -->
+  <!--   called from SegmentationTrainer's training loop.                     -->
+  <!-- ===================================================================== -->
+  <phase id="3" title="Trainer integration (epoch logging)">
+    <description>
+      The StructuredEventLogger has log_epoch_complete() which emits epoch_complete
+      JSONL events with train_loss, val_loss, val_dice, lr, ETA, gpu_util, and
+      vram_used. It also updates heartbeat.json for quick status checks. However,
+      SegmentationTrainer never calls it. This phase threads the event_logger from
+      the flow-level context manager into the trainer's epoch loop.
+    </description>
+
+    <task id="3.1" title="Thread StructuredEventLogger into SegmentationTrainer">
+      <description>
+        Modify SegmentationTrainer.__init__() to accept an optional event_logger
+        parameter of type StructuredEventLogger | None. Store it as self._event_logger.
+
+        In the epoch completion path (after validation metrics are computed), call:
+<![CDATA[
+        if self._event_logger is not None:
+            self._event_logger.log_epoch_complete(
+                epoch=epoch,
+                max_epochs=self.config.max_epochs,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                val_dice=val_dice,
+                lr=current_lr,
+                epoch_wall_s=epoch_duration,
+                gpu_util_pct=gpu_snapshot.get("gpu_util_pct", 0),
+                vram_used_mb=gpu_snapshot.get("gpu_memory_used_mb", 0),
+            )
+]]>
+        The gpu_snapshot comes from the existing gpu_heartbeat module's
+        _get_gpu_snapshot() function (graceful degradation if no GPU).
+
+        Also call log_training_start() at the beginning of the training loop and
+        log_training_end() after all folds complete.
+      </description>
+      <files>
+        <file>src/minivess/pipeline/trainer.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/pipeline/test_trainer_event_logging.py</test>
+      </tests>
+      <acceptance>
+        When SegmentationTrainer is constructed with an event_logger, each epoch
+        completion produces an epoch_complete event in events.jsonl. heartbeat.json
+        is updated with current epoch, loss, dice, and ETA. training_start and
+        training_end events bracket the training loop.
+      </acceptance>
+    </task>
+
+    <task id="3.2" title="Pass event_logger from train_flow to SegmentationTrainer">
+      <description>
+        In train_flow.py, the gpu_flow_observability_context yields an event_logger
+        (StructuredEventLogger). Pass this event_logger to SegmentationTrainer when
+        constructing it inside the flow body:
+<![CDATA[
+        with gpu_flow_observability_context(...) as event_logger:
+            trainer = SegmentationTrainer(
+                model=model,
+                config=config,
+                event_logger=event_logger,  # NEW
+                ...
+            )
+]]>
+        Similarly wire event_logger into hpo_flow.py where it constructs trainers
+        for HPO trials. post_training_flow and analysis_flow do not construct
+        trainers directly, so they do not need this wiring.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_train_flow_event_logger_passthrough.py</test>
+      </tests>
+      <acceptance>
+        Running train_flow produces epoch-level JSONL events alongside flow-level
+        events. The events.jsonl file contains training_start, epoch_complete (per
+        epoch), and training_end events interleaved with flow_start/flow_end events.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 4: Docker Compose modifications                                  -->
+  <!--   HEALTHCHECK directives for flow containers, LGTM stack (Loki +      -->
+  <!--   Grafana + Tempo + Mimir), DCGM exporter for GPU metrics, and        -->
+  <!--   OTel collector configuration for flow containers.                    -->
+  <!-- ===================================================================== -->
+  <phase id="4" title="Docker Compose modifications (HEALTHCHECK, LGTM, DCGM, OTEL)">
+    <description>
+      The infrastructure docker-compose.yml has OTel collector, Prometheus, and Grafana
+      but the flow docker-compose.flows.yml has no HEALTHCHECK directives on any flow
+      service. Additionally, there is no DCGM (NVIDIA Data Center GPU Manager) exporter
+      for hardware-level GPU metrics, and the OTel collector is not connected to the
+      flow containers via environment variables. This phase adds these missing pieces.
+    </description>
+
+    <task id="4.1" title="Add HEALTHCHECK to all flow services in docker-compose.flows.yml">
+      <description>
+        Add Docker HEALTHCHECK directives to each flow service in
+        docker-compose.flows.yml. The base Dockerfiles already have a HEALTHCHECK
+        that verifies the Python interpreter, but per-flow health checks should be
+        more specific.
+
+        For long-running services (dashboard-api, dashboard-ui, monai-label):
+<![CDATA[
+        healthcheck:
+          test: ["CMD-SHELL", "curl -sf http://localhost:${PORT}/health || exit 1"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 60s
+]]>
+        For batch flow services (train, data, biostatistics, etc.) that run to
+        completion and exit, use a heartbeat file check:
+<![CDATA[
+        healthcheck:
+          test: ["CMD-SHELL", "test -f /app/logs/heartbeat.json && python3 -c \"import json,sys,time; h=json.load(open('/app/logs/heartbeat.json')); age=time.time()-__import__('datetime').datetime.fromisoformat(h['timestamp']).timestamp(); sys.exit(0 if age<300 else 1)\""]
+          interval: 60s
+          timeout: 10s
+          retries: 5
+          start_period: 120s
+]]>
+        This leverages the heartbeat.json file that StructuredEventLogger.update_heartbeat()
+        writes. A heartbeat older than 300 seconds indicates a stalled flow.
+      </description>
+      <files>
+        <file>deployment/docker-compose.flows.yml</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_flow_compose_healthchecks.py</test>
+      </tests>
+      <acceptance>
+        Every service in docker-compose.flows.yml has a healthcheck directive.
+        The test parses the YAML and asserts all services have healthcheck keys
+        with test, interval, timeout, retries, and start_period fields.
+      </acceptance>
+    </task>
+
+    <task id="4.2" title="Add DCGM exporter and wire OTel endpoint into flow containers">
+      <description>
+        Two related infrastructure additions that connect flow containers to the
+        monitoring stack:
+
+        A) Add NVIDIA DCGM exporter as a service in the monitoring profile of
+        docker-compose.yml. DCGM provides hardware-level GPU metrics (temperature,
+        power draw, ECC errors, NVLink throughput, PCIe throughput) that pynvml-based
+        heartbeat monitoring cannot capture.
+<![CDATA[
+        dcgm-exporter:
+          image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.8-3.6.1-ubuntu22.04
+          container_name: minivess-dcgm-exporter
+          profiles: ["monitoring", "full"]
+          devices:
+            - "nvidia.com/gpu=all"
+          ports:
+            - "${DCGM_PORT:-9400}:9400"
+          restart: unless-stopped
+]]>
+        Also add a Prometheus scrape target in deployment/prometheus/prometheus.yml
+        for dcgm-exporter:9400/metrics.
+
+        B) Add OTEL_EXPORTER_OTLP_ENDPOINT to x-common-env in docker-compose.flows.yml
+        so that all flow containers can send traces to the OTel collector:
+<![CDATA[
+        OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://minivess-otel-collector:4317}
+        OTEL_SERVICE_NAME: ${FLOW_NAME:-minivess-unknown}
+]]>
+        This enables TelemetryProvider (telemetry.py) to connect to the OTel collector
+        without any code changes -- it reads the endpoint from environment. The
+        OTEL_SERVICE_NAME is set per-flow via the existing FLOW_NAME env var.
+
+        Add DCGM_PORT and OTEL_EXPORTER_OTLP_ENDPOINT to .env.example.
+      </description>
+      <files>
+        <file>deployment/docker-compose.yml</file>
+        <file>deployment/docker-compose.flows.yml</file>
+        <file>deployment/prometheus/prometheus.yml</file>
+        <file>.env.example</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_dcgm_and_otel_config.py</test>
+      </tests>
+      <acceptance>
+        docker-compose.yml monitoring profile includes dcgm-exporter service.
+        Prometheus config includes dcgm-exporter scrape target. x-common-env in
+        docker-compose.flows.yml includes OTEL_EXPORTER_OTLP_ENDPOINT and
+        OTEL_SERVICE_NAME. All flow containers inherit these via YAML anchor.
+        DCGM_PORT and OTEL_EXPORTER_OTLP_ENDPOINT are in .env.example.
+      </acceptance>
+    </task>
+
+    <task id="4.3" title="Add Grafana LGTM stack service definitions">
+      <description>
+        Add Loki (log aggregation), Tempo (distributed tracing), and Mimir (long-term
+        metrics) to docker-compose.yml under the monitoring profile. These complement
+        the existing Prometheus + Grafana services to form the full LGTM stack.
+
+        Loki receives structured logs from flow containers via the Docker log driver
+        (or a Promtail sidecar). Tempo receives OTel trace spans from the OTel
+        collector (already configured). Mimir provides long-term metric storage
+        behind Prometheus remote_write.
+<![CDATA[
+        loki:
+          image: grafana/loki:3.4.2
+          container_name: minivess-loki
+          profiles: ["monitoring", "full"]
+          ports:
+            - "${LOKI_PORT:-3100}:3100"
+          volumes:
+            - loki_data:/loki
+          command: -config.file=/etc/loki/local-config.yaml
+          restart: unless-stopped
+
+        tempo:
+          image: grafana/tempo:2.7.2
+          container_name: minivess-tempo
+          profiles: ["monitoring", "full"]
+          ports:
+            - "${TEMPO_PORT:-3200}:3200"
+          volumes:
+            - tempo_data:/tmp/tempo
+          command: -config.file=/etc/tempo/tempo.yaml
+          restart: unless-stopped
+]]>
+        Add Grafana datasource provisioning for Loki and Tempo in
+        deployment/grafana/provisioning/datasources/.
+
+        NOTE: Mimir is deferred to a future pass -- Prometheus local storage is
+        sufficient for the current scale (&lt;100 training runs).
+      </description>
+      <files>
+        <file>deployment/docker-compose.yml</file>
+        <file>deployment/grafana/provisioning/datasources/loki.yaml</file>
+        <file>deployment/grafana/provisioning/datasources/tempo.yaml</file>
+        <file>.env.example</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_lgtm_stack_config.py</test>
+      </tests>
+      <acceptance>
+        docker-compose.yml monitoring profile includes loki and tempo services.
+        Grafana datasource provisioning files exist for both. OTel collector config
+        (otel-collector-config.yml) exports traces to Tempo endpoint. LOKI_PORT
+        and TEMPO_PORT are in .env.example.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 5: Cross-wiring (stall detection, OTel dependency)              -->
+  <!--   Connect stall_detection.py to the monitoring/alerting pipeline.     -->
+  <!--   Wire TelemetryProvider into flow context managers.                   -->
+  <!-- ===================================================================== -->
+  <phase id="5" title="Cross-wiring (stall detection, OTel dependency)">
+    <description>
+      Two standalone observability modules need cross-wiring into the active pipeline:
+      1. stall_detection.py has detect_mlflow_metric_stall() but nothing calls it
+         during flow execution or monitoring checks.
+      2. TelemetryProvider (telemetry.py) creates OTel spans but is never instantiated
+         inside flow context managers -- flows cannot emit distributed traces.
+
+      This phase connects both into the existing observability infrastructure.
+    </description>
+
+    <task id="5.1" title="Integrate stall detection into dashboard health checks">
+      <description>
+        The dashboard_flow.py includes QA health checks (merged from qa_flow.py per
+        PR #567). Add stall detection as an additional health check that runs during
+        the dashboard flow:
+
+        1. Import detect_mlflow_metric_stall from stall_detection.py
+        2. Add a new @task "check-training-stall" that discovers active MLflow runs
+           (status == RUNNING) and calls detect_mlflow_metric_stall() for each
+        3. Wire the task into the dashboard flow's QA section
+        4. Emit Prometheus alert metric if any run is stale
+
+        Also integrate stall detection into the GpuHeartbeatMonitor as an optional
+        cross-check: if the heartbeat thread detects low GPU utilization AND MLflow
+        metrics are stale, emit a combined diagnostic event to events.jsonl with
+        both signals.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+        <file>src/minivess/observability/gpu_heartbeat.py</file>
+        <file>src/minivess/observability/stall_detection.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_stall_detection_integration.py</test>
+      </tests>
+      <acceptance>
+        Dashboard flow health check section includes stall detection for active runs.
+        GpuHeartbeatMonitor optionally cross-references MLflow metric staleness with
+        low GPU utilization. Combined diagnostic events appear in events.jsonl when
+        both conditions are met.
+      </acceptance>
+    </task>
+
+    <task id="5.2" title="Wire TelemetryProvider into flow observability context">
+      <description>
+        Modify flow_observability_context and gpu_flow_observability_context in
+        flow_observability.py to optionally create a TelemetryProvider and wrap the
+        flow body in an OTel span:
+
+        1. Check if OTEL_EXPORTER_OTLP_ENDPOINT is set in the environment
+        2. If set, instantiate TelemetryProvider with the endpoint
+        3. Wrap the flow body in a span named "flow/{flow_name}"
+        4. Add flow_name, status, and duration as span attributes
+        5. If OTEL_EXPORTER_OTLP_ENDPOINT is not set, skip OTel (graceful degradation)
+
+        This means flows automatically emit OTel traces when the LGTM stack is active
+        (docker compose --profile monitoring) and silently skip when it is not (local
+        dev). No code changes needed in individual flow files.
+      </description>
+      <files>
+        <file>src/minivess/observability/flow_observability.py</file>
+        <file>src/minivess/observability/telemetry.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_flow_otel_integration.py</test>
+      </tests>
+      <acceptance>
+        When OTEL_EXPORTER_OTLP_ENDPOINT is set, flow context managers create OTel
+        spans with flow name, status, and duration attributes. When not set, no OTel
+        code is executed (no import errors, no connection attempts). The opentelemetry
+        packages are optional dependencies -- ImportError is caught gracefully.
+      </acceptance>
+    </task>
+
+    <task id="5.3" title="Add OTel span context to Prefect task hooks">
+      <description>
+        Extend create_task_timing_hooks() in prefect_hooks.py to optionally create
+        child OTel spans for each task:
+
+        1. Accept an optional TelemetryProvider parameter
+        2. If provided, each on_completion/on_failure hook creates a child span with
+           task_name, duration, and status attributes
+        3. If not provided, hooks behave as before (logger only)
+
+        Wire this through the flow context managers: when OTel is active, pass the
+        TelemetryProvider to create_task_timing_hooks() so that task spans nest
+        under the parent flow span.
+      </description>
+      <files>
+        <file>src/minivess/observability/prefect_hooks.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_task_hooks_otel.py</test>
+      </tests>
+      <acceptance>
+        When OTel is active, each @task execution produces a child span under the
+        flow span. Span hierarchy: flow/train -&gt; task/train-one-fold -&gt; task/log-fold-results.
+        When OTel is inactive, no spans are created and hooks log to Python logger only.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 6: Verification (staging tests, docker demo, behavioral tests)  -->
+  <!--   Comprehensive verification of all wiring from Phases 1-5.           -->
+  <!-- ===================================================================== -->
+  <phase id="6" title="Verification (staging tests, docker demo, behavioral tests)">
+    <description>
+      Final verification phase ensuring all observability wiring from Phases 1-5
+      works end-to-end. Includes staging-tier tests (no model loading, no Docker),
+      a Docker Compose integration demo script, and behavioral tests that verify
+      the complete observability pipeline produces the expected artifacts.
+    </description>
+
+    <task id="6.1" title="Staging-tier test suite for all observability wiring">
+      <description>
+        Run make test-staging and verify:
+        1. All new enforcement tests pass (flow context wiring, task hooks)
+        2. All existing observability tests still pass
+        3. Zero new test skips introduced
+        4. Zero ruff or mypy errors in modified files
+
+        Fix any failures discovered. Per CLAUDE.md Rule #23: gather ALL failures
+        first (--maxfail=200), categorize by root cause, fix in batches.
+      </description>
+      <files>
+        <file>tests/v2/unit/orchestration/test_flow_observability_enforcement.py</file>
+        <file>tests/v2/unit/orchestration/test_task_hooks_enforcement.py</file>
+        <file>tests/v2/unit/orchestration/test_gpu_flow_observability_wiring.py</file>
+        <file>tests/v2/unit/orchestration/test_cpu_flow_observability_wiring.py</file>
+        <file>tests/v2/unit/orchestration/test_task_hooks_wiring.py</file>
+        <file>tests/v2/unit/observability/test_stall_detection_integration.py</file>
+        <file>tests/v2/unit/observability/test_flow_otel_integration.py</file>
+        <file>tests/v2/unit/observability/test_task_hooks_otel.py</file>
+        <file>tests/v2/unit/deployment/test_flow_compose_healthchecks.py</file>
+        <file>tests/v2/unit/deployment/test_dcgm_and_otel_config.py</file>
+        <file>tests/v2/unit/deployment/test_lgtm_stack_config.py</file>
+      </files>
+      <tests>
+        <test>make test-staging</test>
+      </tests>
+      <acceptance>
+        make test-staging passes with 0 failures, 0 new skips. ruff check and mypy
+        report no errors in modified files.
+      </acceptance>
+    </task>
+
+    <task id="6.2" title="Docker Compose integration demo">
+      <description>
+        Create a demo script (scripts/demo_observability.sh) that:
+        1. Starts the monitoring profile: docker compose --profile monitoring up -d
+        2. Runs the biostatistics flow (CPU, lightweight, fast)
+        3. Verifies events.jsonl contains flow_start and flow_end events
+        4. Verifies heartbeat.json exists and has recent timestamp
+        5. Checks Grafana datasources include Loki and Tempo
+        6. Checks Prometheus targets include dcgm-exporter (if GPU available)
+        7. Tears down the stack
+
+        This script is a manual verification tool, not a CI test. It validates the
+        Docker Compose wiring end-to-end in the real container environment.
+      </description>
+      <files>
+        <file>scripts/demo_observability.sh</file>
+      </files>
+      <tests>
+        <test>Manual: run scripts/demo_observability.sh and verify output</test>
+      </tests>
+      <acceptance>
+        Script completes without errors on a machine with Docker and the monitoring
+        profile services. events.jsonl and heartbeat.json contain expected data.
+        Grafana is reachable and shows Loki/Tempo datasources.
+      </acceptance>
+    </task>
+
+    <task id="6.3" title="Behavioral tests: end-to-end observability artifact verification">
+      <description>
+        Write behavioral tests that verify the full observability pipeline produces
+        correct artifacts. These tests use MINIVESS_ALLOW_HOST=1 escape hatch (no
+        Docker required) and mock MLflow:
+
+        1. test_flow_produces_jsonl_events: Run a minimal flow variant and assert
+           events.jsonl contains flow_start, task_end (for each task), and flow_end
+           events in chronological order.
+        2. test_gpu_flow_writes_heartbeat: Run a GPU flow variant (mocked CUDA) and
+           assert heartbeat.json is written with expected keys.
+        3. test_epoch_events_in_training: Run SegmentationTrainer with event_logger
+           and assert epoch_complete events appear with correct fields (epoch,
+           max_epochs, train_loss, val_loss, val_dice, lr, epoch_wall_s, eta_s).
+        4. test_stale_run_detected: Create a mock MLflow run with old timestamps
+           and assert detect_mlflow_metric_stall() returns stale=True.
+        5. test_otel_graceful_degradation: Unset OTEL_EXPORTER_OTLP_ENDPOINT and
+           verify flow completes without OTel errors.
+      </description>
+      <files>
+        <file>tests/v2/unit/observability/test_observability_behavioral.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_observability_behavioral.py</test>
+      </tests>
+      <acceptance>
+        All 5 behavioral tests pass in staging tier. No model loading, no Docker,
+        no cloud credentials required. Tests verify the shape and content of
+        observability artifacts, not just that code runs without errors.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- SUMMARY                                                                -->
+  <!-- ===================================================================== -->
+  <summary>
+    <total_phases>6</total_phases>
+    <total_tasks>16</total_tasks>
+    <estimated_test_count>11 new test files, ~55 test functions</estimated_test_count>
+    <modified_files>
+      <category name="Flow files (15)">
+        src/minivess/orchestration/flows/train_flow.py,
+        src/minivess/orchestration/flows/hpo_flow.py,
+        src/minivess/orchestration/flows/post_training_flow.py,
+        src/minivess/orchestration/flows/analysis_flow.py,
+        src/minivess/orchestration/flows/acquisition_flow.py,
+        src/minivess/orchestration/flows/data_flow.py,
+        src/minivess/orchestration/flows/deploy_flow.py,
+        src/minivess/orchestration/flows/dashboard_flow.py,
+        src/minivess/orchestration/flows/biostatistics_flow.py,
+        src/minivess/orchestration/flows/annotation_flow.py,
+        src/minivess/orchestration/flows/drift_simulation_flow.py,
+        src/minivess/orchestration/flows/synthetic_generation_flow.py,
+        src/minivess/orchestration/flows/qa_flow.py,
+        src/minivess/orchestration/flows/maintenance_flow.py,
+        src/minivess/orchestration/flows/pipeline_flow.py
+      </category>
+      <category name="Observability modules (4)">
+        src/minivess/observability/flow_observability.py,
+        src/minivess/observability/prefect_hooks.py,
+        src/minivess/observability/gpu_heartbeat.py,
+        src/minivess/observability/telemetry.py
+      </category>
+      <category name="Pipeline (1)">
+        src/minivess/pipeline/trainer.py
+      </category>
+      <category name="Docker Compose (2)">
+        deployment/docker-compose.yml,
+        deployment/docker-compose.flows.yml
+      </category>
+      <category name="Config (3)">
+        .env.example,
+        deployment/prometheus/prometheus.yml,
+        deployment/grafana/provisioning/datasources/loki.yaml,
+        deployment/grafana/provisioning/datasources/tempo.yaml
+      </category>
+    </modified_files>
+    <key_risks>
+      <risk severity="medium">
+        Phase 1 indentation changes in 15 flow files may cause merge conflicts with
+        concurrent feature branches. Recommend merging early.
+      </risk>
+      <risk severity="low">
+        DCGM exporter (Phase 4.2) requires NVIDIA GPU on the Docker host. Graceful
+        skip when GPU is absent, but Prometheus scrape target will show as DOWN.
+      </risk>
+      <risk severity="low">
+        OTel dependency (Phase 5) adds opentelemetry-* packages. These are already
+        optional extras in pyproject.toml. ImportError is handled gracefully.
+      </risk>
+    </key_risks>
+  </summary>
+
+</plan>
