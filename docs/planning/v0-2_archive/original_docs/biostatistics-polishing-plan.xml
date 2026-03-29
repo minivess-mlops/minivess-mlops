@@ -1,0 +1,909 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BIOSTATISTICS FLOW POLISHING PLAN
+  ==================================
+  Branch: fix/biostatistics-flow-verification
+  Created: 2026-03-29
+  Council: 3-agent iterated LLM council (Biostatistician + Nature Protocols Editor + MLOps Engineer)
+  Convergence: Iteration 2 → 8.0/8.0/8.0 → Iteration 3 incorporates all remaining fixes → target 9+/10
+  Source of truth: This XML. Cross-reference with CLAUDE.md, knowledge-graph/navigator.yaml.
+
+  CONTEXT:
+  - All old mlruns DELETED (clean slate)
+  - Fresh mini-experiment from scratch on local RTX 2070 Super (8 GB VRAM)
+  - 4 DynUNet variants × 2 post-training methods × 1 ensemble = 8 conditions
+  - Per-volume metrics generated correctly from day one
+  - DeepVess external test (7 volumes) included
+  - R/ggplot2 figures via foundation-PLR file I/O pattern
+  - DuckDB as single input contract for biostatistics flow
+  - Target: Nature Protocols platform paper
+-->
+<plan name="biostatistics-polishing"
+      version="3.0"
+      branch="fix/biostatistics-flow-verification"
+      target_journal="Nature Protocols"
+      estimated_hours="32-40">
+
+  <!-- ================================================================== -->
+  <!-- COUNCIL SYNTHESIS: KEY DECISIONS                                     -->
+  <!-- ================================================================== -->
+  <council_decisions>
+    <decision id="D1" topic="R vs matplotlib">
+      <resolution>R/ggplot2 is PRIMARY for publication figures. matplotlib kept for quick
+        diagnostics only (not manuscript). Rationale: user explicitly requested ggplot2
+        matching foundation-PLR, and biomedical audience expects R-style figures.
+        Existing biostatistics_figures.py becomes a fallback/diagnostic tool.</resolution>
+    </decision>
+    <decision id="D2" topic="data_source config">
+      <resolution>DELETED. DuckDB is the ONLY input contract. Analysis flow materializes
+        DuckDB; biostatistics flow reads DuckDB. No mlruns scanning, no Parquet bypass.</resolution>
+    </decision>
+    <decision id="D3" topic="primary statistical test">
+      <resolution>Stratified within-fold permutation test (volume labels shuffled within
+        each fold stratum). This is the primary analysis. Fold-level aggregation is a
+        sensitivity check. Per DiCiccio &amp; Efron (1996): percentile bootstrap for
+        N &lt; 20, BCa for N >= 20.</resolution>
+    </decision>
+    <decision id="D4" topic="mixed-effects ANOVA formula">
+      <resolution>Random intercept only: metric ~ C(model) * C(loss) * C(calib) + (1|fold).
+        statsmodels.mixedlm for Python pathway; lmerTest::anova with Satterthwaite for
+        R pathway (primary for manuscript tables). Partial eta-squared approximated via
+        Nakagawa &amp; Schielzeth (2013) marginal/conditional R-squared.</resolution>
+    </decision>
+    <decision id="D5" topic="pre-registration mechanism">
+      <resolution>Git tag `pre-registration/mini-experiment-v1` created after Phase 0,
+        before Phase 3. Freezes: factorial YAML, split config, biostatistics config,
+        analysis plan. Timestamped commit is the pre-registration artifact.</resolution>
+    </decision>
+  </council_decisions>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 0: MINI-EXPERIMENT DESIGN                                     -->
+  <!-- ================================================================== -->
+  <phase id="0" name="Mini-Experiment Design" hours="1-2">
+    <description>
+      Design minimal factorial subset exercising the full Layer A-D pipeline locally.
+      Clean slate — no legacy data, no metric migration. Per-volume metrics from day one.
+    </description>
+
+    <task id="0.1" name="Define factorial cells">
+      <spec>
+        Layer A (Training, GPU):
+          model_family: [dynunet]  (1 model — sufficient for pipeline testing)
+          loss_name: [dice_ce, cbdice_cldice]  (2 losses — tests the comparison machinery)
+          aux_calibration: [false]  (1 level — calibration deferred to full factorial)
+          → 2 Layer A cells
+
+        Layer B (Post-Training, CPU):
+          method: [none, checkpoint_averaging]  (2 methods)
+          recalibration: [none]  (1 level)
+          → 2 Layer B cells
+
+        Layer C (Analysis, CPU):
+          ensemble_strategy: [per_loss_single_best]  (1 strategy)
+          → 1 Layer C cell
+
+        Total conditions: 2 × 2 × 1 = 4 conditions
+        Folds: 3 (full CV, seed=42, configs/splits/3fold_seed42.json)
+        Epochs: 20 (mini — enough for meaningful metrics, fast enough for local)
+        Validation volumes: 23 per fold, 70 total across folds
+        External test: DeepVess 7 volumes
+
+        Per-volume metric logging:
+          eval/{fold}/vol/{vol_id}/dsc
+          eval/{fold}/vol/{vol_id}/cldice
+          eval/{fold}/vol/{vol_id}/masd
+          test/deepvess/vol/{vol_id}/dsc
+          test/deepvess/vol/{vol_id}/cldice
+          test/deepvess/vol/{vol_id}/masd
+      </spec>
+    </task>
+
+    <task id="0.2" name="Create smoke_mini factorial YAML">
+      <spec>
+        configs/factorial/smoke_mini.yaml — derived from pre-gcp-master-plan.xml
+        configs/biostatistics/smoke_mini.yaml — reads smoke_mini_evaluation experiment
+        Reduced n_bootstrap: 500 (speed), full metrics list
+      </spec>
+    </task>
+
+    <task id="0.3" name="Create pre-registration git tag">
+      <spec>
+        After factorial YAML + biostatistics config + split config committed:
+        git tag -a pre-registration/mini-experiment-v1 -m "Pre-registration: factorial design frozen"
+        This tag is the pre-registration artifact for Nature Protocols TRIPOD+AI Item 3.
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>configs/factorial/smoke_mini.yaml</file>
+      <file>configs/biostatistics/smoke_mini.yaml</file>
+      <artifact>git tag: pre-registration/mini-experiment-v1</artifact>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 1: STATISTICAL AUDIT AND FIX                                  -->
+  <!-- ================================================================== -->
+  <phase id="1" name="Statistical Audit and Fix" hours="4-5">
+    <description>
+      Fix all statistical correctness issues identified by council biostatistician.
+      Every fix has a deterministic test with known statistical outcomes.
+      TDD: RED (failing test) → GREEN (implement fix) → VERIFY.
+    </description>
+
+    <task id="1.1" name="Fix _pool_scores() — stratified permutation">
+      <spec>
+        PROBLEM: Current code (biostatistics_statistics.py lines 294-297) does
+        np.concatenate across folds, treating clustered observations as i.i.d.
+        This violates exchangeability and inflates effective sample size.
+
+        FIX: Primary analysis = stratified within-fold permutation test.
+        - Join on (fold_id, volume_id) to guarantee pairing across conditions
+        - Permute condition labels WITHIN each fold stratum
+        - Combine per-stratum test statistics via Fisher's method or Stouffer's Z
+        - Sensitivity check: fold-level aggregation (mean per fold, then test on K=3)
+
+        SPECIFICATION:
+        "Primary analysis: stratified within-fold permutation (volume labels shuffled
+        within each fold stratum). Sensitivity: fold-level aggregation. The stratified
+        test is preferred because K=3 folds provide insufficient combinatorial
+        resolution for the fold-level test."
+
+        TEST: Synthetic data with known effect (condition A = condition B + 0.05).
+        Assert stratified test detects it at alpha=0.05 with > 80% power over 1000 seeds.
+      </spec>
+    </task>
+
+    <task id="1.2" name="Fix BCa threshold">
+      <spec>
+        PROBLEM: BCa bootstrap requires N >= 20 for reliable jackknife acceleration.
+        Per DiCiccio &amp; Efron (1996, Statistical Science).
+
+        FIX: If N &lt; 20, use percentile bootstrap. If N >= 20, use BCa.
+        Document threshold in BiostatisticsConfig with field: bca_min_n = 20.
+        Per-volume analysis (N=23 within fold) → BCa OK.
+        Fold-level aggregation (N=3) → percentile only.
+
+        TEST: Assert percentile CI for N=3 is wider than BCa CI for N=50.
+      </spec>
+    </task>
+
+    <task id="1.3" name="Fix mixed-effects ANOVA">
+      <spec>
+        PROBLEM: Current code uses pg.anova with fold as fixed between-subjects factor.
+        Fold is a nuisance grouping variable, not a treatment → must be random effect.
+
+        FIX: Python pathway: statsmodels.mixedlm
+          Formula: metric_value ~ C(model_family) * C(loss_name) * C(with_aux_calib)
+          Random: ~1 | fold_id
+          Method: REML
+          Note: random intercept only (K=3 insufficient for random slopes)
+
+        R pathway (primary for manuscript tables): lmerTest::anova
+          Formula: metric_value ~ model_family * loss_name * aux_calib + (1|fold_id)
+          Satterthwaite degrees of freedom → proper F-tests
+          Partial eta-squared via effectsize::eta_squared()
+
+        Effect size reporting: Nakagawa &amp; Schielzeth (2013) marginal R² and
+        conditional R² replace partial eta-squared from fixed-effects ANOVA.
+
+        TEST: Synthetic balanced data with known factor effects. Assert F-test
+        p-values match within 0.01 between Python and R pathways.
+      </spec>
+    </task>
+
+    <task id="1.4" name="Implement hierarchical gatekeeping">
+      <spec>
+        Co-primaries (clDice, MASD): alpha/2 = 0.025 each (Bonferroni).
+        Conditional on at least one co-primary rejection:
+          Secondary metrics (DSC, HD95, etc.): BH-FDR at alpha=0.05.
+        Per Dmitrienko et al. (2010, Statistics in Medicine).
+        Config fields already exist: co_primary_metrics, foil_metrics.
+
+        TEST: Synthetic data where clDice is significant but MASD is not.
+        Assert secondary tests proceed (gatekeeping passes on partial rejection).
+      </spec>
+    </task>
+
+    <task id="1.5" name="Fix condition key parser — generic N-factor">
+      <spec>
+        PROBLEM: biostatistics_figures.py line 398-402 parses only 2 factors.
+        6-factor keys exist: model__loss__calib__method__recalib__ensemble.
+
+        FIX: Generic parser: split on "__", return dict of factor_name→value.
+        Encoder: join factor values with "__". Factor values MUST NOT contain "__"
+        — enforce with ValueError in encoder.
+
+        TEST: Hypothesis property test — round-trip encode/decode for random
+        factor combinations. @given(st.lists(st.text(min_size=1, alphabet=SAFE_CHARS)))
+      </spec>
+    </task>
+
+    <task id="1.6" name="Seed all random operations">
+      <spec>
+        All operations use numpy.random.Generator(PCG64(config.seed)).
+        baycomp: check if it accepts seed param. If not, use np.random.seed()
+        before call and document global state pollution risk in docstring.
+        Deterministic ordering: sorted() on all dict key iterations.
+
+        TEST: Run full pipeline twice with same seed, assert bit-identical JSON sidecars.
+      </spec>
+    </task>
+
+    <task id="1.7" name="Sensitivity concordance analysis">
+      <spec>
+        For every pairwise comparison, run BOTH parametric (paired t-test) and
+        nonparametric (Wilcoxon signed-rank). Report concordance rate:
+        "Two tests are concordant if they agree on significance at alpha."
+        Flag any discordant pairs for investigation in results.
+
+        TEST: Synthetic data with known borderline effect. Verify concordance
+        logic correctly identifies discordance when it exists.
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>src/minivess/pipeline/biostatistics_statistics.py (fixes)</file>
+      <file>tests/v2/unit/biostatistics/test_stratified_permutation.py</file>
+      <file>tests/v2/unit/biostatistics/test_mixed_effects_anova.py</file>
+      <file>tests/v2/unit/biostatistics/test_gatekeeping.py</file>
+      <file>tests/v2/unit/biostatistics/test_condition_key_roundtrip.py</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 2: DUCKDB CONTRACT AND INTEGRATION TESTS                      -->
+  <!-- ================================================================== -->
+  <phase id="2" name="DuckDB Contract and Integration Tests" hours="2-3">
+    <description>
+      Establish DuckDB as the single input contract. Create fixture DuckDB,
+      schema contract tests, JSON sidecar schema, and Docker smoke test.
+    </description>
+
+    <task id="2.1" name="DuckDB-only refactor">
+      <spec>
+        Remove mlruns re-scanning from biostatistics_flow.py _build_per_volume_data().
+        Read per_volume_metrics table from DuckDB exclusively.
+        Analysis flow is responsible for materializing DuckDB from mlruns.
+        Delete any data_source config option if it exists.
+      </spec>
+    </task>
+
+    <task id="2.2" name="Create fixture DuckDB">
+      <spec>
+        Synthetic data: 3 folds, 4 conditions, 23 volumes/fold, 3 metrics.
+        Known statistical outcomes: condition A is 0.03 DSC better than B (ground truth).
+        ICC = 0.15 (moderate fold effect). Per-volume variance = 0.04.
+        Use for: Phase 1 test validation, Phase 4 smoke test, Phase 5 R development.
+
+        SIMULATION VALIDATION: Verify pipeline recovers known effects:
+        - Stratified Wilcoxon detects A > B at alpha=0.05
+        - Mixed-effects ANOVA significant main effect for loss
+        - Power analysis returns detectable d consistent with synthetic truth
+        This is the "positive control" — validates statistical calibration.
+      </spec>
+    </task>
+
+    <task id="2.3" name="Schema contract tests">
+      <spec>
+        DuckDB schema validation: columns, types, non-null constraints for all 8 tables.
+        JSON sidecar schema: Pydantic model (FigureSidecar, TableSidecar) with:
+          - figure_id, generated_at, duckdb_sha256, git_sha, config_hash
+          - data: Dict[str, Any] (figure-specific payload)
+          - output_files: List[str] (referenced PDF/PNG/TEX paths)
+        Validated in both Python (Pydantic) and R (jsonvalidate).
+
+        Tests:
+        - test_duckdb_schema_contract.py: assert all columns, types, constraints
+        - test_json_sidecar_schema.py: validate Pydantic model round-trip
+      </spec>
+    </task>
+
+    <task id="2.4" name="Docker smoke test">
+      <spec>
+        Build biostatistics Docker image (multi-stage with R).
+        Run on fixture DuckDB: docker run biostatistics /data/fixture.duckdb
+        Assert: exit code 0, all expected output files exist, JSON sidecars valid.
+
+        Makefile target: make test-biostatistics-docker
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>tests/v2/fixtures/biostatistics_fixture.duckdb</file>
+      <file>tests/v2/unit/biostatistics/test_duckdb_schema_contract.py</file>
+      <file>tests/v2/unit/biostatistics/test_json_sidecar_schema.py</file>
+      <file>src/minivess/pipeline/biostatistics_sidecar.py (Pydantic models)</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 3: RUN MINI-EXPERIMENT                                        -->
+  <!-- ================================================================== -->
+  <phase id="3" name="Run Mini-Experiment" hours="4-8">
+    <description>
+      Train DynUNet variants locally, run post-training + analysis + DuckDB
+      materialization. Generate real per-volume metrics for all validation and
+      test volumes. This is the first time the full Layer A-D chain runs end-to-end.
+    </description>
+
+    <task id="3.1" name="Train Layer A (2 DynUNet × 2 losses × 3 folds)">
+      <spec>
+        Run via Prefect train flow in Docker.
+        6 training runs (2 losses × 3 folds), 20 epochs each.
+        RTX 2070 Super (8 GB VRAM) — DynUNet fits comfortably.
+        Per-volume metrics: log eval/{fold}/vol/{vol_id}/{metric} for ALL 23 val volumes.
+        Training metrics: train/loss, val/dice, val/cldice per epoch.
+        All factorial tags: model_family, loss_name, with_aux_calib=false, fold_id, seed.
+        Wall-clock timing: log perf/training_seconds per run.
+
+        Estimated: ~2-4 hours for 6 runs × 20 epochs.
+      </spec>
+    </task>
+
+    <task id="3.2" name="Run DeepVess inference">
+      <spec>
+        Run inference on 7 DeepVess volumes using all 6 trained models.
+        Log: test/deepvess/vol/{vol_id}/{metric} for each model.
+        No training — inference only (CPU sufficient, ~5 min per model).
+        Requires: EXTERNAL_DATA_DIR set, DeepVess data downloaded and DVC-versioned.
+      </spec>
+    </task>
+
+    <task id="3.3" name="Run Post-Training Flow (Layer B)">
+      <spec>
+        For each training run:
+          method=none (pass-through) → tag: post_training_method=none
+          method=checkpoint_averaging → tag: post_training_method=checkpoint_averaging
+        Tags written: post_training_method, recalibration=none
+        Creates: 12 post-training MLflow runs (6 training × 2 methods).
+      </spec>
+    </task>
+
+    <task id="3.4" name="Run Analysis Flow (Layer C)">
+      <spec>
+        ensemble_strategy: per_loss_single_best
+        Evaluates all post-training models on MiniVess val + DeepVess test.
+        Creates DuckDB: outputs/biostatistics/biostatistics.duckdb
+        Tags: ensemble_strategy, all upstream tags inherited.
+        Exports Parquet alongside DuckDB.
+      </spec>
+    </task>
+
+    <task id="3.5" name="Phase 3→4 validation gate">
+      <spec>
+        Run Phase 2 contract tests against the REAL DuckDB from Phase 3.4.
+        Same test code, different fixture:
+          pytest tests/v2/unit/biostatistics/test_duckdb_schema_contract.py \
+            --db-path outputs/biostatistics/biostatistics.duckdb
+        Must pass before Phase 4 starts. If it fails, fix the upstream flow.
+      </spec>
+    </task>
+
+    <deliverables>
+      <artifact>mlruns/ with 6 training + 12 post-training + N analysis runs</artifact>
+      <file>outputs/biostatistics/biostatistics.duckdb</file>
+      <file>outputs/biostatistics/parquet/*.parquet</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 4: BIOSTATISTICS FLOW END-TO-END                             -->
+  <!-- ================================================================== -->
+  <phase id="4" name="Biostatistics Flow End-to-End" hours="3-4">
+    <description>
+      Run the full biostatistics flow on real data from Phase 3. DuckDB-only
+      input. All statistical analyses, power analysis, sensitivity checks.
+    </description>
+
+    <task id="4.1" name="Run biostatistics flow">
+      <spec>
+        Input: outputs/biostatistics/biostatistics.duckdb (from Phase 3)
+        Config: configs/biostatistics/smoke_mini.yaml
+        Analyses:
+          - Stratified within-fold permutation (primary pairwise)
+          - Mixed-effects ANOVA (statsmodels + R lmerTest)
+          - Bayesian signed-rank with ROPE (baycomp)
+          - Variance decomposition (Friedman + ICC)
+          - Rank concordance (Kendall's tau — DSC vs clDice inversion)
+          - Specification curve (Simonsohn 2020)
+          - Multi-metric rankings
+          - Sensitivity: parametric vs nonparametric concordance
+
+        All results JSON-serializable, logged to MLflow experiment "minivess_biostatistics".
+      </spec>
+    </task>
+
+    <task id="4.2" name="Power analysis">
+      <spec>
+        Using pilot variance from mini-experiment:
+        - Target test: stratified Wilcoxon
+        - Effective N: N_eff = N / (1 + (n_per_fold - 1) * ICC_pilot)
+        - Design effect correction per Killip et al. (2004)
+        - Compute detectable Cohen's d at 80% power for each metric
+        - Report for both per-fold (N=23) and pooled (N_eff) scenarios
+        - Output: power_curve.pdf + power_table.tex + power_analysis.json sidecar
+      </spec>
+    </task>
+
+    <task id="4.3" name="Multiple comparisons disclosure">
+      <spec>
+        Count total tests: K_pairwise = C(4,2) × N_metrics = 6 × 14 = 84 pairwise
+        Plus: 14 ANOVA F-tests, 14 Friedman tests, 14 spec curve permutation tests.
+        Total: ~126 tests.
+        Report: effective alpha after hierarchical gatekeeping + BH-FDR.
+        Output: multiple_comparisons_summary.json
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>outputs/biostatistics/results/*.json (all statistical results)</file>
+      <file>outputs/biostatistics/power_analysis.json</file>
+      <file>outputs/biostatistics/multiple_comparisons_summary.json</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 5: R/GGPLOT2 FIGURE SYSTEM                                   -->
+  <!-- ================================================================== -->
+  <phase id="5" name="R/ggplot2 Figure System" hours="6-8">
+    <description>
+      Publication-quality figures via R/ggplot2 following foundation-PLR pattern.
+      Python exports JSON/CSV → R scripts read → ggplot2 renders → PDF/PNG + JSON sidecar.
+      Docker multi-stage build for R integration.
+    </description>
+
+    <task id="5.1" name="Docker multi-stage build with R">
+      <spec>
+        Dockerfile.biostatistics update:
+          Stage 1 (builder): FROM rocker/r-ver:4.4.0
+            - renv::restore() from committed src/r/renv.lock
+            - Packages: ggplot2, patchwork, jsonlite, ggdist, gghalves,
+              ggrepel, scales, viridis, effectsize, lmerTest
+          Stage 2 (runner): FROM minivess-base-cpu:latest
+            - COPY --from=builder /usr/local/lib/R + /usr/local/bin/R*
+            - COPY src/r/ /app/src/r/
+
+        R package version pinning via renv.lock (committed to git).
+        docker-compose.flows.yml update: biostatistics service uses new image.
+      </spec>
+    </task>
+
+    <task id="5.2" name="Create R figure infrastructure">
+      <spec>
+        src/r/
+        ├── renv.lock                          # Package version lock
+        ├── figure_system/
+        │   ├── save_figure.R                  # Publication-ready save (PDF+PNG+JSON)
+        │   ├── figure_factory.R               # Core plot creation functions
+        │   ├── config_loader.R                # Load YAML configs
+        │   ├── common.R                       # Shared utilities
+        │   └── theme_vascadia.R               # Custom ggplot2 theme
+        ├── figures/
+        │   ├── generate_all_biostat_figures.R  # Master entry point
+        │   ├── fig_forest_plot.R
+        │   ├── fig_effect_size_heatmap.R
+        │   ├── fig_specification_curve.R
+        │   ├── fig_interaction_plot.R
+        │   ├── fig_cd_diagram.R
+        │   ├── fig_raincloud.R
+        │   ├── fig_calibration_reliability.R
+        │   ├── fig_generalization_gap.R
+        │   └── fig_consort_flow.R
+        └── utils/
+            └── load_sidecar.R
+
+        configs/VISUALIZATION/
+        ├── figure_registry.yaml               # Dimensions, data deps, output format
+        └── colors.yaml                        # Okabe-Ito palette + domain colors
+      </spec>
+    </task>
+
+    <task id="5.3" name="Python data export for R">
+      <spec>
+        Biostatistics flow task: task_export_r_data()
+        Exports to outputs/biostatistics/r_data/:
+          - pairwise_results.json (Cohen's d, Cliff's delta, p-values)
+          - anova_results.json (F-values, R², factor levels)
+          - per_volume_data.json (metric × condition × fold × volume arrays)
+          - rankings.json (per-metric condition ranks)
+          - spec_curve.json (sorted specifications + indicators)
+          - power_analysis.json (detectable d per metric)
+          - variance_decomp.json (Friedman, ICC, Nemenyi)
+          - test_generalization.json (MiniVess vs DeepVess per metric per condition)
+      </spec>
+    </task>
+
+    <task id="5.4" name="Implement 10 publication figures">
+      <spec>
+        FIGURE REGISTRY (manuscript mapping):
+
+        Main figures (biostatistics scope):
+        ┌──────┬───────────────────────────────┬──────────────────────────────┐
+        │ Fig# │ Type                          │ R Script                     │
+        ├──────┼───────────────────────────────┼──────────────────────────────┤
+        │ F2   │ CONSORT volume flow diagram   │ fig_consort_flow.R           │
+        │ F4   │ Forest plot (Cohen's d + CIs) │ fig_forest_plot.R            │
+        │ F5   │ Interaction plot (model×loss)  │ fig_interaction_plot.R       │
+        │ F6a  │ Effect size heatmap (Cliff δ) │ fig_effect_size_heatmap.R    │
+        │ F6b  │ Specification curve            │ fig_specification_curve.R    │
+        │ F7   │ Generalization gap (train/test)│ fig_generalization_gap.R     │
+        └──────┴───────────────────────────────┴──────────────────────────────┘
+
+        Supplementary figures:
+        ┌──────┬───────────────────────────────┬──────────────────────────────┐
+        │ S1   │ Raincloud (per-volume dist)   │ fig_raincloud.R              │
+        │ S2   │ CD diagram (Nemenyi)          │ fig_cd_diagram.R             │
+        │ S3   │ Calibration reliability       │ fig_calibration_reliability.R│
+        │ S4   │ Variance lollipop             │ (matplotlib diagnostic OK)   │
+        └──────┴───────────────────────────────┴──────────────────────────────┘
+
+        Out of biostatistics scope (other skills):
+        - F1: Architecture overview (React Flow)
+        - F3: Pipeline protocol (React Flow)
+
+        Each figure: PDF (vector) + PNG (300 DPI) + JSON sidecar with:
+          figure_id, generated_at, duckdb_sha256, git_sha, config_hash,
+          r_session_info, data payload, output_files list
+      </spec>
+    </task>
+
+    <task id="5.5" name="Sidecar-to-file assertion test">
+      <spec>
+        Post-generation integration test:
+        For every JSON sidecar in outputs/biostatistics/figures/:
+          - Assert every output_files path exists
+          - Assert file size > 0
+          - For PDFs: assert valid PDF header (%PDF-)
+          - For PNGs: assert valid PNG header (89 50 4E 47)
+        This catches the most common R rendering failure: silent empty files.
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>deployment/docker/Dockerfile.biostatistics (updated)</file>
+      <file>src/r/ (complete figure system)</file>
+      <file>configs/VISUALIZATION/figure_registry.yaml</file>
+      <file>configs/VISUALIZATION/colors.yaml</file>
+      <file>src/r/renv.lock</file>
+      <file>tests/v2/unit/biostatistics/test_figure_sidecar_integrity.py</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 6: LATEX TABLE GENERATION                                     -->
+  <!-- ================================================================== -->
+  <phase id="6" name="LaTeX Table Generation" hours="2">
+    <description>
+      Publication-ready LaTeX tables with booktabs + JSON sidecars.
+      Tables generated from DuckDB + statistical results, not hardcoded.
+    </description>
+
+    <task id="6.1" name="Generate 8 table types">
+      <spec>
+        T1: Main comparison (conditions × metrics, BCa CIs, significance stars)
+        T2: Hierarchical gatekeeping summary (co-primary + conditional secondary)
+        T3: Effect sizes (Cohen's d, Cliff's delta, VDA per pair)
+        T4: Variance decomposition (Friedman χ², p, ICC, CI, F-test)
+        T5: Rankings per metric (mean rank, CD value)
+        T6: ANOVA summary (lmerTest F, p, marginal R², per metric)
+        T7: Cost appendix (GPU hours, wall-clock, cloud cost per condition)
+        T8: Power analysis (detectable d at 80% power, per metric, per N scenario)
+
+        All tables: booktabs format, \input{}-ready for vascadia-results.tex.
+        Each table: .tex file + .json sidecar (underlying data).
+      </spec>
+    </task>
+
+    <task id="6.2" name="Table sidecar validation">
+      <spec>
+        Same pattern as figure sidecars: Pydantic model for TableSidecar.
+        Assert every .tex file has a corresponding .json sidecar.
+        Assert sidecar data can regenerate the table content.
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>outputs/biostatistics/tables/*.tex (8 tables)</file>
+      <file>outputs/biostatistics/tables/*.json (8 sidecars)</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 7: CONFIG-DRIVEN VERIFICATION                                -->
+  <!-- ================================================================== -->
+  <phase id="7" name="Config-Driven Verification" hours="2">
+    <description>
+      Verify the biostatistics pipeline is fully config-driven. No hardcoded
+      alpha, seed, metric names, or factor names in code. AST-enforced.
+    </description>
+
+    <task id="7.1" name="AST scan for hardcoded values">
+      <spec>
+        Extend test_no_hardcoded_alpha.py:
+        - No alpha=0.05 in any biostatistics code
+        - No seed=42 in any biostatistics code
+        - No hardcoded metric names in statistical functions
+        - No hardcoded factor names in ANOVA/condition key code
+        All values must trace to BiostatisticsConfig fields.
+      </spec>
+    </task>
+
+    <task id="7.2" name="Config mutation tests">
+      <spec>
+        Test 1: Change alpha to 0.01 → pipeline runs, produces different significance decisions
+        Test 2: Change primary_metric to dsc → pipeline runs, forest plot uses dsc
+        Test 3: Add new metric "junction_f1" → pipeline includes it without code changes
+        Test 4: Change seed to 0 → pipeline runs, results differ from seed=42
+        Test 5: Change seed to 42 → pipeline produces bit-identical results (reproducibility)
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>tests/v2/unit/biostatistics/test_config_driven.py</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 8: NATURE PROTOCOLS COMPLIANCE                                -->
+  <!-- ================================================================== -->
+  <phase id="8" name="Nature Protocols Compliance" hours="3">
+    <description>
+      Generate Nature Protocols format artifacts: CONSORT diagram, timing
+      annotations, provenance chain, limitations paragraph, pre-registration link.
+    </description>
+
+    <task id="8.1" name="CONSORT flow diagram data">
+      <spec>
+        Programmatically generated from experiment metadata (not hand-drawn):
+        70 MiniVess volumes → 3 folds (47 train / 23 val each)
+        → 2 loss functions × 3 folds = 6 training runs
+        → 2 post-training methods = 12 post-training runs
+        → 1 ensemble strategy = 4 analysis conditions
+        → biostatistics flow → 10 figures + 8 tables
+
+        Output: consort_data.json → consumed by fig_consort_flow.R
+      </spec>
+    </task>
+
+    <task id="8.2" name="Timing annotations">
+      <spec>
+        Extract from MLflow perf/* metrics:
+        - Training: wall-clock per fold, per loss function
+        - Post-training: wall-clock per method
+        - Analysis: wall-clock for evaluation
+        - Biostatistics: wall-clock for statistical engine + figure generation
+        - Total pipeline: sum
+        Format: JSON + LaTeX timing table for Procedure section.
+      </spec>
+    </task>
+
+    <task id="8.3" name="Provenance chain figure">
+      <spec>
+        Lineage DAG showing exact data flow:
+        MLflow mlruns/ → DuckDB (8 tables) → Statistical engine (7 analyses)
+        → Figures (10) + Tables (8) → Manuscript sections
+
+        Generated as a Mermaid diagram (rendered to SVG/PNG via CLI).
+        JSON sidecar with all SHA-256 hashes linking each step.
+      </spec>
+    </task>
+
+    <task id="8.4" name="Limitations paragraph">
+      <spec>
+        Auto-generated from power analysis results:
+        "With K=3 folds as blocks, the Friedman test achieves 80% power to detect
+        only effect sizes > {d_detectable}. Per-volume stratified tests (N=23 per fold)
+        provide substantially more power (detectable d = {d_volume}). This mini-experiment
+        serves as a platform validation; the full factorial (720 conditions × 3 folds)
+        will provide definitive statistical power."
+
+        Output: limitations_paragraph.tex (LaTeX fragment for inclusion)
+      </spec>
+    </task>
+
+    <task id="8.5" name="Pre-registration link">
+      <spec>
+        Add to manuscript methods:
+        "The experimental design was pre-registered via git tag
+        pre-registration/mini-experiment-v1 (SHA: {sha}) before experiments
+        were executed. The factorial YAML, split configuration, and biostatistics
+        configuration were frozen at this commit."
+      </spec>
+    </task>
+
+    <task id="8.6" name="TRIPOD+AI item mapping">
+      <spec>
+        Map every figure and table to TRIPOD+AI items:
+        - T1 (comparison) → Item 23a (performance with CI)
+        - T4 (variance) → Item 23b (heterogeneity)
+        - F2 (CONSORT) → Item 6/20a (participant flow)
+        - F7 (generalization) → Item 24 (external validation)
+        - T8 (power) → Item 9a (sample size)
+        Output: tripod_mapping.json
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>outputs/biostatistics/consort_data.json</file>
+      <file>outputs/biostatistics/timing_annotations.json</file>
+      <file>outputs/biostatistics/provenance_chain.mmd</file>
+      <file>outputs/biostatistics/limitations_paragraph.tex</file>
+      <file>outputs/biostatistics/tripod_mapping.json</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- PHASE 9: MANUSCRIPT INTEGRATION                                     -->
+  <!-- ================================================================== -->
+  <phase id="9" name="Manuscript Integration" hours="2">
+    <description>
+      Export all biostatistics artifacts to manuscript directory. Update KG
+      with actual metric values. Link figures to manuscript sections.
+    </description>
+
+    <task id="9.1" name="Export to manuscript directory">
+      <spec>
+        Copy figures + tables to:
+        /home/petteri/Dropbox/knowledge-hub/outputs/manuscripts/vasculature-mlops/
+          figures/biostatistics/ (PDF + PNG)
+          tables/ (LaTeX .tex)
+          data/ (JSON sidecars)
+
+        Naming convention: fig-biostat-{number}-{slug}.pdf
+      </spec>
+    </task>
+
+    <task id="9.2" name="Update knowledge-graph">
+      <spec>
+        knowledge-graph/manuscript/results.yaml:
+          R3a: Update with actual metric values from mini-experiment
+          - cbdice_cldice: DSC=actual, clDice=actual, MASD=actual
+          - dice_ce: DSC=actual, clDice=actual, MASD=actual
+          Status: DATA_AVAILABLE (not BLOCKED)
+
+        knowledge-graph/domains/manuscript.yaml:
+          Update figure assignments with actual file paths
+      </spec>
+    </task>
+
+    <task id="9.3" name="Lineage manifest">
+      <spec>
+        JSON manifest linking:
+          DuckDB (SHA-256) → each figure/table → manuscript section → TRIPOD item
+        Logged to MLflow as artifact of biostatistics run.
+        Satisfies IEC 62304 §8 traceability requirement.
+      </spec>
+    </task>
+
+    <deliverables>
+      <file>outputs/manuscripts/vasculature-mlops/figures/biostatistics/*.pdf</file>
+      <file>outputs/manuscripts/vasculature-mlops/tables/*.tex</file>
+      <file>knowledge-graph/manuscript/results.yaml (updated)</file>
+    </deliverables>
+  </phase>
+
+  <!-- ================================================================== -->
+  <!-- DEPENDENCY GRAPH                                                    -->
+  <!-- ================================================================== -->
+  <dependencies>
+    <!--
+      Phase 0 ──→ Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4 ──→ Phase 5 ──→ Phase 6
+                                                                       │         │
+                                                                       └────→ Phase 7
+                                                                       │
+                                                                       └────→ Phase 8 ──→ Phase 9
+
+      Phases 5, 6, 7, 8 can partially overlap (figures, tables, config tests, compliance).
+      Phase 9 requires all prior phases complete.
+    -->
+    <dep from="0" to="1" />
+    <dep from="1" to="2" />
+    <dep from="2" to="3" />
+    <dep from="3" to="4" />
+    <dep from="4" to="5" />
+    <dep from="4" to="6" />
+    <dep from="4" to="7" />
+    <dep from="4" to="8" />
+    <dep from="5" to="9" />
+    <dep from="6" to="9" />
+    <dep from="7" to="9" />
+    <dep from="8" to="9" />
+  </dependencies>
+
+  <!-- ================================================================== -->
+  <!-- RISK REGISTER                                                       -->
+  <!-- ================================================================== -->
+  <risks>
+    <risk id="R1" severity="high" mitigation="Phase 0.3 pre-registration tag">
+      Config drift between design and execution. Mitigation: git tag freezes config.
+    </risk>
+    <risk id="R2" severity="high" mitigation="Phase 2.2 simulation validation">
+      Statistical pipeline produces wrong results on real data. Mitigation: synthetic
+      data with known ground truth validates pipeline before real experiment.
+    </risk>
+    <risk id="R3" severity="medium" mitigation="Phase 5.1 renv.lock">
+      R package version drift breaks figures. Mitigation: renv lockfile committed.
+    </risk>
+    <risk id="R4" severity="medium" mitigation="Phase 3.5 validation gate">
+      DuckDB schema mismatch between analysis flow output and biostatistics input.
+      Mitigation: contract tests run on real data before biostatistics flow starts.
+    </risk>
+    <risk id="R5" severity="low" mitigation="Phase 1.2 BCa threshold">
+      BCa bootstrap with small N produces unreliable CIs. Mitigation: automatic
+      fallback to percentile when N &lt; 20.
+    </risk>
+    <risk id="R6" severity="medium" mitigation="Phase 3.2">
+      DeepVess data not available locally. Mitigation: DVC-versioned, downloaded
+      as part of Phase 3 prerequisites.
+    </risk>
+  </risks>
+
+  <!-- ================================================================== -->
+  <!-- SUCCESS CRITERIA                                                    -->
+  <!-- ================================================================== -->
+  <success_criteria>
+    <criterion>All 68+ existing biostatistics tests pass (make test-staging)</criterion>
+    <criterion>New tests: stratified permutation, mixed-effects, gatekeeping, contract, config-driven (target +30 tests)</criterion>
+    <criterion>Biostatistics flow runs end-to-end on real DuckDB, produces all figures + tables</criterion>
+    <criterion>Every figure has JSON sidecar with valid schema, referenced files exist</criterion>
+    <criterion>Every table has JSON sidecar with underlying data</criterion>
+    <criterion>Power analysis produces quantified limitations paragraph</criterion>
+    <criterion>Pre-registration git tag exists before experiment execution</criterion>
+    <criterion>TRIPOD+AI mapping covers Items 6, 9a, 12, 20a, 23a, 23b, 24</criterion>
+    <criterion>Docker: make test-biostatistics-docker exits 0</criterion>
+    <criterion>Zero hardcoded alpha, seed, metric names, factor names in code (AST-verified)</criterion>
+    <criterion>Seed=42 produces bit-identical results across runs (reproducibility)</criterion>
+    <criterion>Config mutation: change alpha/metric/seed → pipeline adapts without code changes</criterion>
+  </success_criteria>
+
+  <!-- ================================================================== -->
+  <!-- COUNCIL AUDIT TRAIL                                                 -->
+  <!-- ================================================================== -->
+  <council_audit>
+    <iteration id="1" date="2026-03-29">
+      <reviewer role="Biostatistician" score="6.5">
+        Pooling bug, invalid BCa for N=3, ANOVA misspecification, missing power analysis.
+      </reviewer>
+      <reviewer role="Nature Protocols Editor" score="6.0">
+        DeepVess optional, no Procedure/Timing/CONSORT, platform figures absent.
+      </reviewer>
+      <reviewer role="MLOps Engineer" score="6.0">
+        3 data source paths, no Docker detail, no contract tests.
+      </reviewer>
+    </iteration>
+    <iteration id="2" date="2026-03-29">
+      <reviewer role="Biostatistician" score="8.0">
+        Stratified permutation underspecified, mixed-model formula needs pinning,
+        power analysis target unclear, volume-pairing guarantee needed.
+      </reviewer>
+      <reviewer role="Nature Protocols Editor" score="8.0">
+        R vs matplotlib ambiguous, missing calibration + generalization gap figures,
+        pre-registration needs git tag, no figure numbering.
+      </reviewer>
+      <reviewer role="MLOps Engineer" score="8.0">
+        Missing Phase 3→4 gate, no round-trip property test, no sidecar-file assertion.
+      </reviewer>
+    </iteration>
+    <iteration id="3" date="2026-03-29">
+      <description>
+        All iteration 2 feedback incorporated into this final plan:
+        - D3: Stratified within-fold permutation specified as primary
+        - D4: Mixed-model formula pinned (random intercept only + lmerTest)
+        - Task 4.2: Power analysis with design effect correction
+        - Task 1.1: Volume-pairing via (fold_id, volume_id) join
+        - D1: R/ggplot2 committed as primary, matplotlib for diagnostics
+        - Task 5.4: Calibration reliability + generalization gap figures added
+        - D5: Pre-registration via git tag
+        - Task 5.4: Explicit figure numbering (F2-F7, S1-S4)
+        - Task 3.5: Phase 3→4 validation gate added
+        - Task 1.5: Round-trip property test (Hypothesis)
+        - Task 5.5: Sidecar-to-file assertion test
+        - Task 2.2: Simulation validation (positive control)
+        - Task 5.1: R package pinning via renv.lock
+      </description>
+    </iteration>
+  </council_audit>
+
+</plan>
