@@ -62,9 +62,51 @@ decisions:
   observability_depth:
     status: resolved
     winner: full_stack_otel
-    rationale: "Prometheus + Grafana + MLflow + Langfuse full stack"
-    implementation: [deployment/docker-compose.yml]
+    rationale: "Prometheus + Grafana LGTM + MLflow + Langfuse + DCGM Exporter + OTel Collector"
+    implementation: [deployment/docker-compose.yml, deployment/docker-compose.flows.yml]
     prd_node: knowledge-graph/decisions/L2-architecture/observability_depth.yaml
+
+  flow_observability_wiring:
+    status: resolved
+    winner: context_manager_pattern
+    rationale: "All 15 flows wrapped in flow_observability_context / gpu_flow_observability_context.
+      GPU flows get CUDA guard + heartbeat. All flows get JSONL events + Prefect task hooks.
+      AST-enforced: test_flow_observability_enforcement.py verifies every @flow body has `with`."
+    implementation:
+      - src/minivess/observability/flow_observability.py
+      - src/minivess/observability/gpu_heartbeat.py
+      - src/minivess/observability/prefect_hooks.py
+      - src/minivess/observability/structured_logging.py
+    last_reviewed: "2026-03-30"
+
+  docker_healthcheck:
+    status: resolved
+    winner: heartbeat_and_events_staleness
+    rationale: "GPU flows: heartbeat.json staleness. CPU flows: events.jsonl staleness.
+      10/10 flow services have HEALTHCHECK in docker-compose.flows.yml."
+    implementation:
+      - scripts/healthcheck_training.py
+      - scripts/healthcheck_cpu.py
+      - deployment/docker-compose.flows.yml
+
+  gpu_monitoring:
+    status: resolved
+    winner: dcgm_exporter_plus_pynvml
+    rationale: "DCGM Exporter for hardware metrics (Prometheus at :9400).
+      pynvml for application-level heartbeat (GpuHeartbeatMonitor).
+      Grafana LGTM for unified dashboard."
+    implementation:
+      - src/minivess/observability/gpu_heartbeat.py
+      - deployment/docker-compose.yml (dcgm-exporter service)
+
+  stall_detection:
+    status: resolved
+    winner: combined_heartbeat_mlflow
+    rationale: "Low GPU util AND stale MLflow metrics = strong stall signal.
+      GpuHeartbeatMonitor.set_mlflow_run_id() enables cross-check."
+    implementation:
+      - src/minivess/observability/stall_detection.py
+      - src/minivess/observability/gpu_heartbeat.py
 
   agent_architecture:
     status: resolved

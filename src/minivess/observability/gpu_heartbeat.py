@@ -87,6 +87,15 @@ class GpuHeartbeatMonitor:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._low_util_start: float | None = None
+        self._mlflow_run_id: str | None = None
+
+    def set_mlflow_run_id(self, run_id: str) -> None:
+        """Set MLflow run ID for stall detection cross-check.
+
+        Called after the MLflow run is created inside the flow body.
+        Enables combined stall detection: low GPU util AND stale MLflow metrics.
+        """
+        self._mlflow_run_id = run_id
 
     def __enter__(self) -> GpuHeartbeatMonitor:
         self._output_dir.mkdir(parents=True, exist_ok=True)
@@ -114,7 +123,25 @@ class GpuHeartbeatMonitor:
             snapshot = _get_gpu_snapshot()
             self._write_heartbeat(snapshot)
             self._check_low_utilization(snapshot)
+            self._check_mlflow_stall()
             self._stop_event.wait(self._check_interval_s)
+
+    def _check_mlflow_stall(self) -> None:
+        """Check MLflow metric staleness if run_id is set."""
+        if self._mlflow_run_id is None:
+            return
+        try:
+            from minivess.observability.stall_detection import detect_mlflow_metric_stall
+
+            result = detect_mlflow_metric_stall(self._mlflow_run_id)
+            if result.stale:
+                logger.error(
+                    "MLflow stall detected: %s (run %s)",
+                    result.message,
+                    self._mlflow_run_id[:8],
+                )
+        except Exception:
+            pass  # Stall detection is best-effort
 
     def _write_heartbeat(self, snapshot: dict[str, Any]) -> None:
         """Write heartbeat.json with current GPU metrics."""
