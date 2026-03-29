@@ -54,8 +54,11 @@ from minivess.pipeline.resume_discovery import (
     find_completed_config,
     load_fold_result_from_mlflow,
 )
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 def log_epoch0_cost_estimate(
@@ -288,7 +291,7 @@ class TrainingFlowResult:
 # ---------------------------------------------------------------------------
 
 
-@task(name="check-resume-state")
+@task(name="check-resume-state", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_resume_state_task(checkpoint_dir: Path) -> dict[str, Any] | None:
     """Check for epoch_latest.yaml to determine if this is a resumed run.
 
@@ -360,7 +363,7 @@ def check_resume_state_task(checkpoint_dir: Path) -> dict[str, Any] | None:
     return None
 
 
-@task(name="load-fold-splits")
+@task(name="load-fold-splits", on_completion=[_on_complete], on_failure=[_on_fail])
 def load_fold_splits_task(splits_dir: Path) -> list[dict[str, Any]]:
     """Load fold splits from SPLITS_DIR/splits.json.
 
@@ -416,7 +419,7 @@ def resolve_patch_size(model_family: str, config: dict[str, Any] | None = None) 
     return default_patch
 
 
-@task(name="train-one-fold")
+@task(name="train-one-fold", on_completion=[_on_complete], on_failure=[_on_fail])
 def train_one_fold_task(
     fold_id: int,
     fold_split: dict[str, Any],
@@ -746,7 +749,7 @@ def train_one_fold_task(
         return fit_result
 
 
-@task(name="log-fold-results")
+@task(name="log-fold-results", on_completion=[_on_complete], on_failure=[_on_fail])
 def log_fold_results_task(
     fold_id: int,
     result: dict[str, Any],

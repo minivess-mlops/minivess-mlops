@@ -35,10 +35,14 @@ if TYPE_CHECKING:
         PipelineDashboardSection,
     )
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="collect-data-section")
+
+@task(name="collect-data-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_data_section_task(
     n_volumes: int,
     quality_gate_passed: bool,
@@ -71,7 +75,7 @@ def collect_data_section_task(
     )
 
 
-@task(name="collect-config-section")
+@task(name="collect-config-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_config_section_task(
     environment: str,
     experiment_config: str,
@@ -113,7 +117,7 @@ def collect_config_section_task(
     )
 
 
-@task(name="collect-model-section")
+@task(name="collect-model-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_model_section_task(
     architecture_name: str,
     param_count: int,
@@ -135,7 +139,7 @@ def collect_model_section_task(
     )
 
 
-@task(name="collect-pipeline-section")
+@task(name="collect-pipeline-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_pipeline_section_task(
     flow_results: dict[str, str],
     last_data_version: str,
@@ -155,7 +159,7 @@ def collect_pipeline_section_task(
     )
 
 
-@task(name="collect-drift-section")
+@task(name="collect-drift-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_drift_section_task(
     *,
     tracking_uri: str,

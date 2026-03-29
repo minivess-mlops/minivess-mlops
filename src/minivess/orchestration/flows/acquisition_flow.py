@@ -26,7 +26,11 @@ from minivess.orchestration.constants import FLOW_NAME_ACQUISITION
 from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +38,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@task(name="check-dataset-status")
+@task(name="check-dataset-status", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_dataset_status_task(
     dataset_name: str,
     output_dir: Path,
@@ -59,7 +63,7 @@ def check_dataset_status_task(
     return status
 
 
-@task(name="download-dataset")
+@task(name="download-dataset", on_completion=[_on_complete], on_failure=[_on_fail])
 def download_dataset_task(
     dataset_name: str,
     output_dir: Path,
@@ -96,7 +100,7 @@ def download_dataset_task(
         return DatasetAcquisitionStatus.FAILED
 
 
-@task(name="convert-formats")
+@task(name="convert-formats", on_completion=[_on_complete], on_failure=[_on_fail])
 def convert_formats_task(
     dataset_name: str,
     input_dir: Path,
@@ -139,7 +143,7 @@ def convert_formats_task(
     )
 
 
-@task(name="log-acquisition-provenance")
+@task(name="log-acquisition-provenance", on_completion=[_on_complete], on_failure=[_on_fail])
 def log_acquisition_provenance_task(
     datasets_acquired: dict[str, DatasetAcquisitionStatus],
     total_volumes: int,
@@ -169,7 +173,7 @@ def log_acquisition_provenance_task(
     return provenance
 
 
-@task(name="dvc-commit-datasets")
+@task(name="dvc-commit-datasets", on_completion=[_on_complete], on_failure=[_on_fail])
 def dvc_commit_datasets_task(
     data_dir: Path,
     datasets_acquired: list[str],
@@ -230,7 +234,7 @@ def dvc_commit_datasets_task(
     return tag
 
 
-@task(name="print-manual-instructions")
+@task(name="print-manual-instructions", on_completion=[_on_complete], on_failure=[_on_fail])
 def print_manual_instructions_task(
     manual_datasets: list[str],
 ) -> dict[str, str]:

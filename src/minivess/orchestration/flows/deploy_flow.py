@@ -40,7 +40,11 @@ from minivess.orchestration.mlflow_helpers import (
 if TYPE_CHECKING:
     from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +96,7 @@ class DeployResult:
 # ---------------------------------------------------------------------------
 
 
-@task(name="discover-champions")
+@task(name="discover-champions", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_task(
     config: DeployConfig,
     experiment_id: str,
@@ -110,7 +114,7 @@ def discover_task(
     return champions
 
 
-@task(name="export-onnx")
+@task(name="export-onnx", on_completion=[_on_complete], on_failure=[_on_fail])
 def export_task(
     champion: ChampionModel,
     output_dir: Path,
@@ -129,7 +133,7 @@ def export_task(
     return onnx_path
 
 
-@task(name="import-bento")
+@task(name="import-bento", on_completion=[_on_complete], on_failure=[_on_fail])
 def import_task(
     champion: ChampionModel,
     onnx_path: Path,
@@ -143,7 +147,7 @@ def import_task(
     return result.tag
 
 
-@task(name="generate-artifacts")
+@task(name="generate-artifacts", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_artifacts_task(
     champions: list[ChampionModel],
     bento_tags: dict[str, str],
@@ -174,7 +178,7 @@ def generate_artifacts_task(
     return output_dir
 
 
-@task(name="promote-model")
+@task(name="promote-model", on_completion=[_on_complete], on_failure=[_on_fail])
 def promote_task(
     champion: ChampionModel,
 ) -> bool:

@@ -44,7 +44,11 @@ from minivess.pipeline.post_training_plugin import (
     PostTrainingPlugin,
 )
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 def resolve_checkpoint_paths_from_contract(
@@ -174,7 +178,7 @@ def _plugin_config_dict(config: PostTrainingConfig, plugin_name: str) -> dict[st
     return dict(sub_config.model_dump())
 
 
-@task(name="run-post-training-plugin")
+@task(name="run-post-training-plugin", on_completion=[_on_complete], on_failure=[_on_fail])
 def run_plugin_task(
     plugin: PostTrainingPlugin,
     plugin_input: PluginInput,

@@ -25,10 +25,14 @@ from minivess.orchestration.constants import FLOW_NAME_SYNTHETIC_GENERATION
 from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="generate-synthetic-volumes")
+
+@task(name="generate-synthetic-volumes", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_volumes_task(
     method: str,
     n_volumes: int,

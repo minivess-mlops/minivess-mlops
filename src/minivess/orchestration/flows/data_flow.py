@@ -36,7 +36,11 @@ if TYPE_CHECKING:
     from minivess.data.splits import FoldSplit
     from minivess.validation.gates import GateResult
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ class DataFlowResult:
 # ---------------------------------------------------------------------------
 
 
-@task(name="serialize-splits")
+@task(name="serialize-splits", on_completion=[_on_complete], on_failure=[_on_fail])
 def serialize_splits_task(splits: list[FoldSplit], splits_dir: Path) -> Path:
     """Serialize FoldSplit list to JSON at splits_dir/splits.json.
 
@@ -137,7 +141,7 @@ def serialize_splits_task(splits: list[FoldSplit], splits_dir: Path) -> Path:
     return splits_path
 
 
-@task(name="dvc-pull")
+@task(name="dvc-pull", on_completion=[_on_complete], on_failure=[_on_fail])
 def dvc_pull_task(
     data_dir: Path,
     *,
@@ -176,7 +180,7 @@ def dvc_pull_task(
     return rev_result.stdout.strip()
 
 
-@task(name="discover-data")
+@task(name="discover-data", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_data_task(data_dir: Path) -> list[dict[str, str]]:
     """Discover image/label pairs from a data directory.
 
@@ -198,7 +202,7 @@ def discover_data_task(data_dir: Path) -> list[dict[str, str]]:
     return pairs
 
 
-@task(name="validate-data")
+@task(name="validate-data", on_completion=[_on_complete], on_failure=[_on_fail])
 def validate_data_task(
     pairs: list[dict[str, str]],
 ) -> DataValidationReport:
@@ -242,7 +246,7 @@ def validate_data_task(
     return report
 
 
-@task(name="extract-nifti-metadata")
+@task(name="extract-nifti-metadata", on_completion=[_on_complete], on_failure=[_on_fail])
 def extract_nifti_metadata_task(
     pairs: list[dict[str, str]],
 ) -> pd.DataFrame:
@@ -330,7 +334,7 @@ def extract_nifti_metadata_task(
     return pd.DataFrame(rows, columns=columns)
 
 
-@task(name="pandera-validation-gate")
+@task(name="pandera-validation-gate", on_completion=[_on_complete], on_failure=[_on_fail])
 def pandera_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     """Run Pandera NiftiMetadataSchema validation.
 
@@ -348,7 +352,7 @@ def pandera_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     return validate_nifti_metadata(metadata_df)
 
 
-@task(name="ge-validation-gate")
+@task(name="ge-validation-gate", on_completion=[_on_complete], on_failure=[_on_fail])
 def ge_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     """Run Great Expectations nifti_metadata_suite validation.
 
@@ -366,7 +370,7 @@ def ge_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     return validate_nifti_batch(metadata_df)
 
 
-@task(name="datacare-validation-gate")
+@task(name="datacare-validation-gate", on_completion=[_on_complete], on_failure=[_on_fail])
 def datacare_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     """Run DATA-CARE quality assessment on NIfTI metadata.
 
@@ -385,7 +389,7 @@ def datacare_gate_task(metadata_df: pd.DataFrame) -> GateResult:
     return quality_gate(report)
 
 
-@task(name="deepchecks-validation-gate")
+@task(name="deepchecks-validation-gate", on_completion=[_on_complete], on_failure=[_on_fail])
 def deepchecks_gate_task(
     pairs: list[dict[str, str]],
     *,
@@ -444,7 +448,7 @@ def deepchecks_gate_task(
     )
 
 
-@task(name="data-quality-gate")
+@task(name="data-quality-gate", on_completion=[_on_complete], on_failure=[_on_fail])
 def data_quality_gate(report: DataValidationReport) -> bool:
     """Check whether data passes quality gate.
 
@@ -467,7 +471,7 @@ def data_quality_gate(report: DataValidationReport) -> bool:
     return True
 
 
-@task(name="validate-external-data")
+@task(name="validate-external-data", on_completion=[_on_complete], on_failure=[_on_fail])
 def validate_external_data_task(
     dataset_name: str,
     data_dir: Path,
@@ -499,7 +503,7 @@ def validate_external_data_task(
     return pairs
 
 
-@task(name="split-data")
+@task(name="split-data", on_completion=[_on_complete], on_failure=[_on_fail])
 def split_data_task(
     pairs: list[dict[str, str]],
     n_folds: int,
@@ -529,7 +533,7 @@ def split_data_task(
     return result
 
 
-@task(name="log-data-provenance")
+@task(name="log-data-provenance", on_completion=[_on_complete], on_failure=[_on_fail])
 def log_data_provenance_task(
     n_volumes: int,
     n_folds: int,
@@ -570,7 +574,7 @@ class DriftDetectionResult:
     triage_recommendation: dict[str, Any] | None = None
 
 
-@task(name="drift-detection")
+@task(name="drift-detection", on_completion=[_on_complete], on_failure=[_on_fail])
 def drift_detection_task(
     *,
     reference_features: pd.DataFrame,
@@ -622,7 +626,7 @@ def drift_detection_task(
     )
 
 
-@task(name="triage-drift")
+@task(name="triage-drift", on_completion=[_on_complete], on_failure=[_on_fail])
 def triage_drift(
     drift_score: float,
     feature_drift_scores: dict[str, float],

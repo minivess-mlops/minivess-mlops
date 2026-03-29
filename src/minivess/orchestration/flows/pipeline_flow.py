@@ -47,8 +47,11 @@ from minivess.orchestration.constants import (
 )
 from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 @dataclass(frozen=True)
@@ -97,7 +100,7 @@ _PIPELINE_STEPS: list[tuple[str, bool]] = [
 ]
 
 
-@task(name="run-pipeline-step")
+@task(name="run-pipeline-step", on_completion=[_on_complete], on_failure=[_on_fail])
 def run_pipeline_step(
     deployment_name: str,
     trigger_source: str,

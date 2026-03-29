@@ -30,10 +30,14 @@ from minivess.orchestration.constants import FLOW_NAME_DRIFT_SIMULATION
 from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="extract-reference-features")
+
+@task(name="extract-reference-features", on_completion=[_on_complete], on_failure=[_on_fail])
 def extract_reference_features_task(
     reference_volumes: list[np.ndarray],
 ) -> dict[str, Any]:
@@ -58,7 +62,7 @@ def extract_reference_features_task(
     }
 
 
-@task(name="run-batch-drift-detection")
+@task(name="run-batch-drift-detection", on_completion=[_on_complete], on_failure=[_on_fail])
 def run_batch_drift_task(
     batch_volumes: list[np.ndarray],
     reference_features: dict[str, Any],
@@ -105,7 +109,7 @@ def run_batch_drift_task(
     }
 
 
-@task(name="save-drift-summary")
+@task(name="save-drift-summary", on_completion=[_on_complete], on_failure=[_on_fail])
 def save_drift_summary_task(
     batch_results: list[dict[str, Any]],
     output_dir: str,

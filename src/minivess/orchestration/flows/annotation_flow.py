@@ -26,7 +26,11 @@ if TYPE_CHECKING:
     from minivess.serving.api_models import SegmentationResponse
     from minivess.serving.inference_client import InferenceClient
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 @dataclass
@@ -110,7 +114,7 @@ def _compute_dice(
     return float(2.0 * intersection / total)
 
 
-@task(name="run-inference")
+@task(name="run-inference", on_completion=[_on_complete], on_failure=[_on_fail])
 def inference_task(
     volume: NDArray[np.float32],
     config: AnnotationFlowConfig,
@@ -127,7 +131,7 @@ def inference_task(
     return client.predict(request)
 
 
-@task(name="record-annotation")
+@task(name="record-annotation", on_completion=[_on_complete], on_failure=[_on_fail])
 def record_annotation_task(
     volume_id: str,
     response: SegmentationResponse,

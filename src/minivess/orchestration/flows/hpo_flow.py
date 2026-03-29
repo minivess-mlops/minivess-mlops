@@ -30,7 +30,11 @@ from minivess.orchestration.docker_guard import require_docker_context
 if TYPE_CHECKING:
     from prefect.client.schemas.objects import FlowRun
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 # Suppress Optuna's INFO logs unless debugging — they're verbose
@@ -50,7 +54,7 @@ _DEFAULT_SEARCH_SPACE: dict[str, dict[str, Any]] = {
 _TRAINING_DEPLOYMENT = f"{FLOW_NAME_TRAIN}/default"
 
 
-@task(name="run-hpo-trial")
+@task(name="run-hpo-trial", on_completion=[_on_complete], on_failure=[_on_fail])
 def run_trial_task(
     trial_number: int,
     params: dict[str, Any],

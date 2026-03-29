@@ -68,7 +68,11 @@ if TYPE_CHECKING:
     from minivess.data.test_datasets import HierarchicalDataLoaderDict
     from minivess.pipeline.evaluation_runner import EvaluationResult
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 def _validate_analysis_env() -> None:
@@ -401,7 +405,7 @@ def _run_mlflow_eval_safe(
 # ---------------------------------------------------------------------------
 
 
-@task(name="load-training-artifacts")
+@task(name="load-training-artifacts", on_completion=[_on_complete], on_failure=[_on_fail])
 def load_training_artifacts(
     eval_config: EvaluationConfig,
     model_config_dict: dict[str, Any],
@@ -438,7 +442,7 @@ def load_training_artifacts(
     return runs
 
 
-@task(name="discover-post-training-models")
+@task(name="discover-post-training-models", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_post_training_models(
     *,
     experiment_name: str = EXPERIMENT_POST_TRAINING,
@@ -502,7 +506,7 @@ def discover_post_training_models(
         return []
 
 
-@task(name="discover-zero-shot-baselines")
+@task(name="discover-zero-shot-baselines", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_zero_shot_baselines(
     *,
     factorial_yaml: Path | None = None,
@@ -569,7 +573,7 @@ def discover_zero_shot_baselines(
     return baselines
 
 
-@task(name="predict-with-uncertainty")
+@task(name="predict-with-uncertainty", on_completion=[_on_complete], on_failure=[_on_fail])
 def predict_with_uncertainty(
     *,
     models: list[nn.Module],
@@ -611,7 +615,7 @@ def predict_with_uncertainty(
     }
 
 
-@task(name="build-ensembles")
+@task(name="build-ensembles", on_completion=[_on_complete], on_failure=[_on_fail])
 def build_ensembles(
     runs: list[dict[str, Any]],
     eval_config: EvaluationConfig,
@@ -652,7 +656,7 @@ def build_ensembles(
     return ensembles
 
 
-@task(name="log-models-to-mlflow")
+@task(name="log-models-to-mlflow", on_completion=[_on_complete], on_failure=[_on_fail])
 def log_models_to_mlflow(
     runs: list[dict[str, Any]],
     ensembles: dict[str, EnsembleSpec],
@@ -706,7 +710,7 @@ def log_models_to_mlflow(
     return model_uris
 
 
-@task(name="evaluate-all-models")
+@task(name="evaluate-all-models", on_completion=[_on_complete], on_failure=[_on_fail])
 def evaluate_all_models(
     single_models: dict[str, nn.Module],
     ensembles: dict[str, EnsembleSpec],
@@ -781,7 +785,7 @@ def evaluate_all_models(
     return all_results
 
 
-@task(name="evaluate-with-mlflow")
+@task(name="evaluate-with-mlflow", on_completion=[_on_complete], on_failure=[_on_fail])
 def evaluate_with_mlflow(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -823,7 +827,7 @@ def evaluate_with_mlflow(
     return mlflow_results
 
 
-@task(name="generate-comparison")
+@task(name="generate-comparison", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_comparison(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
 ) -> str:
@@ -897,7 +901,7 @@ def generate_comparison(
     return markdown
 
 
-@task(name="register-champion")
+@task(name="register-champion", on_completion=[_on_complete], on_failure=[_on_fail])
 def register_champion_task(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -1000,7 +1004,7 @@ def register_champion_task(
     }
 
 
-@task(name="tag-champion-models")
+@task(name="tag-champion-models", on_completion=[_on_complete], on_failure=[_on_fail])
 def tag_champion_models(
     analysis_entries: list[dict[str, Any]],
     runs: list[dict[str, Any]],
@@ -1087,7 +1091,7 @@ def tag_champion_models(
     }
 
 
-@task(name="generate-report")
+@task(name="generate-report", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_report(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     comparison_md: str,
@@ -1174,7 +1178,7 @@ def generate_report(
     return report
 
 
-@task(name="summarize-experiment")
+@task(name="summarize-experiment", on_completion=[_on_complete], on_failure=[_on_fail])
 def summarize_experiment(
     all_results: dict[str, dict[str, dict[str, Any]]],
     promotion_info: dict[str, Any],
@@ -1661,7 +1665,7 @@ class EmbeddingDriftResult:
     mmd_statistic: float
 
 
-@task(name="embedding-drift")
+@task(name="embedding-drift", on_completion=[_on_complete], on_failure=[_on_fail])
 def embedding_drift_task(
     *,
     reference_embeddings: NDArray[np.float32],

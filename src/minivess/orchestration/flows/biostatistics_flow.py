@@ -52,8 +52,11 @@ from minivess.pipeline.biostatistics_statistics import (
 )
 from minivess.pipeline.biostatistics_tables import generate_tables
 from minivess.pipeline.biostatistics_types import BiostatisticsResult
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +64,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@task(name="discover-source-runs")
+@task(name="discover-source-runs", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_discover_source_runs(
     mlruns_dir: str,
     experiment_names: list[str],
@@ -70,7 +73,7 @@ def task_discover_source_runs(
     return discover_source_runs(Path(mlruns_dir), experiment_names)
 
 
-@task(name="validate-source-completeness")
+@task(name="validate-source-completeness", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_validate_source_completeness(
     manifest: Any,
     min_folds: int,
@@ -80,7 +83,7 @@ def task_validate_source_completeness(
     return validate_source_completeness(manifest, min_folds, min_conditions)
 
 
-@task(name="build-biostatistics-duckdb")
+@task(name="build-biostatistics-duckdb", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_build_duckdb(
     manifest: Any,
     mlruns_dir: str,
@@ -94,7 +97,7 @@ def task_build_duckdb(
     return db_path
 
 
-@task(name="compute-factorial-anova")
+@task(name="compute-factorial-anova", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_factorial_anova(
     per_volume_data: dict[str, dict[str, dict[int, Any]]],
     metric_name: str,
@@ -112,7 +115,7 @@ def task_compute_factorial_anova(
     )
 
 
-@task(name="compute-pairwise")
+@task(name="compute-pairwise", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_pairwise(
     per_volume_data: dict[str, dict[int, Any]],
     metric_name: str,
@@ -132,7 +135,7 @@ def task_compute_pairwise(
     )
 
 
-@task(name="compute-bayesian")
+@task(name="compute-bayesian", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_bayesian(
     per_volume_data: dict[str, dict[int, Any]],
     metric_name: str,
@@ -146,7 +149,7 @@ def task_compute_bayesian(
     )
 
 
-@task(name="compute-variance-decomposition")
+@task(name="compute-variance-decomposition", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_variance(
     per_volume_data: dict[str, dict[int, Any]],
     metric_name: str,
@@ -161,7 +164,7 @@ def task_compute_variance(
     )
 
 
-@task(name="compute-rankings")
+@task(name="compute-rankings", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_rankings(
     per_volume_data: dict[str, dict[str, dict[int, Any]]],
     metric_names: list[str],
@@ -178,7 +181,7 @@ def task_compute_rankings(
     )
 
 
-@task(name="generate-figures")
+@task(name="generate-figures", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_generate_figures(
     per_volume_data: dict[str, dict[str, dict[int, Any]]],
     pairwise: list[Any],
@@ -201,7 +204,7 @@ def task_generate_figures(
     )
 
 
-@task(name="generate-tables")
+@task(name="generate-tables", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_generate_tables(
     pairwise: list[Any],
     variance: list[Any],
@@ -222,7 +225,7 @@ def task_generate_tables(
     )
 
 
-@task(name="build-lineage-manifest")
+@task(name="build-lineage-manifest", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_build_lineage(
     manifest: Any, figures: list[Any], tables: list[Any]
 ) -> dict[str, Any]:
@@ -230,7 +233,7 @@ def task_build_lineage(
     return build_lineage_manifest(manifest=manifest, figures=figures, tables=tables)
 
 
-@task(name="log-biostatistics-run")
+@task(name="log-biostatistics-run", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_log_mlflow(
     manifest: Any,
     lineage: dict[str, Any],
@@ -248,7 +251,7 @@ def task_log_mlflow(
     )
 
 
-@task(name="compute-rank-concordance")
+@task(name="compute-rank-concordance", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_rank_concordance(
     per_volume_data: dict[str, dict[str, dict[int, Any]]],
     metric_names: list[str],
@@ -262,7 +265,7 @@ def task_compute_rank_concordance(
     )
 
 
-@task(name="compute-specification-curve")
+@task(name="compute-specification-curve", on_completion=[_on_complete], on_failure=[_on_fail])
 def task_compute_specification_curve(
     per_volume_data: dict[str, dict[str, dict[int, Any]]],
     factor_names: list[str],
@@ -285,7 +288,7 @@ def task_compute_specification_curve(
     )
 
 
-@task(name="narrate-figures")
+@task(name="narrate-figures", on_completion=[_on_complete], on_failure=[_on_fail])
 def narrate_figures(
     figures: list[Any],
     n_conditions: int = 0,

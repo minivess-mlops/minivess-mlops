@@ -29,10 +29,14 @@ from minivess.orchestration.docker_guard import require_docker_context
 # backward compatibility until this module is fully retired.
 FLOW_NAME_QA: str = "qa-flow"
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="check-backend-consistency")
+
+@task(name="check-backend-consistency", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_backend_consistency(tracking_uri: str) -> dict[str, Any]:
     """Check MLflow backend type and warn on local filesystem.
 
@@ -66,7 +70,7 @@ def check_backend_consistency(tracking_uri: str) -> dict[str, Any]:
     }
 
 
-@task(name="check-run-params")
+@task(name="check-run-params", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_run_params(run: Any) -> dict[str, Any]:
     """Check that a run has all required parameters.
 
@@ -98,7 +102,7 @@ def check_run_params(run: Any) -> dict[str, Any]:
     }
 
 
-@task(name="check-ghost-runs")
+@task(name="check-ghost-runs", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_ghost_runs(
     client: Any,
     *,
