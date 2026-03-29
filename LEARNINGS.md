@@ -67,3 +67,18 @@ Accumulated discoveries from TDD iterations. Persists across sessions.
   11. MLflow tag value `None` → TypeError in protobuf. Fix: filter None before passing tags
   12. Base image must be rebuilt with `--no-cache` after `src/` changes; train Dockerfile only copies `scripts/`
 - **Persistence**: Full catalog saved in `.claude/projects/.../memory/docker-infra-learnings.md`
+
+## 2026-03-29 — CRITICAL: Proposed local launcher hack instead of Docker+Prefect
+
+- **Discovery**: When asked to run Phase 3 mini-experiment training, Claude proposed `MINIVESS_ALLOW_HOST=1` shortcuts and "local launcher scripts" instead of the Docker+Prefect pipeline. This is the 7th+ documented instance of this anti-pattern.
+- **Resolution**: Created CLAUDE.md Rule #33 (Docker+Prefect non-negotiable, zero bypass), metalearning doc, P1 Issue #971. The correct answer is ALWAYS `docker compose run --shm-size 8g train`.
+
+## 2026-03-29 — P0: Hardcoded MLFLOW_TRACKING_URI in docker-compose.flows.yml
+
+- **Discovery**: `docker-compose.flows.yml` line 20 hardcoded `http://minivess-mlflow:5000` instead of `${MLFLOW_TRACKING_URI:-...}`, silently ignoring the DagsHub URI in `.env`. The AST guard only scans Python for `alpha=0.05` — it doesn't scan YAML.
+- **Resolution**: Fixed to `${MLFLOW_TRACKING_URI:-http://minivess-mlflow:${MLFLOW_PORT:-5000}}`. Created P0 Issue #972 (hardcoded URLs) and #973 (AST guard must scan ALL values + YAML).
+
+## 2026-03-29 — Biostatistics Flow: Phase 0-8 implementation
+
+- **Discovery**: Implemented stratified within-fold permutation test, BCa/percentile adaptive bootstrap, hierarchical gatekeeping, DuckDB-only data loading, JSON sidecar models, R data export, Nature Protocols compliance generators. 184 tests passing.
+- **Resolution**: Synthetic fixture DuckDB with known effects validates the full statistical pipeline. Real training deferred to Docker+Prefect pipeline (correctly — no shortcuts).
