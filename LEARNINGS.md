@@ -82,3 +82,9 @@ Accumulated discoveries from TDD iterations. Persists across sessions.
 
 - **Discovery**: Implemented stratified within-fold permutation test, BCa/percentile adaptive bootstrap, hierarchical gatekeeping, DuckDB-only data loading, JSON sidecar models, R data export, Nature Protocols compliance generators. 184 tests passing.
 - **Resolution**: Synthetic fixture DuckDB with known effects validates the full statistical pipeline. Real training deferred to Docker+Prefect pipeline (correctly — no shortcuts).
+
+## 2026-03-30 — Observability: 4-pass journey from dead code to production
+
+- **Discovery**: Pass 1-2 wrote 5 Python modules but only imported them (dead code). Pass 3 wired context managers into all 15 flows + 77 @task hooks + Docker HEALTHCHECK + LGTM/DCGM compose services. Pass 4 threaded event_logger into SegmentationTrainer epoch loop, added CPU healthcheck, wired stall detection, updated KG.
+- **Resolution**: Rule #34 added: "Import ≠ Done — code must be CALLED + DEPLOYED + OBSERVABLE." AST enforcement test verifies every @flow body has `with` context manager. 10/10 flow services have HEALTHCHECK. Trainer calls log_epoch_complete() each epoch. 7086 tests passing.
+- **Key lesson**: Writing code ≠ shipping functionality. Import tests are necessary but NOT sufficient. Every observability feature must produce OBSERVABLE OUTPUT verifiable by `docker logs` or dashboard.
