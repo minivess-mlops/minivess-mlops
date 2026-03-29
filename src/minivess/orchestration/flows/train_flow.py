@@ -45,6 +45,13 @@ from minivess.orchestration.constants import (
 )
 from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
+
+# Thread-local storage for passing event_logger from flow context to @task.
+# Prefect @task params must be serializable; StructuredEventLogger is not.
+# Safe because all tasks run in-process for single-machine Docker.
+import threading as _threading
+
+_flow_context = _threading.local()
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -654,6 +661,10 @@ def train_one_fold_task(
         fold_label=f"f #{fold_id + 1}/{num_folds}",
         tracker=tracker,
     )
+    # Wire event_logger from flow context (Pass 4 — G1 fix)
+    _event_logger = getattr(_flow_context, "event_logger", None)
+    if _event_logger is not None:
+        trainer.set_event_logger(_event_logger)
 
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     # Compute config fingerprint for auto-resume discovery
@@ -1465,6 +1476,9 @@ def training_flow(
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
     with gpu_flow_observability_context("train", logs_dir=logs_dir) as event_logger:
+        # Thread event_logger for @task access (Pass 4 — G1 fix)
+        _flow_context.event_logger = event_logger
+
         # Preflight: validate required environment variables
         _validate_training_env()
 
