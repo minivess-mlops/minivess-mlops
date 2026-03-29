@@ -1,0 +1,1224 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Observability Fourth Pass: Thread, Wire, Verify
+  =================================================
+  Pass 3 achieved full structural wiring: all 15 flows have context managers,
+  all ~77 @task decorators have timing hooks, LGTM + DCGM services exist in
+  docker-compose.yml, and the train service has a heartbeat-based HEALTHCHECK.
+
+  THIS fourth pass addresses the remaining FUNCTIONAL gaps — code paths that
+  EXIST but are never CALLED, infrastructure that is DEFINED but never CONSUMED,
+  and verification that actually RUNS the observability pipeline end-to-end.
+
+  Gap inventory (verified by reading every source file bidirectionally):
+
+  G1. Trainer epoch logging: StructuredEventLogger.log_epoch_complete() exists
+      but SegmentationTrainer.fit() never calls it. The event_logger from
+      gpu_flow_observability_context is captured in train_flow.py line 1467
+      but never passed to train_one_fold_task or SegmentationTrainer.
+
+  G2. Stall detection wiring: stall_detection.py has detect_mlflow_metric_stall()
+      but NO flow, task, or monitoring loop ever calls it. The dashboard flow
+      does not include stall detection in its health checks.
+
+  G3. OTel trace propagation: flow_observability_context writes JSONL events but
+      never creates OTel spans. TelemetryProvider exists in telemetry.py with a
+      span() context manager but nothing instantiates it inside flow wrappers.
+      OTEL_EXPORTER_OTLP_ENDPOINT is in x-common-env but unused by Python code.
+
+  G4. Docker HEALTHCHECK coverage: Only the train service (line 198 of
+      docker-compose.flows.yml) has a healthcheck. The other 14 flow services
+      have ZERO healthcheck directives.
+
+  G5. CPU flow healthcheck: healthcheck_training.py reads heartbeat.json
+      (GPU heartbeat). CPU flows write events.jsonl via flow_observability_context
+      but there is no events.jsonl staleness healthcheck script.
+
+  G6. Dashboard observability consumer: dashboard_flow.py collects data/config/model/
+      pipeline sections but has NO observability section. It does not read
+      heartbeat.json, events.jsonl, or expose GPU/training status.
+
+  G7. Behavioral verification: Existing tests verify code EXISTS (AST checks,
+      import checks) but do not verify the observability pipeline PRODUCES
+      correct artifacts when a flow actually runs.
+
+  G8. KG staleness: observability.yaml last_reviewed is 2026-03-13. Missing
+      decisions for: structured_event_logging, gpu_heartbeat, stall_detection,
+      flow_observability_wiring, docker_healthcheck, lgtm_stack, dcgm_exporter,
+      otel_trace_propagation.
+
+  Architecture after this pass is described in the plan description element.
+
+  Created: 2026-03-29
+  Author: 3-Agent Council (Claude Code)
+  Preconditions: Pass 3 complete (7083 tests passing)
+-->
+<plan id="observability-pass4-thread-wire-verify"
+      title="Observability Fourth Pass: Thread, Wire, Verify"
+      created="2026-03-29"
+      status="proposed"
+      branch="feat/observability-pass4">
+
+  <architecture><![CDATA[
+    SegmentationTrainer.fit()
+      |--- log_epoch_complete() ---> events.jsonl + heartbeat.json
+      |--- GpuHeartbeatMonitor -----> heartbeat.json (background thread)
+      \--- [OTel span per epoch] ---> Grafana Tempo (via LGTM)
+
+    flow_observability_context()
+      |--- JSONL flow_start/flow_end -> events.jsonl
+      |--- [OTel span per flow] -----> Grafana Tempo (via LGTM)
+      \--- prefect_hooks @task -------> Python logger (Prefect UI)
+
+    Docker HEALTHCHECK (per service)
+      |--- GPU flows: heartbeat.json staleness (healthcheck_training.py)
+      |--- CPU batch flows: events.jsonl staleness (healthcheck_cpu.py)
+      \--- Long-running services: HTTP /health endpoint
+
+    Dashboard Flow (observability consumer)
+      |--- reads heartbeat.json for training status
+      |--- reads events.jsonl for progress summary
+      \--- includes stall detection for active MLflow runs
+  ]]></architecture>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 1: Thread event_logger into SegmentationTrainer (G1)            -->
+  <!--   The #1 gap: epoch-level observability is dead code. The event_logger -->
+  <!--   lives in train_flow context but never reaches trainer.fit().         -->
+  <!-- ===================================================================== -->
+  <phase id="1" title="Thread event_logger into SegmentationTrainer epoch loop">
+    <description>
+      StructuredEventLogger.log_epoch_complete() has been tested and working since
+      pass 2, but the SegmentationTrainer never receives or calls it. The event_logger
+      from gpu_flow_observability_context is captured at train_flow.py:1467 but never
+      passed down through train_one_fold_task to the trainer.
+
+      This phase adds event_logger as an optional parameter to SegmentationTrainer and
+      wires the call into the epoch loop inside fit(), then passes it from the flow
+      context through the task to the trainer constructor.
+    </description>
+
+    <task id="1.1" title="Add event_logger parameter to SegmentationTrainer">
+      <description>
+        Modify SegmentationTrainer.__init__() to accept an optional event_logger
+        parameter of type StructuredEventLogger | None (default None). Store it as
+        self._event_logger.
+
+        In the fit() method epoch loop (after line ~785 where epoch_wall_time is
+        computed and all metrics are available), add the log_epoch_complete() call:
+<![CDATA[
+        # Structured JSONL epoch logging (pass 4 — G1 fix)
+        if self._event_logger is not None:
+            gpu_snap = {}
+            if self._monitor is not None:
+                snap = self._monitor.get_latest_snapshot()
+                if snap is not None:
+                    gpu_snap = {
+                        "gpu_util_pct": snap.gpu_utilization_percent,
+                        "gpu_memory_used_mb": snap.gpu_memory_used_mb,
+                    }
+            self._event_logger.log_epoch_complete(
+                epoch=epoch + 1,
+                max_epochs=self.config.max_epochs,
+                train_loss=train_result.loss,
+                val_loss=val_result.loss,
+                val_dice=val_result.metrics.get("val/dice", 0.0),
+                lr=current_lr,
+                epoch_wall_s=epoch_wall_time,
+                gpu_util_pct=gpu_snap.get("gpu_util_pct", 0),
+                vram_used_mb=gpu_snap.get("gpu_memory_used_mb", 0),
+            )
+]]>
+        Also add log_training_start() before the epoch loop and log_training_end()
+        after the loop completes (or on exception). The model_family comes from
+        self._get_model_family(), loss_name from the config, etc.
+
+        IMPORTANT: The event_logger parameter must use TYPE_CHECKING import guard
+        to avoid circular import (structured_logging imports nothing from pipeline,
+        but defensive coding).
+      </description>
+      <files>
+        <file>src/minivess/pipeline/trainer.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/pipeline/test_trainer_event_logger_wiring.py</test>
+      </tests>
+      <acceptance>
+        SegmentationTrainer accepts event_logger=StructuredEventLogger(...).
+        After fit() runs, events.jsonl contains training_start, epoch_complete
+        (one per epoch), and training_end events. heartbeat.json is updated
+        each epoch with current progress.
+      </acceptance>
+    </task>
+
+    <task id="1.2" title="Thread event_logger from train_flow through to trainer">
+      <description>
+        The wiring chain: train_flow.py captures event_logger from
+        gpu_flow_observability_context (line 1467), but the current call to
+        training_subflow and then train_one_fold_task does not pass it through.
+
+        Strategy: Pass event_logger through the config dict as a special key
+        '_event_logger' that train_one_fold_task extracts and passes to
+        SegmentationTrainer. This avoids changing the Prefect @task signature
+        (Prefect serializes task parameters — StructuredEventLogger is not
+        serializable).
+
+        Alternative (preferred if Prefect allows): Use Prefect runtime context
+        or a module-level variable set by the flow before calling the task.
+        Since all tasks run in the same process (no remote workers for
+        single-machine Docker), a module-level threading.local() is safe:
+<![CDATA[
+        # In train_flow.py, after context manager yields:
+        import threading
+        _flow_context = threading.local()
+
+        # Inside flow body:
+        _flow_context.event_logger = event_logger
+
+        # In train_one_fold_task:
+        _event_logger = getattr(_flow_context, 'event_logger', None)
+        trainer = SegmentationTrainer(
+            model, training_config,
+            ...,
+            event_logger=_event_logger,
+        )
+]]>
+        This pattern is used because Prefect @task parameters must be
+        JSON-serializable, and StructuredEventLogger is not.
+
+        Also wire hpo_flow.py similarly — HPO trials construct
+        SegmentationTrainer instances that need epoch logging.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+        <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_train_flow_event_logger_thread.py</test>
+      </tests>
+      <acceptance>
+        When train_flow runs, the SegmentationTrainer receives the event_logger
+        and produces epoch-level JSONL events. The events.jsonl file contains
+        flow_start, training_start, epoch_complete (per epoch), training_end,
+        and flow_end in chronological order. No Prefect serialization errors.
+      </acceptance>
+    </task>
+
+    <task id="1.3" title="Behavioral test: epoch events appear in events.jsonl">
+      <description>
+        Write a behavioral test that constructs a minimal SegmentationTrainer with
+        a real StructuredEventLogger (writing to tmp_path), runs fit() for 2 epochs
+        with tiny mock data (4x4x4 volumes), and asserts events.jsonl contains the
+        expected event sequence.
+
+        This test uses @pytest.mark.model_loading (it instantiates DynUNet) so it
+        is excluded from staging tier but included in prod tier. A lightweight
+        variant using a mock model (just returns input) runs in staging tier.
+
+        Expected event sequence in events.jsonl:
+        1. training_start (model_family, loss_name, num_folds, max_epochs)
+        2. epoch_complete (epoch=1, train_loss, val_loss, val_dice, lr, epoch_wall_s)
+        3. epoch_complete (epoch=2, ...)
+        4. training_end (status=completed, total_wall_s, folds_completed)
+
+        Also verify heartbeat.json has been updated with epoch=2 and eta_s.
+      </description>
+      <files>
+        <file>tests/v2/unit/pipeline/test_trainer_epoch_behavioral.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/pipeline/test_trainer_epoch_behavioral.py</test>
+      </tests>
+      <acceptance>
+        Staging-tier test (mock model) passes: events.jsonl has training_start +
+        2x epoch_complete + training_end. heartbeat.json updated. Prod-tier test
+        (real DynUNet) also passes.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 2: Docker HEALTHCHECK for all flow services (G4, G5)            -->
+  <!--   Only train has a healthcheck. 14 services are unmonitored.          -->
+  <!-- ===================================================================== -->
+  <phase id="2" title="Docker HEALTHCHECK for all flow services">
+    <description>
+      Only the train service has a HEALTHCHECK (healthcheck_training.py, which
+      reads heartbeat.json). The other 14 flow services have no health monitoring.
+
+      Strategy by service type:
+
+      - GPU batch flows (hpo, post_training, analyze): Reuse healthcheck_training.py
+        (they have GpuHeartbeatMonitor writing heartbeat.json via
+        gpu_flow_observability_context).
+
+      - CPU batch flows (data, biostatistics, acquisition, deploy, annotation,
+        drift_simulation, synthetic_generation, qa, maintenance, pipeline): Create
+        healthcheck_cpu.py that checks events.jsonl staleness instead of
+        heartbeat.json (CPU flows write events via flow_observability_context
+        but do NOT have heartbeat).
+
+      - Long-running services (dashboard-api, dashboard-ui, monai-label): Use
+        HTTP health endpoint checks (curl-based).
+
+      - Dashboard batch flow: Use healthcheck_cpu.py.
+    </description>
+
+    <task id="2.1" title="Create healthcheck_cpu.py for CPU flow services">
+      <description>
+        Create scripts/healthcheck_cpu.py mirroring healthcheck_training.py but
+        checking events.jsonl staleness instead of heartbeat.json:
+
+        1. Read LOGS_DIR/events.jsonl
+        2. Parse the last line (most recent event)
+        3. Check timestamp staleness against STALL_THRESHOLD_MINUTES
+        4. Grace period for startup (HEALTH_GRACE_PERIOD_MINUTES)
+        5. Exit 0 (healthy) or 1 (unhealthy)
+
+        Uses ONLY stdlib (no minivess imports). Same env vars as
+        healthcheck_training.py for consistency.
+
+        Edge case: events.jsonl may not exist yet during flow startup
+        (before flow_observability_context is entered). Grace period
+        handles this.
+      </description>
+      <files>
+        <file>scripts/healthcheck_cpu.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_healthcheck_cpu.py</test>
+      </tests>
+      <acceptance>
+        healthcheck_cpu.py returns exit 0 when events.jsonl has a recent event,
+        exit 1 when stale or missing (after grace period). Test verifies both
+        healthy and unhealthy paths with fresh/stale/missing events.jsonl.
+      </acceptance>
+    </task>
+
+    <task id="2.2" title="Add HEALTHCHECK to all flow services in docker-compose.flows.yml">
+      <description>
+        Add healthcheck directives to all flow services that currently lack them.
+
+        GPU batch flows (hpo, post_training, analyze, gpu-benchmark):
+<![CDATA[
+        healthcheck:
+          test: ["CMD", "python", "scripts/healthcheck_training.py"]
+          interval: 60s
+          timeout: 10s
+          retries: 3
+          start_period: 600s
+]]>
+        CPU batch flows (data, biostatistics, acquisition, deploy, annotation,
+        drift_simulation, synthetic_generation, pipeline, maintenance, dashboard):
+<![CDATA[
+        healthcheck:
+          test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+          interval: 60s
+          timeout: 10s
+          retries: 5
+          start_period: 300s
+]]>
+        Long-running HTTP services (dashboard-api):
+<![CDATA[
+        healthcheck:
+          test: ["CMD-SHELL", "curl -sf http://localhost:${DASHBOARD_API_PORT:-8090}/health || exit 1"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 60s
+]]>
+        dashboard-ui (nginx):
+<![CDATA[
+        healthcheck:
+          test: ["CMD-SHELL", "curl -sf http://localhost:80/ || exit 1"]
+          interval: 30s
+          timeout: 5s
+          retries: 3
+          start_period: 30s
+]]>
+        monai-label:
+<![CDATA[
+        healthcheck:
+          test: ["CMD-SHELL", "curl -sf http://localhost:${MONAI_LABEL_PORT:-8000}/info || exit 1"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 120s
+]]>
+        IMPORTANT: This modifies docker-compose.flows.yml which is a declarative
+        config. Per CLAUDE.md Rule #31, we only add healthcheck keys (new keys,
+        not modifying existing). The healthcheck values are deterministic
+        (defined in this plan), not improvised.
+      </description>
+      <files>
+        <file>deployment/docker-compose.flows.yml</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_all_services_healthcheck.py</test>
+      </tests>
+      <acceptance>
+        Every service in docker-compose.flows.yml has a healthcheck directive.
+        Test parses the YAML and asserts all services have healthcheck with
+        test, interval, timeout, retries, and start_period fields. Zero services
+        without healthcheck (excluding hpo-worker which is a scaled replica
+        of hpo and inherits its healthcheck pattern).
+      </acceptance>
+    </task>
+
+    <task id="2.3" title="AST enforcement test: healthcheck scripts use only stdlib">
+      <description>
+        Write a test that parses healthcheck_training.py and healthcheck_cpu.py
+        with ast.parse() and verifies that NO import statement references the
+        minivess package. Healthcheck scripts must work in ANY container image
+        (including Tier C light images that may not have the full minivess
+        package installed).
+
+        Also verify both scripts have a __main__ guard and sys.exit() call.
+      </description>
+      <files>
+        <file>tests/v2/unit/deployment/test_healthcheck_stdlib_only.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_healthcheck_stdlib_only.py</test>
+      </tests>
+      <acceptance>
+        Test asserts both healthcheck scripts import only from stdlib modules.
+        No minivess, torch, mlflow, prefect, or any third-party imports.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 3: Stall detection wiring (G2)                                  -->
+  <!--   stall_detection.py exists but nothing ever calls it.                -->
+  <!-- ===================================================================== -->
+  <phase id="3" title="Wire stall detection into dashboard health checks">
+    <description>
+      detect_mlflow_metric_stall() exists in stall_detection.py and is tested in
+      isolation (test_stall_detection.py). But no flow, task, or monitoring loop
+      ever calls it. The dashboard flow is the natural consumer — it already
+      aggregates pipeline status and has a health-check responsibility.
+
+      This phase adds a stall detection task to the dashboard flow and optionally
+      wires it into the GpuHeartbeatMonitor as a cross-check signal.
+    </description>
+
+    <task id="3.1" title="Add stall detection task to dashboard flow">
+      <description>
+        Add a new @task to dashboard_flow.py that discovers active MLflow runs
+        and checks each for metric staleness:
+<![CDATA[
+        @task(name="check-training-stall", on_completion=[_on_complete], on_failure=[_on_fail])
+        def check_training_stall_task(
+            *,
+            tracking_uri: str,
+            threshold_minutes: float = 30.0,
+        ) -> dict[str, Any]:
+            """Check active MLflow runs for metric staleness.
+
+            Returns dict with 'stale_runs' list and 'total_active' count.
+            """
+            import mlflow
+
+            mlflow.set_tracking_uri(tracking_uri)
+            client = mlflow.MlflowClient()
+
+            # Find runs with status RUNNING
+            from mlflow.entities import ViewType
+            active_runs = client.search_runs(
+                experiment_ids=["0"],  # Default experiment
+                filter_string="status = 'RUNNING'",
+                run_view_type=ViewType.ACTIVE_ONLY,
+                max_results=50,
+            )
+
+            stale_runs = []
+            for run in active_runs:
+                result = detect_mlflow_metric_stall(
+                    run_id=run.info.run_id,
+                    threshold_minutes=threshold_minutes,
+                    tracking_uri=tracking_uri,
+                )
+                if result.stale:
+                    stale_runs.append({
+                        "run_id": run.info.run_id[:8],
+                        "minutes_since": result.minutes_since,
+                        "message": result.message,
+                    })
+
+            return {
+                "total_active": len(active_runs),
+                "stale_runs": stale_runs,
+                "has_stale": len(stale_runs) > 0,
+            }
+]]>
+        Wire this task into the run_dashboard_flow() body, after the existing
+        sections are collected. The stall check result is included in the
+        dashboard metadata JSON output.
+
+        The threshold_minutes comes from the STALL_THRESHOLD_MINUTES env var
+        (already in x-common-env, default 30).
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_dashboard_stall_detection.py</test>
+      </tests>
+      <acceptance>
+        Dashboard flow includes stall detection task. When called with a tracking
+        URI that has active runs, it reports stale/fresh status. Test mocks MLflow
+        client to return runs with old timestamps and verifies stale detection.
+      </acceptance>
+    </task>
+
+    <task id="3.2" title="Add MLflow run_id callback to GpuHeartbeatMonitor">
+      <description>
+        GpuHeartbeatMonitor currently only checks GPU utilization. Add an optional
+        set_mlflow_run_id() method that enables cross-referencing with MLflow stall
+        detection. When both low GPU utilization AND MLflow metric staleness are
+        detected simultaneously, emit a combined diagnostic event.
+<![CDATA[
+        class GpuHeartbeatMonitor:
+            def set_mlflow_run_id(self, run_id: str, tracking_uri: str) -> None:
+                """Enable MLflow metric stall cross-check.
+
+                When GPU utilization is low AND metrics are stale, the combined
+                signal is much stronger than either alone (reduces false positives
+                from data loading pauses or checkpoint saving).
+                """
+                self._mlflow_run_id = run_id
+                self._mlflow_tracking_uri = tracking_uri
+
+            def _check_low_utilization(self, snapshot: dict[str, Any]) -> None:
+                # ... existing logic ...
+                # NEW: if low util AND mlflow_run_id set, cross-check
+                if (util < self._low_util_threshold_pct
+                        and self._mlflow_run_id
+                        and now - self._low_util_start > self._alert_after_s):
+                    stall = detect_mlflow_metric_stall(
+                        self._mlflow_run_id,
+                        threshold_minutes=self._alert_after_s / 60.0,
+                        tracking_uri=self._mlflow_tracking_uri,
+                    )
+                    if stall.stale:
+                        logger.error(
+                            "COMBINED STALL: GPU util=%d%% for %.0fs "
+                            "AND MLflow metrics stale for %.1f min. "
+                            "Training is likely stuck.",
+                            util, duration, stall.minutes_since,
+                        )
+]]>
+        The set_mlflow_run_id() call happens in train_flow.py after the MLflow
+        run starts. This is optional — the heartbeat monitor works fine without
+        it (graceful degradation).
+      </description>
+      <files>
+        <file>src/minivess/observability/gpu_heartbeat.py</file>
+        <file>src/minivess/orchestration/flows/train_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_heartbeat_stall_crosscheck.py</test>
+      </tests>
+      <acceptance>
+        GpuHeartbeatMonitor with set_mlflow_run_id() detects combined stall
+        (low GPU + stale MLflow metrics) and logs ERROR with both signals.
+        Without set_mlflow_run_id(), behavior is identical to pass 3.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 4: OTel trace propagation into flow context managers (G3)       -->
+  <!--   TelemetryProvider exists but flow_observability_context ignores it.  -->
+  <!-- ===================================================================== -->
+  <phase id="4" title="OTel trace propagation into flow context managers">
+    <description>
+      TelemetryProvider (telemetry.py) creates OTel spans via start_as_current_span
+      but is never instantiated inside flow_observability_context or
+      gpu_flow_observability_context. The OTEL_EXPORTER_OTLP_ENDPOINT env var is
+      already in x-common-env (docker-compose.flows.yml line 63) and .env.example
+      (line 130), but no Python code reads it.
+
+      This phase wires TelemetryProvider into the flow context managers with
+      graceful degradation: OTel spans are created when the endpoint is configured,
+      silently skipped when not. opentelemetry packages are already in
+      pyproject.toml (lines 57-58) as core dependencies.
+    </description>
+
+    <task id="4.1" title="Wire TelemetryProvider into flow_observability_context">
+      <description>
+        Modify flow_observability_context() in flow_observability.py to optionally
+        create OTel spans:
+
+        1. Check os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+        2. If set and non-empty, try to instantiate TelemetryProvider
+        3. Wrap the flow body in a span named "flow/{flow_name}"
+        4. Add flow_name, status, and duration_s as span attributes on exit
+        5. Catch ImportError gracefully (opentelemetry may not be installed
+           in Tier C light images)
+        6. If OTEL_EXPORTER_OTLP_ENDPOINT is empty or unset, skip OTel entirely
+
+        Implementation pattern:
+<![CDATA[
+        @contextlib.contextmanager
+        def flow_observability_context(
+            flow_name: str,
+            *,
+            logs_dir: Path | None = None,
+        ) -> Generator[StructuredEventLogger, None, None]:
+            # ... existing setup ...
+
+            # OTel tracing (graceful degradation)
+            otel_span = None
+            otel_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+            if otel_endpoint:
+                try:
+                    from minivess.observability.telemetry import TelemetryProvider
+                    tp = TelemetryProvider(
+                        service_name=f"minivess-{flow_name}",
+                        endpoint=otel_endpoint,
+                    )
+                    otel_span = tp.tracer.start_span(
+                        f"flow/{flow_name}",
+                        attributes={"flow.name": flow_name},
+                    )
+                except (ImportError, Exception):
+                    logger.debug("OTel not available — tracing disabled")
+
+            try:
+                yield event_logger
+            finally:
+                # ... existing cleanup ...
+                if otel_span is not None:
+                    otel_span.set_attribute("flow.status", status)
+                    otel_span.set_attribute("flow.duration_s", elapsed)
+                    otel_span.end()
+]]>
+        Apply the same pattern to gpu_flow_observability_context(). Since it
+        delegates to flow_observability_context via `with flow_observability_context(...)`,
+        the OTel span is automatically created — no additional code needed.
+      </description>
+      <files>
+        <file>src/minivess/observability/flow_observability.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_flow_otel_tracing.py</test>
+      </tests>
+      <acceptance>
+        When OTEL_EXPORTER_OTLP_ENDPOINT is set, flow_observability_context
+        creates OTel spans with flow name, status, and duration attributes.
+        When unset/empty, no OTel code runs. ImportError is caught gracefully.
+        Existing JSONL logging is unaffected.
+      </acceptance>
+    </task>
+
+    <task id="4.2" title="Add OTel child spans to Prefect task hooks">
+      <description>
+        Extend create_task_timing_hooks() in prefect_hooks.py to optionally
+        create OTel child spans for each task execution. This gives per-task
+        trace granularity inside flow spans.
+
+        Strategy: Accept an optional tracer parameter. If provided, each hook
+        creates a child span with task_name, duration_s, and status attributes.
+        If not provided, hooks work exactly as before (Python logger only).
+<![CDATA[
+        def create_task_timing_hooks(
+            *,
+            tracer: Any | None = None,
+        ) -> tuple[Any, Any]:
+            def on_completion(task: Any, task_run: Any, state: Any) -> None:
+                task_name = getattr(task, "name", "unknown")
+                duration_s = _compute_duration(task_run)
+                logger.info(...)
+
+                # OTel child span (optional)
+                if tracer is not None:
+                    with tracer.start_as_current_span(
+                        f"task/{task_name}",
+                        attributes={
+                            "task.name": task_name,
+                            "task.status": "completed",
+                            "task.duration_s": duration_s,
+                        },
+                    ):
+                        pass  # Span auto-closes
+
+            # Similar for on_failure...
+]]>
+        The tracer is set at module level in each flow file when OTel is active.
+        Since flow files already define _on_complete, _on_fail at module level
+        via create_task_timing_hooks(), we need a way to inject the tracer
+        AFTER module load (since OTEL_EXPORTER_OTLP_ENDPOINT is a runtime check).
+
+        Preferred approach: Make the hooks check for a module-level _otel_tracer
+        variable that is set by the flow body at runtime when OTel is active.
+        This avoids changing all 15 flow files — the hooks self-discover.
+      </description>
+      <files>
+        <file>src/minivess/observability/prefect_hooks.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_task_hooks_otel_spans.py</test>
+      </tests>
+      <acceptance>
+        When a tracer is provided, each task completion/failure creates a child
+        OTel span. Span hierarchy: flow/train &gt; task/train-one-fold &gt;
+        task/log-fold-results. When no tracer, hooks work as before.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 5: Dashboard observability consumer (G6)                        -->
+  <!--   Dashboard flow should aggregate heartbeat + events + stall status.  -->
+  <!-- ===================================================================== -->
+  <phase id="5" title="Dashboard as observability consumer">
+    <description>
+      The dashboard flow collects data, config, model, and pipeline sections but
+      has no observability section. It should also aggregate:
+      - Training status from heartbeat.json (is training running? which epoch?)
+      - Flow progress from events.jsonl (which flows completed? durations?)
+      - Stall detection results (from Phase 3.1 task)
+      - GPU metrics summary (if available)
+
+      This makes the dashboard flow the single pane of glass for pipeline health,
+      complementing Grafana (which requires the monitoring Docker profile).
+    </description>
+
+    <task id="5.1" title="Add ObservabilityDashboardSection to dashboard sections">
+      <description>
+        Add a new dataclass to dashboard_sections.py:
+<![CDATA[
+        @dataclass
+        class ObservabilityDashboardSection:
+            """Observability status for the Everything Dashboard."""
+            training_active: bool
+            current_epoch: int | None
+            max_epochs: int | None
+            current_val_dice: float | None
+            eta_s: float | None
+            heartbeat_age_s: float | None
+            recent_flow_events: list[dict[str, Any]]
+            stall_detection: dict[str, Any]
+            gpu_status: str  # "healthy" | "no_gpu" | "stale"
+]]>
+        Add it to EverythingDashboard as an optional field (backward compatible
+        with existing dashboard invocations that do not pass observability data).
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/dashboard_sections.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_observability_dashboard_section.py</test>
+      </tests>
+      <acceptance>
+        ObservabilityDashboardSection dataclass exists with all fields.
+        EverythingDashboard accepts optional observability field.
+      </acceptance>
+    </task>
+
+    <task id="5.2" title="Add observability collection task to dashboard flow">
+      <description>
+        Add a new @task that reads heartbeat.json and events.jsonl from the
+        shared logs volume to build ObservabilityDashboardSection:
+<![CDATA[
+        @task(name="collect-observability-section",
+              on_completion=[_on_complete], on_failure=[_on_fail])
+        def collect_observability_section_task(
+            *,
+            logs_dir: Path,
+            stall_result: dict[str, Any] | None = None,
+        ) -> ObservabilityDashboardSection:
+            """Read heartbeat + events for observability status."""
+            heartbeat_path = logs_dir / "heartbeat.json"
+            events_path = logs_dir / "events.jsonl"
+
+            # Read heartbeat
+            training_active = False
+            current_epoch = None
+            max_epochs = None
+            current_val_dice = None
+            eta_s = None
+            heartbeat_age_s = None
+            gpu_status = "no_data"
+
+            if heartbeat_path.exists():
+                hb = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+                heartbeat_ts = datetime.fromisoformat(hb["timestamp"])
+                heartbeat_age_s = (datetime.now(UTC) - heartbeat_ts).total_seconds()
+                training_active = heartbeat_age_s < 300  # 5 min threshold
+                current_epoch = hb.get("epoch")
+                max_epochs = hb.get("max_epochs")
+                current_val_dice = hb.get("val_dice")
+                eta_s = hb.get("eta_s")
+                gpu_status = hb.get("status", "unknown")
+
+            # Read last N events
+            recent_events = []
+            if events_path.exists():
+                lines = events_path.read_text(encoding="utf-8").strip().split("\n")
+                for line in lines[-20:]:  # Last 20 events
+                    try:
+                        recent_events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        pass
+
+            return ObservabilityDashboardSection(
+                training_active=training_active,
+                current_epoch=current_epoch,
+                max_epochs=max_epochs,
+                current_val_dice=current_val_dice,
+                eta_s=eta_s,
+                heartbeat_age_s=heartbeat_age_s,
+                recent_flow_events=recent_events,
+                stall_detection=stall_result or {},
+                gpu_status=gpu_status,
+            )
+]]>
+        Wire this task into run_dashboard_flow() and include the result in the
+        metadata export and markdown report.
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_dashboard_observability_collection.py</test>
+      </tests>
+      <acceptance>
+        Dashboard flow reads heartbeat.json and events.jsonl from logs volume.
+        Metadata JSON output includes observability section with training status,
+        epoch progress, and stall detection results. Markdown report includes
+        an Observability section.
+      </acceptance>
+    </task>
+
+    <task id="5.3" title="Add Observability section to markdown report generator">
+      <description>
+        Extend generate_report() in dashboard_flow.py to include an Observability
+        section when the observability data is available:
+<![CDATA[
+        ## Observability
+
+        - **Training active:** Yes (epoch 15/100, val_dice=0.82)
+        - **ETA:** ~45 minutes
+        - **Heartbeat age:** 12 seconds
+        - **GPU status:** healthy
+        - **Stale runs:** None
+        - **Recent events:** 3 flow_end, 2 epoch_complete in last hour
+]]>
+        This section is omitted when no observability data is available
+        (backward compatible).
+      </description>
+      <files>
+        <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/orchestration/test_dashboard_report_observability.py</test>
+      </tests>
+      <acceptance>
+        Markdown report includes Observability section with training status,
+        ETA, heartbeat age, GPU status, and stall detection summary. Section
+        is skipped when observability data is None.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 6: Behavioral verification tests (G7)                           -->
+  <!--   Tests that verify observability PRODUCES OUTPUT, not just EXISTS.    -->
+  <!-- ===================================================================== -->
+  <phase id="6" title="Behavioral verification tests">
+    <description>
+      Existing observability tests verify code structure (AST enforcement, import
+      checks) and unit behavior (StructuredEventLogger methods work in isolation).
+      Missing: tests that verify the full observability pipeline produces correct
+      artifacts when a flow ACTUALLY RUNS.
+
+      These behavioral tests use MINIVESS_ALLOW_HOST=1 escape hatch (no Docker)
+      and mock MLflow/Prefect to run in staging tier.
+    </description>
+
+    <task id="6.1" title="End-to-end flow observability artifact test">
+      <description>
+        Write a test that runs a minimal CPU flow variant (biostatistics or a
+        custom test flow) and verifies:
+
+        1. events.jsonl exists in LOGS_DIR with flow_start and flow_end events
+        2. Events are in chronological order (timestamps monotonically increasing)
+        3. flow_end has status=completed and duration_s &gt; 0
+        4. All events have required fields (timestamp, event_type)
+        5. JSONL is valid (each line parses as JSON)
+
+        Uses monkeypatch.setenv to set LOGS_DIR, MLFLOW_TRACKING_URI,
+        MINIVESS_ALLOW_HOST, and PREFECT_DISABLED. Runs the flow function
+        directly (not via Prefect deployment).
+      </description>
+      <files>
+        <file>tests/v2/unit/observability/test_e2e_flow_artifacts.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_e2e_flow_artifacts.py</test>
+      </tests>
+      <acceptance>
+        Test runs a real flow function and verifies events.jsonl content.
+        Not an AST check — the flow actually executes and produces artifacts.
+        Runs in staging tier (&lt;3 min, no model loading, no Docker).
+      </acceptance>
+    </task>
+
+    <task id="6.2" title="Heartbeat freshness behavioral test">
+      <description>
+        Write a test that exercises the GPU flow observability context (with mocked
+        CUDA) and verifies heartbeat.json is:
+
+        1. Created within 1 second of context entry
+        2. Updated at least once during a 1-second sleep inside the context
+        3. Contains required keys: timestamp, gpu_util_pct, gpu_memory_used_mb, status
+        4. Timestamp is parseable ISO 8601
+        5. Status is "healthy" or "no_gpu" (depending on GPU availability)
+
+        Also verify heartbeat.json STOPS being updated after context exit
+        (the background thread has stopped).
+      </description>
+      <files>
+        <file>tests/v2/unit/observability/test_heartbeat_behavioral.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_heartbeat_behavioral.py</test>
+      </tests>
+      <acceptance>
+        Test exercises the real GpuHeartbeatMonitor (via gpu_flow_observability_context)
+        and verifies heartbeat.json lifecycle: created, updated, and stopped.
+      </acceptance>
+    </task>
+
+    <task id="6.3" title="OTel graceful degradation behavioral test">
+      <description>
+        Write a test that verifies:
+
+        1. With OTEL_EXPORTER_OTLP_ENDPOINT="" (empty): flow runs without OTel,
+           no ImportError, no connection attempts, events.jsonl still written
+        2. With OTEL_EXPORTER_OTLP_ENDPOINT unset: same as above
+        3. With OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317" (set but
+           unreachable): flow runs, OTel initialization is attempted but failure
+           is caught, events.jsonl still written
+
+        This prevents the monitoring stack from becoming a hard dependency.
+        Flow execution must NEVER fail because OTel is unavailable.
+      </description>
+      <files>
+        <file>tests/v2/unit/observability/test_otel_graceful_degradation.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/observability/test_otel_graceful_degradation.py</test>
+      </tests>
+      <acceptance>
+        All three scenarios pass: OTel off, OTel unset, OTel unreachable. In all
+        cases, the flow completes and events.jsonl is written correctly. Zero
+        exceptions propagated to the flow.
+      </acceptance>
+    </task>
+
+    <task id="6.4" title="Healthcheck script behavioral tests">
+      <description>
+        Write tests that invoke healthcheck_training.py and healthcheck_cpu.py
+        as subprocess calls (simulating Docker HEALTHCHECK CMD execution) and
+        verify:
+
+        1. Fresh heartbeat/events: exit code 0
+        2. Stale heartbeat/events (timestamp &gt; STALL_THRESHOLD_MINUTES ago): exit code 1
+        3. Missing heartbeat/events within grace period: exit code 0
+        4. Missing heartbeat/events after grace period: exit code 1
+        5. Malformed JSON: exit code 1
+
+        Uses subprocess.run() to invoke the scripts directly, matching how
+        Docker HEALTHCHECK CMD would execute them.
+      </description>
+      <files>
+        <file>tests/v2/unit/deployment/test_healthcheck_behavioral.py</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_healthcheck_behavioral.py</test>
+      </tests>
+      <acceptance>
+        All 5 scenarios pass for both healthcheck scripts. Tests use subprocess
+        to match real Docker HEALTHCHECK execution. Exit codes match expected
+        healthy/unhealthy states.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 7: Knowledge graph update (G8)                                  -->
+  <!--   observability.yaml needs new decisions for pass 3 + pass 4 work.    -->
+  <!-- ===================================================================== -->
+  <phase id="7" title="Knowledge graph update for observability domain">
+    <description>
+      knowledge-graph/domains/observability.yaml was last reviewed on 2026-03-13
+      and is missing decisions for all the observability infrastructure added in
+      passes 2, 3, and 4. This phase updates it with new resolved decisions.
+    </description>
+
+    <task id="7.1" title="Update observability.yaml with pass 3 and 4 decisions">
+      <description>
+        Add the following resolved decisions to observability.yaml:
+
+        structured_event_logging:
+          status: resolved
+          winner: jsonl_event_logger
+          rationale: "StructuredEventLogger writes events.jsonl + heartbeat.json.
+            Supplements MLflow (not replaces). Machine-parseable for LLM monitoring."
+          implementation: [src/minivess/observability/structured_logging.py,
+            src/minivess/observability/flow_observability.py]
+
+        gpu_heartbeat_monitoring:
+          status: resolved
+          winner: pynvml_background_thread
+          rationale: "GpuHeartbeatMonitor checks GPU util every 30s via pynvml.
+            Writes heartbeat.json. Alerts on sustained low utilization."
+          implementation: [src/minivess/observability/gpu_heartbeat.py]
+
+        stall_detection:
+          status: resolved
+          winner: mlflow_metric_staleness
+          rationale: "detect_mlflow_metric_stall() checks MLflow run timestamps.
+            Wired into dashboard flow + GpuHeartbeatMonitor cross-check."
+          implementation: [src/minivess/observability/stall_detection.py,
+            src/minivess/orchestration/flows/dashboard_flow.py]
+
+        flow_observability_wiring:
+          status: resolved
+          winner: context_manager_per_flow
+          rationale: "All 15 flows use flow_observability_context or
+            gpu_flow_observability_context. AST enforcement prevents regression."
+          implementation: [src/minivess/observability/flow_observability.py,
+            tests/v2/unit/orchestration/test_flow_observability_enforcement.py]
+
+        docker_healthcheck:
+          status: resolved
+          winner: heartbeat_plus_events_staleness
+          rationale: "GPU flows use heartbeat.json staleness (healthcheck_training.py).
+            CPU flows use events.jsonl staleness (healthcheck_cpu.py).
+            HTTP services use curl endpoint checks."
+          implementation: [scripts/healthcheck_training.py, scripts/healthcheck_cpu.py,
+            deployment/docker-compose.flows.yml]
+
+        monitoring_stack:
+          status: resolved
+          winner: grafana_lgtm_single_container
+          rationale: "grafana/otel-lgtm provides Grafana + Loki + Tempo + Prometheus
+            in a single container. Activated via --profile observability."
+          implementation: [deployment/docker-compose.yml]
+
+        gpu_hardware_metrics:
+          status: resolved
+          winner: dcgm_exporter
+          rationale: "NVIDIA DCGM exporter for hardware-level GPU metrics
+            (temp, power, ECC, NVLink). Complements pynvml heartbeat."
+          implementation: [deployment/docker-compose.yml]
+
+        otel_trace_propagation:
+          status: resolved
+          winner: telemetry_provider_in_context
+          rationale: "TelemetryProvider creates OTel spans inside
+            flow_observability_context. Graceful degradation when OTel unavailable."
+          implementation: [src/minivess/observability/flow_observability.py,
+            src/minivess/observability/telemetry.py]
+
+        task_timing_hooks:
+          status: resolved
+          winner: prefect_task_hooks
+          rationale: "create_task_timing_hooks() provides on_completion/on_failure
+            hooks for all ~77 @task decorators. AST enforcement prevents regression."
+          implementation: [src/minivess/observability/prefect_hooks.py,
+            tests/v2/unit/orchestration/test_all_flows_observability.py]
+
+        Update last_reviewed to "2026-03-29".
+        Add metalearning reference for the silent-cpu-fallback incident.
+        Add planning_docs reference to all four pass plans.
+      </description>
+      <files>
+        <file>knowledge-graph/domains/observability.yaml</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/knowledge_graph/test_observability_kg_completeness.py</test>
+      </tests>
+      <acceptance>
+        observability.yaml contains all 9 new decisions with status: resolved.
+        last_reviewed is 2026-03-29. All implementation paths are valid files.
+        Test verifies KG completeness: every observability module has a
+        corresponding decision in the domain YAML.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- PHASE 8: Full verification (staging gate)                             -->
+  <!--   Run make test-staging and verify zero failures, zero new skips.     -->
+  <!-- ===================================================================== -->
+  <phase id="8" title="Full verification and staging gate">
+    <description>
+      Final verification phase. Run the complete staging test suite and verify
+      all new tests pass alongside the existing 7083+ tests. Fix any failures
+      per CLAUDE.md Rule #23 (batch resolution, never serial whac-a-mole).
+    </description>
+
+    <task id="8.1" title="Run make test-staging with --maxfail=200">
+      <description>
+        Run the full staging test suite:
+        1. make test-staging (--maxfail=200, no -x)
+        2. Verify zero failures in new test files
+        3. Verify zero new skips introduced
+        4. Run ruff check on all modified files
+        5. Run mypy on all modified files
+
+        If failures occur, categorize by root cause and fix in batches.
+        Per Rule #23: GATHER → CATEGORIZE → PLAN → FIX → VERIFY.
+      </description>
+      <files>
+        <file>Makefile</file>
+      </files>
+      <tests>
+        <test>make test-staging</test>
+      </tests>
+      <acceptance>
+        make test-staging passes with 0 failures, 0 new skips. ruff and mypy
+        report no errors in modified files. Total test count increases by
+        the number of new test functions (~35-45 expected).
+      </acceptance>
+    </task>
+
+    <task id="8.2" title="Verify Docker Compose YAML validity">
+      <description>
+        Validate the modified docker-compose.flows.yml:
+        1. docker compose -f deployment/docker-compose.flows.yml config (YAML valid)
+        2. Existing compose correctness tests pass
+        3. All services have healthcheck (new test from Phase 2.2)
+        4. No new services added (healthcheck only)
+        5. Cross-reference with yaml_contract.yaml if applicable
+
+        NOTE: This does NOT start containers. It validates YAML syntax and
+        schema only. Docker runtime testing is manual (scripts/demo_observability.sh
+        from pass 3).
+      </description>
+      <files>
+        <file>deployment/docker-compose.flows.yml</file>
+      </files>
+      <tests>
+        <test>tests/v2/unit/deployment/test_compose_correctness.py</test>
+        <test>tests/v2/unit/deployment/test_all_services_healthcheck.py</test>
+      </tests>
+      <acceptance>
+        docker compose config succeeds. All compose tests pass. All services
+        have healthcheck directives.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ===================================================================== -->
+  <!-- SUMMARY                                                                -->
+  <!-- ===================================================================== -->
+  <summary>
+    <total_phases>8</total_phases>
+    <total_tasks>20</total_tasks>
+    <estimated_test_count>18 new test files, ~50 test functions</estimated_test_count>
+    <gaps_addressed>
+      <gap id="G1" title="Trainer epoch logging" phase="1" tasks="1.1, 1.2, 1.3" />
+      <gap id="G2" title="Stall detection wiring" phase="3" tasks="3.1, 3.2" />
+      <gap id="G3" title="OTel trace propagation" phase="4" tasks="4.1, 4.2" />
+      <gap id="G4" title="Docker HEALTHCHECK coverage" phase="2" tasks="2.1, 2.2, 2.3" />
+      <gap id="G5" title="CPU flow healthcheck" phase="2" tasks="2.1" />
+      <gap id="G6" title="Dashboard observability consumer" phase="5" tasks="5.1, 5.2, 5.3" />
+      <gap id="G7" title="Behavioral verification tests" phase="6" tasks="6.1, 6.2, 6.3, 6.4" />
+      <gap id="G8" title="KG update" phase="7" tasks="7.1" />
+    </gaps_addressed>
+    <modified_files>
+      <category name="Pipeline (1)">
+        src/minivess/pipeline/trainer.py
+      </category>
+      <category name="Observability modules (3)">
+        src/minivess/observability/flow_observability.py,
+        src/minivess/observability/gpu_heartbeat.py,
+        src/minivess/observability/prefect_hooks.py
+      </category>
+      <category name="Flow files (2)">
+        src/minivess/orchestration/flows/train_flow.py,
+        src/minivess/orchestration/flows/dashboard_flow.py
+      </category>
+      <category name="Dashboard sections (1)">
+        src/minivess/orchestration/flows/dashboard_sections.py
+      </category>
+      <category name="Docker Compose (1)">
+        deployment/docker-compose.flows.yml
+      </category>
+      <category name="Healthcheck scripts (1 new)">
+        scripts/healthcheck_cpu.py
+      </category>
+      <category name="Knowledge graph (1)">
+        knowledge-graph/domains/observability.yaml
+      </category>
+      <category name="New test files (14)">
+        tests/v2/unit/pipeline/test_trainer_event_logger_wiring.py,
+        tests/v2/unit/pipeline/test_trainer_epoch_behavioral.py,
+        tests/v2/unit/orchestration/test_train_flow_event_logger_thread.py,
+        tests/v2/unit/orchestration/test_dashboard_stall_detection.py,
+        tests/v2/unit/orchestration/test_observability_dashboard_section.py,
+        tests/v2/unit/orchestration/test_dashboard_observability_collection.py,
+        tests/v2/unit/orchestration/test_dashboard_report_observability.py,
+        tests/v2/unit/deployment/test_healthcheck_cpu.py,
+        tests/v2/unit/deployment/test_all_services_healthcheck.py,
+        tests/v2/unit/deployment/test_healthcheck_stdlib_only.py,
+        tests/v2/unit/deployment/test_healthcheck_behavioral.py,
+        tests/v2/unit/observability/test_flow_otel_tracing.py,
+        tests/v2/unit/observability/test_task_hooks_otel_spans.py,
+        tests/v2/unit/observability/test_e2e_flow_artifacts.py,
+        tests/v2/unit/observability/test_heartbeat_behavioral.py,
+        tests/v2/unit/observability/test_otel_graceful_degradation.py,
+        tests/v2/unit/observability/test_heartbeat_stall_crosscheck.py,
+        tests/v2/unit/knowledge_graph/test_observability_kg_completeness.py
+      </category>
+    </modified_files>
+    <key_risks>
+      <risk severity="medium">
+        Phase 1 (trainer threading): SegmentationTrainer.fit() is the most critical
+        code path. Changes must not affect training correctness. Mitigated by:
+        event_logger is optional (None = no-op), and logging happens AFTER
+        train/val results are computed (no side effects on training logic).
+      </risk>
+      <risk severity="medium">
+        Phase 1.2 (threading.local for event_logger): Relies on Prefect running
+        tasks in the same process. If Prefect ever switches to remote workers,
+        the threading.local approach breaks. Mitigated by: Prefect 3.x default
+        for single-machine is process-local; cloud deployments would need
+        different observability anyway.
+      </risk>
+      <risk severity="low">
+        Phase 2 (Docker Compose healthchecks): Adding healthcheck to all services
+        increases Docker daemon overhead slightly (one healthcheck process per
+        container per interval). With 60s intervals, this is negligible.
+      </risk>
+      <risk severity="low">
+        Phase 4 (OTel wiring): opentelemetry packages are in pyproject.toml as
+        core deps (lines 57-58). However, Tier C light images may not include
+        them. ImportError is caught gracefully — zero risk to flow execution.
+      </risk>
+      <risk severity="low">
+        Phase 3.2 (heartbeat stall cross-check): Adds MLflow client call inside
+        the heartbeat background thread. This is rate-limited by the heartbeat
+        interval (30s) and only fires after the alert threshold (120s). Network
+        timeout is bounded. Failure is caught and logged — never blocks training.
+      </risk>
+    </key_risks>
+    <dependency_chain>
+      Phase 1 (trainer) and Phase 2 (healthcheck) are independent — can be parallelized.
+      Phase 3 (stall detection) depends on Phase 1 (trainer produces heartbeat.json).
+      Phase 4 (OTel) is independent of Phases 1-3.
+      Phase 5 (dashboard consumer) depends on Phases 1 and 3 (reads their artifacts).
+      Phase 6 (behavioral tests) depends on Phases 1-5 (tests what they produce).
+      Phase 7 (KG update) depends on Phases 1-6 (documents what was built).
+      Phase 8 (verification) depends on ALL previous phases.
+    </dependency_chain>
+  </summary>
+
+</plan>
