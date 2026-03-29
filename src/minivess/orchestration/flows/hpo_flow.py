@@ -24,6 +24,7 @@ from prefect import flow, task
 from prefect.deployments import run_deployment
 
 from minivess.orchestration.constants import FLOW_NAME_HPO, FLOW_NAME_TRAIN
+from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 

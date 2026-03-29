@@ -43,6 +43,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     FLOW_NAME_TRAINING_SUBFLOW,
 )
+from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.orchestration.cuda_guard import require_cuda_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (

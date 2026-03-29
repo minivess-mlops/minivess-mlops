@@ -93,3 +93,16 @@ class TestGpuFlowsCudaGuard:
             f"{flow_file} MUST call require_cuda_context() or use "
             f"gpu_flow_observability_context()"
         )
+
+
+class TestGpuFlowsHeartbeat:
+    """ALL 4 GPU flows must import gpu_flow_observability_context."""
+
+    @pytest.mark.parametrize("flow_file", _GPU_FLOWS)
+    def test_imports_gpu_observability(self, flow_file: str) -> None:
+        path = _FLOWS_DIR / flow_file
+        has_import = _file_imports(path, "gpu_flow_observability_context")
+        assert has_import, (
+            f"{flow_file} MUST import gpu_flow_observability_context "
+            f"for GPU heartbeat monitoring"
+        )
