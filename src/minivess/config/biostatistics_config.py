@@ -67,6 +67,14 @@ class BiostatisticsConfig(BaseModel):
         default_factory=lambda: Path("outputs/biostatistics"),
         description="Directory for generated artifacts (figures, tables, DuckDB).",
     )
+    analysis_duckdb_path: Path | None = Field(
+        default=None,
+        description=(
+            "Path to analysis_results.duckdb (DuckDB 1). When provided, the "
+            "Biostatistics Flow reads per-volume data from this DuckDB instead "
+            "of querying MLflow API. When None, falls back to MLflow API."
+        ),
+    )
     factorial_yaml: Path | None = Field(
         default=None,
         description=(

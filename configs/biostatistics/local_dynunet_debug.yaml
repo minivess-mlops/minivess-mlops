@@ -1,0 +1,39 @@
+# Biostatistics config for the local DynUNet 2-fold mechanics debug experiment.
+#
+# Key overrides from default:
+#   - min_folds_per_condition: 2 (this experiment has 2 folds, default is 3)
+#   - analysis_duckdb_path: reads from analysis_results.duckdb (DuckDB 1)
+#   - co_primary_metrics: clDice + ASSD (topology + boundary)
+#   - foil_metrics: DSC (intentional rank inversion demonstration)
+#
+# Plan: local-dynunet-mechanics-debug-plan-biostats-finish.xml v3.0
+
+experiment_names:
+  - "local_dynunet_mechanics_training"
+
+analysis_duckdb_path: "outputs/analysis/analysis_results.duckdb"
+
+output_dir: "outputs/biostatistics"
+
+min_folds_per_condition: 2
+min_conditions: 2
+
+co_primary_metrics:
+  - "cldice"
+  - "assd"
+
+foil_metrics:
+  - "dsc"
+
+calibration_co_primary_metrics:
+  - "cal_ece"
+  - "cal_ba_ece"
+
+splits:
+  - "trainval"
+  - "test"
+
+# Factor names for 2-way ANOVA (loss × aux_calib only — post_training is constant)
+factor_names:
+  - "loss_function"
+  - "with_aux_calib"
