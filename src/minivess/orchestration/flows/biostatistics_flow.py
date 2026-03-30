@@ -27,6 +27,7 @@ from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.pipeline.biostatistics_discovery import (
     discover_source_runs,
+    discover_source_runs_from_api,
     validate_source_completeness,
 )
 from minivess.pipeline.biostatistics_duckdb import (
@@ -69,7 +70,25 @@ def task_discover_source_runs(
     mlruns_dir: str,
     experiment_names: list[str],
 ) -> Any:
-    """Discover FINISHED runs from MLflow mlruns directory."""
+    """Discover FINISHED runs — tries MLflow API first, falls back to filesystem.
+
+    After DagsHub migration, training runs are on remote MLflow. The API-based
+    discovery queries the remote server directly. Falls back to filesystem
+    scanning for local file-based MLflow backends.
+    """
+    import os
+
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", "")
+
+    # Use API for remote MLflow (DagsHub, Cloud Run, etc.)
+    if tracking_uri.startswith("http"):
+        logger.info("Using MLflow API discovery (remote: %s)", tracking_uri[:50])
+        manifest = discover_source_runs_from_api(experiment_names, tracking_uri)
+        if len(manifest.runs) > 0:
+            return manifest
+        logger.warning("API discovery found 0 runs — falling back to filesystem")
+
+    # Fallback: filesystem scanning (local MLflow)
     return discover_source_runs(Path(mlruns_dir), experiment_names)
 
 
@@ -765,4 +784,9 @@ def _build_per_volume_data(
 
 
 if __name__ == "__main__":
-    run_biostatistics_flow()
+    import os as _os
+
+    _config_path = _os.environ.get(
+        "BIOSTATISTICS_CONFIG", "/app/configs/biostatistics/default.yaml"
+    )
+    run_biostatistics_flow(config_path=_config_path)

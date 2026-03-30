@@ -3,7 +3,7 @@
 # Includes both trainval (MiniVess CV) and test (DeepVess) splits.
 
 experiment_names:
-  - local_dynunet_mechanics_evaluation
+  - local_dynunet_mechanics_training
 
 mlruns_dir: mlruns
 output_dir: outputs/biostatistics_local_dynunet

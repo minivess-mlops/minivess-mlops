@@ -142,6 +142,74 @@ def validate_source_completeness(
     )
 
 
+def discover_source_runs_from_api(
+    experiment_names: list[str],
+    tracking_uri: str | None = None,
+) -> SourceRunManifest:
+    """Discover FINISHED training runs via MLflow API (remote backend).
+
+    Use this instead of discover_source_runs() when MLflow tracking uses
+    a remote backend (DagsHub, Cloud Run, etc.) where local mlruns/ is empty.
+
+    Parameters
+    ----------
+    experiment_names:
+        MLflow experiment names to include.
+    tracking_uri:
+        MLflow tracking URI. If None, reads from MLFLOW_TRACKING_URI env var.
+
+    Returns
+    -------
+    SourceRunManifest with all discovered runs and SHA-256 fingerprint.
+    """
+    import mlflow
+
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+
+    client = mlflow.MlflowClient()
+    runs: list[SourceRun] = []
+
+    for exp_name in experiment_names:
+        exp = client.get_experiment_by_name(exp_name)
+        if exp is None:
+            logger.warning("Experiment %r not found on MLflow server", exp_name)
+            continue
+
+        api_runs = client.search_runs(
+            experiment_ids=[exp.experiment_id],
+            filter_string="status = 'FINISHED'",
+            max_results=500,
+        )
+
+        for r in api_runs:
+            tags = dict(r.data.tags)
+            run = SourceRun(
+                run_id=r.info.run_id,
+                experiment_id=exp.experiment_id,
+                experiment_name=exp_name,
+                loss_function=tags.get("loss_function", "unknown"),
+                fold_id=int(tags.get("fold_id", -1)),
+                model_family=tags.get("model_family", "unknown"),
+                with_aux_calib=tags.get("with_aux_calib", "false").lower() == "true",
+                status="FINISHED",
+                post_training_method=tags.get("post_training_method", "none"),
+                recalibration=tags.get("recalibration", "none"),
+                ensemble_strategy=tags.get("ensemble_strategy", "none"),
+                is_zero_shot=tags.get("is_zero_shot", "false").lower() == "true",
+            )
+            # Skip parent/aggregate runs that have no fold_id
+            if run.fold_id >= 0:
+                runs.append(run)
+
+    logger.info(
+        "Discovered %d FINISHED runs via MLflow API across %d experiments",
+        len(runs),
+        len(experiment_names),
+    )
+    return SourceRunManifest.from_runs(runs)
+
+
 class BiostatisticsValidationError(Exception):
     """Raised when source data validation fails."""
 
