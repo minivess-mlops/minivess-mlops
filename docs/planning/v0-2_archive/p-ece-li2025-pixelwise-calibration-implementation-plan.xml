@@ -1,0 +1,645 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  pECE (Pixelwise Expected Calibration Error) Implementation Plan
+  Li et al. (2025) "SDC: Segmentation-aware Discriminative Calibration"
+  arXiv:2503.05107
+
+  3-Agent Council Review:
+    Biostatistician: Statistical correctness, ROPE selection, edge-case coverage
+    ML Engineer: Integration with existing calibration_metrics.py, config threading
+    Medical Imaging Expert: 3D volume semantics, FP overconfidence in vessel segmentation
+-->
+<plan>
+  <metadata>
+    <title>pECE (Li et al. 2025) — Pixelwise FP-Penalized Calibration Metric</title>
+    <branch>feat/pece-calibration-metric</branch>
+    <date>2026-03-29</date>
+    <status>ready-for-execution</status>
+    <priority>P1 — calibration metric completeness for Nature Protocols manuscript</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <estimated-effort>2-3 hours (single function + config + tests)</estimated-effort>
+    <report-references>
+      <ref url="https://arxiv.org/abs/2503.05107">Li et al. (2025). "SDC: Segmentation-aware Discriminative Calibration." arXiv:2503.05107.</ref>
+      <ref>docs/planning/v0-2_archive/original_docs/calibration-and-swag-implementation-plan.xml (Phase B0, task B0.1 — pECE was planned but not yet implemented)</ref>
+      <ref>src/minivess/pipeline/calibration_metrics.py (existing Tier 1 + Tier 2 metrics)</ref>
+      <ref>configs/biostatistics/default.yaml (metric registry, ROPE values)</ref>
+      <ref>src/minivess/config/biostatistics_config.py (BiostatisticsConfig Pydantic model)</ref>
+    </report-references>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- COUNCIL DELIBERATION                                               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <council-deliberation>
+    <agent role="Biostatistician">
+      <assessment>
+        pECE extends standard ECE with an asymmetric FP overconfidence penalty. The
+        formula from Li et al. (2025) is:
+
+          pECE = Sum_{b=1}^{B} |Omega_b| / |Omega| * |(p_bar_b - a_bar_b) + w_fp * FPConf_b|
+
+        where FPConf_b is the mean confidence of false-positive pixels in bin b, and
+        w_fp is a configurable weight (paper default: approximately 2.0).
+
+        Key statistical properties:
+        1. pECE >= ECE when w_fp > 0 (the FP penalty can only increase the error)
+        2. pECE = ECE when w_fp = 0 (degenerates to standard ECE)
+        3. pECE is unbounded above (unlike ECE which is in [0,1]), because the FP
+           penalty offset is added INSIDE the absolute value — a bin with perfect
+           calibration (p_bar = a_bar) but FP overconfidence still contributes
+        4. Range: [0, 1 + w_fp] theoretical maximum for w_fp > 0
+
+        ROPE recommendation: 0.03 (wider than ECE's 0.02 because the FP penalty
+        introduces additional variance, and the metric has a wider dynamic range).
+
+        Edge cases requiring explicit handling:
+        - Empty bins (no pixels in confidence range): skip bin, zero contribution
+        - No false positives in a bin: FPConf_b = 0, term reduces to standard ECE gap
+        - All-zero labels: every predicted pixel is FP, FPConf_b = p_bar_b for all bins
+        - All-one labels: no false positives possible, pECE = ECE exactly
+        - Single-class arrays (all 0s or all 1s): must not crash, return valid float
+      </assessment>
+      <recommendation>
+        Implement as pure numpy function matching existing pattern. Place in Tier 2
+        (comprehensive) because the FP decomposition is analysis-appropriate, not
+        training-loop-appropriate (training needs fast metrics only). The w_fp
+        parameter MUST come from config per Rule 29.
+      </recommendation>
+    </agent>
+
+    <agent role="ML-Engineer">
+      <assessment>
+        Library search results:
+        1. SDC-Loss repo (github.com/EagleAdelaide/SDC-Loss) — has pECE in metrics.py,
+           but it is tightly coupled to their training loop (torch tensors, CUDA).
+           Not usable as-is in our numpy-based evaluation pipeline.
+        2. torchmetrics — no pECE implementation
+        3. netcal — no pECE implementation
+        4. calibration-error (PyPI) — standard ECE only, no FP penalty variant
+        5. reliability-diagrams — no pECE
+
+        Conclusion: No library provides a numpy-compatible pECE for binary segmentation.
+        Custom implementation is justified per Rule 3 (library-first: "only write custom
+        code when no suitable library exists").
+
+        Integration points (6 files to modify):
+        1. src/minivess/pipeline/calibration_metrics.py — add compute_pece() function
+        2. src/minivess/pipeline/calibration_metrics.py — add to compute_all_calibration_metrics() Tier 2
+        3. configs/biostatistics/default.yaml — add cal_pece to metrics list + ROPE
+        4. src/minivess/config/biostatistics_config.py — add cal_pece to _DEFAULT_METRICS + ROPE
+        5. src/minivess/config/biostatistics_config.py — add pece_fp_weight config field
+        6. tests/v2/unit/test_calibration_metrics_comprehensive.py — add pECE test class
+
+        Threading w_fp through the call chain:
+        - BiostatisticsConfig gains pece_fp_weight: float field (default from config)
+        - compute_all_calibration_metrics() gains optional fp_weight parameter
+        - evaluation_runner.py passes fp_weight when calling comprehensive tier
+        - Training validation loop (Tier 1 "fast") does NOT call pECE — no change needed
+
+        The _equal_width_bin_stats helper can be REUSED for the standard binning, but
+        pECE needs additional per-bin FP statistics. Best approach: extend the binning
+        loop inline in compute_pece() rather than modifying the shared helper (which
+        would break the clean interface for other metrics).
+      </assessment>
+      <recommendation>
+        Self-contained compute_pece() with its own binning loop (pattern matches
+        compute_ba_ece which also has custom binning). Reuse _equal_width_bin_stats
+        pattern but not the function itself, because pECE needs FP-specific stats
+        per bin that the helper does not compute.
+      </recommendation>
+    </agent>
+
+    <agent role="Medical-Imaging-Expert">
+      <assessment>
+        pECE is particularly relevant for our vascular segmentation use case:
+
+        1. Vascular structures have extreme class imbalance (foreground ~2-5% of volume).
+           Standard ECE treats FP and FN symmetrically, but in clinical practice,
+           a confident false-positive vessel prediction is MORE dangerous than an
+           uncertain true-negative (it could trigger unnecessary intervention).
+
+        2. The w_fp parameter allows researchers to encode clinical asymmetry:
+           w_fp > 1 means "penalize overconfident FPs more than underconfident FNs"
+           w_fp = 2.0 (paper default) is reasonable for diagnostic imaging where
+           false positives waste clinical resources.
+
+        3. For our MinIVess 3D volumes (typically 512x512xD), the metric operates on
+           flattened voxels — same as all other calibration metrics. The 3D spatial
+           structure is not used by pECE (that is what BA-ECE captures). pECE adds
+           semantic asymmetry (FP vs FN), not spatial awareness.
+
+        4. The with_aux_calib factorial factor (auxiliary calibration loss during
+           training) should show measurable impact on pECE — well-calibrated models
+           should have lower FP overconfidence. This makes pECE a good discriminator
+           for the aux_calib factor in the factorial ANOVA.
+
+        5. For the DeepVess external test set, pECE is especially informative because
+           domain shift often manifests as overconfident false positives in tissue
+           regions that look vascular but are not (e.g., autofluorescent debris).
+      </assessment>
+      <recommendation>
+        Include pECE as Tier 2 metric. Default w_fp = 2.0 from paper. Consider adding
+        pECE to calibration_co_primary_metrics in a future PR (alongside ECE + BA-ECE)
+        once we have empirical data from the factorial design showing its discriminative
+        power. For this PR, add it as a tracked metric only (not co-primary).
+      </recommendation>
+    </agent>
+
+    <consensus>
+      All three agents agree:
+      1. Custom numpy implementation (no suitable library exists)
+      2. Tier 2 (comprehensive) placement — analysis flow only
+      3. w_fp from BiostatisticsConfig (Rule 29), default = 2.0 from paper
+      4. ROPE = 0.03 (wider than ECE due to FP penalty variance)
+      5. NOT co-primary yet — tracked metric, promotion after empirical evidence
+      6. Full edge-case coverage (empty bins, all-zero labels, all-one labels)
+    </consensus>
+  </council-deliberation>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- FORMULA SPECIFICATION                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <formula-specification>
+    <paper-definition>
+      pECE = Sum_{b=1}^{B} (|Omega_b| / |Omega|) * |(p_bar_b - a_bar_b) + w_fp * FPConf_b|
+
+      Where:
+        B = number of equal-width bins (default: 15, matching ECE for comparability)
+        Omega_b = set of pixels with predicted confidence in bin b
+        |Omega| = total number of pixels
+        p_bar_b = mean predicted confidence in bin b
+        a_bar_b = mean accuracy (label) in bin b
+        FPConf_b = mean confidence of false-positive pixels in bin b
+                   (pixels where label=0 but prediction > threshold)
+                   If no FPs in bin: FPConf_b = 0.0
+        w_fp = FP overconfidence weight (default: 2.0, from config)
+    </paper-definition>
+
+    <pseudocode>
+      def compute_pece(probs, labels, *, n_bins, fp_weight):
+          """Pixelwise ECE with FP overconfidence penalty (Li et al. 2025)."""
+          total = len(probs)
+          if total == 0:
+              raise ValueError("probs and labels must not be empty")
+
+          bin_boundaries = np.linspace(0.0, 1.0, n_bins + 1)
+          pece = 0.0
+
+          for i in range(n_bins):
+              # Pixels in this confidence bin
+              mask = (probs > bin_boundaries[i]) &amp; (probs &lt;= bin_boundaries[i + 1])
+              count = mask.sum()
+              if count == 0:
+                  continue
+
+              bin_weight = count / total
+              bin_conf = probs[mask].mean()   # p_bar_b
+              bin_acc = labels[mask].mean()    # a_bar_b
+
+              # False-positive pixels in this bin: predicted positive but label=0
+              fp_mask = mask &amp; (labels == 0)
+              fp_count = fp_mask.sum()
+              fp_conf = probs[fp_mask].mean() if fp_count > 0 else 0.0  # FPConf_b
+
+              # pECE contribution: |gap + fp_penalty|
+              offset = fp_weight * fp_conf
+              pece += bin_weight * abs((bin_conf - bin_acc) + offset)
+
+          return pece
+    </pseudocode>
+
+    <properties>
+      <property name="lower_bound">0.0 (achieved when perfectly calibrated AND no false positives)</property>
+      <property name="upper_bound">1.0 + fp_weight (theoretical; practical range [0, ~0.5] for reasonable models)</property>
+      <property name="degenerate_case_fp_weight_0">Equals standard ECE (the FP penalty vanishes)</property>
+      <property name="degenerate_case_all_zero_labels">Every pixel is FP; FPConf_b = p_bar_b; large penalty</property>
+      <property name="degenerate_case_all_one_labels">No FPs possible; FPConf_b = 0; pECE = ECE</property>
+      <property name="monotonicity_in_fp_weight">pECE is non-decreasing in fp_weight (more penalty = higher score)</property>
+    </properties>
+  </formula-specification>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- PHASES                                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <phases>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <!-- PHASE 1: TDD — Write Failing Tests FIRST (RED)                 -->
+    <!-- ─────────────────────────────────────────────────────────────── -->
+
+    <phase id="1" name="RED — Write Failing Tests">
+      <description>
+        Write comprehensive tests for compute_pece() BEFORE implementation.
+        All tests must FAIL (ImportError or AssertionError) until Phase 2.
+        Follows self-learning-iterative-coder skill: RED phase.
+      </description>
+
+      <tasks>
+        <task id="1.1" title="Add TestPECE class to test_calibration_metrics_comprehensive.py">
+          <file>tests/v2/unit/test_calibration_metrics_comprehensive.py</file>
+          <description>
+            Add a TestPECE class with the following test methods. Each test imports
+            compute_pece from minivess.pipeline.calibration_metrics.
+
+            Tests designed by Biostatistician to cover all statistical properties:
+          </description>
+          <tests>
+            <test name="test_pece_perfect_calibration_no_fp">
+              Scenario: probs perfectly match labels, no false positives.
+              Input: labels=[1,1,0,0], probs=[0.95, 0.90, 0.05, 0.10]
+              Expected: pECE is very low (near 0) because well-calibrated + no FP overconfidence.
+              Assert: 0.0 &lt;= pece &lt;= 0.15
+            </test>
+            <test name="test_pece_overconfident_fps_high_penalty">
+              Scenario: Many false positives with high confidence.
+              Input: 1000 pixels where 500 are FP (label=0, prob=0.9).
+              Expected: pECE significantly higher than ECE due to FP penalty.
+              Assert: pece > ece (compare with compute_ece on same data)
+            </test>
+            <test name="test_pece_equals_ece_when_fp_weight_zero">
+              Scenario: w_fp=0 degenerates pECE to standard ECE.
+              Input: Random calibration data (use _perfect_calibration helper).
+              Assert: pece(fp_weight=0.0) == pytest.approx(ece, abs=0.001)
+              (Small tolerance for binning differences between ECE implementations)
+            </test>
+            <test name="test_pece_increases_with_fp_weight">
+              Scenario: Monotonicity — higher w_fp produces higher pECE.
+              Input: Data with some FPs.
+              Assert: pece(fp_weight=1.0) &lt;= pece(fp_weight=2.0) &lt;= pece(fp_weight=4.0)
+            </test>
+            <test name="test_pece_all_zero_labels">
+              Scenario: All-background (every prediction is a false positive).
+              Input: labels=zeros(100), probs=uniform(0.3, 0.9, 100)
+              Expected: pECE is large (every pixel is FP with high confidence).
+              Assert: pece > 0.0 AND isinstance(pece, float) AND np.isfinite(pece)
+            </test>
+            <test name="test_pece_all_one_labels">
+              Scenario: All-foreground (no false positives possible).
+              Input: labels=ones(100), probs=uniform(0.6, 0.99, 100)
+              Expected: pECE equals ECE (no FP penalty contribution).
+              Assert: pece == pytest.approx(ece, abs=0.001)
+            </test>
+            <test name="test_pece_empty_input_raises">
+              Scenario: Empty arrays.
+              Input: probs=array([]), labels=array([])
+              Assert: raises ValueError
+            </test>
+            <test name="test_pece_returns_float">
+              Input: Any valid data.
+              Assert: isinstance(result, float)
+            </test>
+            <test name="test_pece_in_all_calibration_metrics_comprehensive">
+              Scenario: pECE appears in compute_all_calibration_metrics(tier="comprehensive").
+              Assert: "pece" in result dict AND isinstance(result["pece"], float)
+            </test>
+            <test name="test_pece_not_in_fast_tier">
+              Scenario: pECE is Tier 2 only — must NOT appear in fast tier.
+              Assert: "pece" not in compute_all_calibration_metrics(tier="fast")
+            </test>
+            <test name="test_pece_known_value_hand_computed">
+              Scenario: Hand-computed example for regression testing.
+              Input: Carefully constructed 10-pixel example where pECE can be computed
+              by hand. 2 bins, 5 pixels each.
+
+              Bin 1 (0.0, 0.5]: pixels with probs [0.2, 0.3, 0.4, 0.1, 0.2],
+                                labels [0, 1, 0, 0, 1]
+                p_bar_1 = 0.24, a_bar_1 = 0.4, FPs = {0.2, 0.4, 0.1} (label=0),
+                FPConf_1 = (0.2+0.4+0.1)/3 = 0.2333...
+                contribution = (5/10) * |(0.24 - 0.4) + 2.0 * 0.2333| = 0.5 * |(-0.16) + 0.4667| = 0.5 * 0.3067 = 0.1533
+
+              Bin 2 (0.5, 1.0]: pixels with probs [0.7, 0.8, 0.9, 0.6, 0.8],
+                                labels [1, 1, 0, 1, 0]
+                p_bar_2 = 0.76, a_bar_2 = 0.6, FPs = {0.9, 0.8} (label=0),
+                FPConf_2 = (0.9+0.8)/2 = 0.85
+                contribution = (5/10) * |(0.76 - 0.6) + 2.0 * 0.85| = 0.5 * |0.16 + 1.70| = 0.5 * 1.86 = 0.93
+
+              pECE = 0.1533 + 0.93 = 1.0833 (approximately)
+
+              Assert: pece == pytest.approx(1.0833, abs=0.01) with n_bins=2, fp_weight=2.0
+            </test>
+          </tests>
+        </task>
+
+        <task id="1.2" title="Add pECE config tests">
+          <file>tests/v2/unit/test_biostatistics_calibration_config.py</file>
+          <description>
+            Add tests verifying that BiostatisticsConfig includes pECE configuration:
+          </description>
+          <tests>
+            <test name="test_cal_pece_in_default_metrics">
+              Assert: "cal_pece" in BiostatisticsConfig().metrics
+            </test>
+            <test name="test_cal_pece_rope_value_exists">
+              Assert: "cal_pece" in BiostatisticsConfig().rope_values
+              Assert: BiostatisticsConfig().rope_values["cal_pece"] > 0
+            </test>
+            <test name="test_pece_fp_weight_config_field">
+              Assert: BiostatisticsConfig has pece_fp_weight field
+              Assert: BiostatisticsConfig().pece_fp_weight > 0
+              Assert: isinstance(BiostatisticsConfig().pece_fp_weight, float)
+            </test>
+            <test name="test_pece_fp_weight_configurable">
+              cfg = BiostatisticsConfig(pece_fp_weight=3.0)
+              Assert: cfg.pece_fp_weight == 3.0
+            </test>
+          </tests>
+        </task>
+      </tasks>
+
+      <gate>
+        All new tests FAIL with ImportError (compute_pece not found) or
+        AttributeError (pece_fp_weight not on config). Zero tests pass.
+        Existing tests are UNAFFECTED (still pass).
+      </gate>
+    </phase>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <!-- PHASE 2: Implement compute_pece() (GREEN)                      -->
+    <!-- ─────────────────────────────────────────────────────────────── -->
+
+    <phase id="2" name="GREEN — Implement compute_pece()">
+      <description>
+        Implement the pECE function and config changes to make all RED tests pass.
+        Pure numpy. No torch. No regex. w_fp from config.
+      </description>
+
+      <tasks>
+        <task id="2.1" title="Add compute_pece() to calibration_metrics.py">
+          <file>src/minivess/pipeline/calibration_metrics.py</file>
+          <description>
+            Add compute_pece() in the Tier 2 section (after compute_ba_ece,
+            before compute_brier_map). Follow the exact pattern of existing
+            Tier 2 functions.
+
+            Function signature:
+              def compute_pece(
+                  probs: np.ndarray,
+                  labels: np.ndarray,
+                  *,
+                  n_bins: int = 15,
+                  fp_weight: float,
+              ) -> float:
+
+            CRITICAL: fp_weight has NO default value in the function signature.
+            It must be explicitly passed by the caller, who reads it from config.
+            This enforces Rule 29 (no hardcoded parameters). The config default
+            lives in BiostatisticsConfig.pece_fp_weight, not in the function.
+
+            Implementation: see formula-specification/pseudocode above.
+
+            Add docstring with:
+            - Paper reference: Li et al. (2025), arXiv:2503.05107
+            - Formula in ASCII math
+            - Parameter descriptions
+            - Returns description
+            - Note about fp_weight having no default (config-driven)
+
+            Add to module docstring references section:
+              - Li et al. (2025). "SDC: Segmentation-aware Discriminative Calibration."
+          </description>
+        </task>
+
+        <task id="2.2" title="Add pECE to compute_all_calibration_metrics()">
+          <file>src/minivess/pipeline/calibration_metrics.py</file>
+          <description>
+            In compute_all_calibration_metrics(), add fp_weight as an optional
+            keyword parameter with a default of 2.0 (the paper default). This
+            default is acceptable HERE because:
+            (a) The function is a convenience aggregator, not a researcher-facing API
+            (b) The real config path is BiostatisticsConfig -> evaluation_runner -> this function
+            (c) Having a default prevents breaking existing callers (metrics.py training loop)
+
+            Add to the "comprehensive" tier block:
+              if tier == "comprehensive":
+                  result["ace"] = compute_ace(flat_probs, flat_labels)
+                  result["ba_ece"] = compute_ba_ece(probs, labels)
+                  result["pece"] = compute_pece(
+                      flat_probs, flat_labels, n_bins=n_bins, fp_weight=fp_weight
+                  )
+
+            Update function signature:
+              def compute_all_calibration_metrics(
+                  probs: np.ndarray,
+                  labels: np.ndarray,
+                  *,
+                  tier: str = "comprehensive",
+                  n_bins: int = 15,
+                  fp_weight: float = 2.0,  # pECE FP penalty (Li et al. 2025)
+              ) -> dict[str, float]:
+
+            Update docstring to document fp_weight parameter.
+          </description>
+        </task>
+
+        <task id="2.3" title="Add pece_fp_weight to BiostatisticsConfig">
+          <file>src/minivess/config/biostatistics_config.py</file>
+          <description>
+            Add three changes:
+
+            1. Add "cal_pece" to _DEFAULT_METRICS list (after "cal_ba_ece"):
+                "cal_pece",
+
+            2. Add "cal_pece" ROPE value to _DEFAULT_ROPE_VALUES:
+                "cal_pece": 0.03,
+
+            3. Add pece_fp_weight field to BiostatisticsConfig class, in the
+               Metrics section:
+                pece_fp_weight: float = Field(
+                    default=2.0,
+                    gt=0.0,
+                    description=(
+                        "FP overconfidence weight for pECE metric (Li et al. 2025). "
+                        "Higher values penalize overconfident false positives more. "
+                        "Paper default: 2.0."
+                    ),
+                )
+          </description>
+        </task>
+
+        <task id="2.4" title="Add cal_pece to configs/biostatistics/default.yaml">
+          <file>configs/biostatistics/default.yaml</file>
+          <description>
+            Add "cal_pece" to the metrics list (after cal_ba_ece):
+              - cal_pece
+
+            Add ROPE value:
+              cal_pece: 0.03
+
+            Add pece_fp_weight field:
+              # pECE FP overconfidence weight (Li et al. 2025, arXiv:2503.05107)
+              pece_fp_weight: 2.0
+          </description>
+        </task>
+
+        <task id="2.5" title="Thread fp_weight through evaluation_runner.py">
+          <file>src/minivess/pipeline/evaluation_runner.py</file>
+          <description>
+            In _compute_calibration_metrics_for_volumes(), pass fp_weight to
+            compute_all_calibration_metrics(). The fp_weight should come from
+            self._config or a parameter.
+
+            Two options (choose based on existing pattern):
+            Option A: If _compute_calibration_metrics_for_volumes already receives
+            config, add fp_weight parameter.
+            Option B: Pass fp_weight=2.0 explicitly (acceptable for now since
+            evaluation_runner config threading is a separate concern).
+
+            For this PR, Option B is acceptable — the config threading from
+            BiostatisticsConfig to evaluation_runner can be done in a follow-up
+            when the biostatistics flow wires pece_fp_weight through. The default
+            in compute_all_calibration_metrics() ensures correct behavior.
+          </description>
+        </task>
+      </tasks>
+
+      <gate>
+        ALL Phase 1 tests pass (GREEN). ALL existing tests still pass.
+        make test-staging succeeds with 0 failures and 0 new skips.
+      </gate>
+    </phase>
+
+    <!-- ─────────────────────────────────────────────────────────────── -->
+    <!-- PHASE 3: VERIFY + Quality Review                               -->
+    <!-- ─────────────────────────────────────────────────────────────── -->
+
+    <phase id="3" name="VERIFY — Full Suite + Quality Review">
+      <description>
+        Run full staging test suite and verify no regressions. Review code
+        quality via /simplify skill. Ensure compute_pece matches the paper
+        formula exactly.
+      </description>
+
+      <tasks>
+        <task id="3.1" title="Run make test-staging">
+          <description>
+            Full staging gate. Must pass with 0 failures and 0 new skips.
+            Report total test count and skip count with reasons.
+          </description>
+        </task>
+
+        <task id="3.2" title="Run ruff check + mypy">
+          <description>
+            uv run ruff check src/minivess/pipeline/calibration_metrics.py
+            uv run ruff check src/minivess/config/biostatistics_config.py
+            uv run ruff check tests/v2/unit/test_calibration_metrics_comprehensive.py
+            uv run mypy src/minivess/pipeline/calibration_metrics.py
+          </description>
+        </task>
+
+        <task id="3.3" title="Verify formula against paper">
+          <description>
+            Cross-reference the implementation against arXiv:2503.05107 Algorithm 1.
+            Specifically verify:
+            1. Bin boundaries use equal-width (not equal-count)
+            2. FPConf_b is mean confidence of pixels where (label=0 AND pixel in bin)
+            3. The offset is fp_weight * FPConf_b (not fp_weight * |gap|)
+            4. The absolute value wraps the SUM of gap + offset, not each individually
+            5. Bin weight is |Omega_b| / |Omega| (count-proportional, not 1/B)
+          </description>
+        </task>
+
+        <task id="3.4" title="Run /simplify on changed files">
+          <description>
+            Review compute_pece() implementation for:
+            - Unnecessary complexity
+            - Missed numpy vectorization opportunities
+            - Docstring completeness
+            - Edge-case handling completeness
+          </description>
+        </task>
+      </tasks>
+
+      <gate>
+        make test-staging: 0 failures.
+        ruff + mypy: 0 errors.
+        Formula verified against paper.
+        /simplify review: no critical issues.
+      </gate>
+    </phase>
+  </phases>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- FILES CHANGED SUMMARY                                             -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <files-changed>
+    <file action="modify" path="src/minivess/pipeline/calibration_metrics.py">
+      Add compute_pece() function. Add pECE to compute_all_calibration_metrics()
+      comprehensive tier. Add Li et al. (2025) to module docstring references.
+    </file>
+    <file action="modify" path="src/minivess/config/biostatistics_config.py">
+      Add "cal_pece" to _DEFAULT_METRICS, _DEFAULT_ROPE_VALUES.
+      Add pece_fp_weight field to BiostatisticsConfig.
+    </file>
+    <file action="modify" path="configs/biostatistics/default.yaml">
+      Add cal_pece to metrics list, ROPE values, and pece_fp_weight field.
+    </file>
+    <file action="modify" path="src/minivess/pipeline/evaluation_runner.py">
+      Minimal change: fp_weight threading if needed (may be zero-diff if
+      compute_all_calibration_metrics default suffices for this PR).
+    </file>
+    <file action="modify" path="tests/v2/unit/test_calibration_metrics_comprehensive.py">
+      Add TestPECE class with 11 test methods.
+    </file>
+    <file action="modify" path="tests/v2/unit/test_biostatistics_calibration_config.py">
+      Add 4 config tests for cal_pece and pece_fp_weight.
+    </file>
+  </files-changed>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- RISK REGISTER                                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <risk-register>
+    <risk id="R1" severity="low" mitigation="handled">
+      <description>
+        compute_all_calibration_metrics callers in metrics.py (training loop)
+        use tier="fast" — they will NOT see pECE. No breaking change.
+      </description>
+    </risk>
+    <risk id="R2" severity="low" mitigation="handled">
+      <description>
+        evaluation_runner.py calls compute_all_calibration_metrics(tier="comprehensive")
+        without fp_weight. The default fp_weight=2.0 in the function signature
+        provides correct behavior. Full config threading is a follow-up.
+      </description>
+    </risk>
+    <risk id="R3" severity="medium" mitigation="test-covered">
+      <description>
+        pECE can exceed 1.0 (unlike ECE) because the FP penalty offset is added
+        inside the absolute value. Consumers (e.g., ROPE tests, reliability diagrams)
+        that assume calibration metrics are in [0,1] must be checked.
+      </description>
+      <mitigation>
+        test_pece_known_value_hand_computed explicitly tests a case where pECE > 1.0.
+        ROPE value of 0.03 is well within reasonable range. Reliability diagram
+        code does not consume pECE (it uses per-bin stats, not scalar metrics).
+      </mitigation>
+    </risk>
+    <risk id="R4" severity="low" mitigation="by-design">
+      <description>
+        Binary segmentation assumption: FP = (label=0 AND pred_confidence > threshold).
+        For probability-based calibration metrics, we use the continuous probability
+        (no threshold). FP here means "label=0" pixels that the model assigns nonzero
+        foreground probability to. This matches Li et al. (2025) definition.
+      </description>
+    </risk>
+  </risk-register>
+
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+  <!-- NON-GOALS (explicit scope boundary)                               -->
+  <!-- ═══════════════════════════════════════════════════════════════════ -->
+
+  <non-goals>
+    <item>SDC Loss function (the training loss from the same paper) — separate PR</item>
+    <item>CECE (Class-wise ECE) — not in this PR, separate implementation</item>
+    <item>pECE as co-primary metric — requires empirical evidence from factorial runs</item>
+    <item>Full config threading from BiostatisticsConfig through evaluation_runner — follow-up PR</item>
+    <item>pECE in training validation loop (Tier 1 "fast") — not needed, analysis-only</item>
+    <item>Visualization / reliability diagram changes for pECE — separate PR</item>
+  </non-goals>
+
+</plan>
