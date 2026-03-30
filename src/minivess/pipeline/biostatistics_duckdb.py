@@ -547,6 +547,133 @@ def build_analysis_results_duckdb(
     return output_path
 
 
+def read_analysis_duckdb(
+    db_path: Path,
+) -> tuple[Any, dict[str, dict[str, dict[int, np.ndarray]]]]:
+    """Read analysis_results.duckdb into SourceRunManifest + PerVolumeData.
+
+    This is the primary input path for the Biostatistics Flow when
+    analysis_duckdb_path is set in BiostatisticsConfig.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the analysis_results.duckdb file.
+
+    Returns
+    -------
+    Tuple of:
+      - SourceRunManifest with all runs and factorial metadata
+      - PerVolumeData: ``{metric: {condition_key: {fold_id: scores_array}}}``
+    """
+    import duckdb
+
+    from minivess.pipeline.biostatistics_statistics import encode_condition_key
+    from minivess.pipeline.biostatistics_types import SourceRun, SourceRunManifest
+
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    # --- Build SourceRunManifest from runs table ---
+    run_rows = conn.execute(
+        "SELECT run_id, experiment_id, experiment_name, loss_function, fold_id, "
+        "model_family, with_aux_calib, post_training_method, recalibration, "
+        "ensemble_strategy, is_zero_shot, status FROM runs"
+    ).fetchall()
+
+    runs: list[SourceRun] = []
+    for row in run_rows:
+        runs.append(
+            SourceRun(
+                run_id=row[0],
+                experiment_id=row[1] or "",
+                experiment_name=row[2] or "",
+                loss_function=row[3] or "unknown",
+                fold_id=int(row[4]),
+                model_family=row[5] or "unknown",
+                with_aux_calib=bool(row[6]),
+                post_training_method=row[7] or "none",
+                recalibration=row[8] or "none",
+                ensemble_strategy=row[9] or "none",
+                is_zero_shot=bool(row[10]),
+                status=row[11] or "FINISHED",
+            )
+        )
+    manifest = SourceRunManifest.from_runs(runs)
+
+    # --- Build PerVolumeData from per_volume_metrics + runs ---
+    pv_rows = conn.execute(
+        """
+        SELECT
+            r.loss_function,
+            r.model_family,
+            r.with_aux_calib,
+            r.post_training_method,
+            r.recalibration,
+            r.ensemble_strategy,
+            pv.fold_id,
+            pv.metric_name,
+            pv.metric_value
+        FROM per_volume_metrics pv
+        JOIN runs r ON pv.run_id = r.run_id
+        ORDER BY pv.metric_name, r.run_id, pv.fold_id
+        """
+    ).fetchall()
+
+    conn.close()
+
+    # Build nested dict: metric -> condition_key -> fold_id -> list[float]
+    data: dict[str, dict[str, dict[int, list[float]]]] = {}
+
+    for row in pv_rows:
+        (
+            loss_function,
+            model_family,
+            with_aux_calib,
+            post_training_method,
+            recalibration,
+            ensemble_strategy,
+            fold_id,
+            metric_name,
+            metric_value,
+        ) = row
+
+        condition_key = encode_condition_key({
+            "ensemble_strategy": str(ensemble_strategy or "none"),
+            "loss_function": str(loss_function or "unknown"),
+            "model_family": str(model_family or "unknown"),
+            "post_training_method": str(post_training_method or "none"),
+            "recalibration": str(recalibration or "none"),
+            "with_aux_calib": (
+                str(with_aux_calib).lower()
+                if with_aux_calib is not None
+                else "false"
+            ),
+        })
+
+        data.setdefault(metric_name, {}).setdefault(condition_key, {}).setdefault(
+            int(fold_id), []
+        ).append(float(metric_value))
+
+    # Convert lists to numpy arrays
+    pv_data: dict[str, dict[str, dict[int, np.ndarray]]] = {}
+    for metric, conditions in data.items():
+        pv_data[metric] = {}
+        for cond, folds in conditions.items():
+            pv_data[metric][cond] = {
+                fold_id: np.array(values, dtype=np.float64)
+                for fold_id, values in sorted(folds.items())
+            }
+
+    logger.info(
+        "Read analysis DuckDB: %d runs, %d metrics, %d conditions",
+        len(runs),
+        len(pv_data),
+        len(next(iter(pv_data.values()), {})) if pv_data else 0,
+    )
+
+    return manifest, pv_data
+
+
 def export_analysis_parquet(db_path: Path, output_dir: Path) -> list[Path]:
     """Export all analysis DuckDB tables to Parquet files.
 
