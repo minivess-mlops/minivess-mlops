@@ -2,9 +2,9 @@
   "plan_file": "docs/planning/v0-2_archive/original_docs/local-dynunet-mechanics-debug-plan-biostats-finish.xml",
   "plan_version": "3.0",
   "execution_mode": "autonomous",
-  "current_task_id": "5.1",
-  "current_phase": "RED",
-  "inner_iteration": 12,
+  "current_task_id": "5.2",
+  "current_phase": "DONE",
+  "inner_iteration": 14,
   "tasks": {
     "1.1": {"status": "DONE", "note": "6 tests, set_factorial_tags + build_training_tags"},
     "1.2": {"status": "DONE", "note": "8 tests, build_analysis_results_duckdb + export_analysis_parquet"},
@@ -21,8 +21,8 @@
     "4.2": {"status": "DEFERRED", "note": "Analysis Flow — needs rebuilt Docker image + GPU"},
     "4.3": {"status": "DEFERRED", "note": "Biostatistics Flow — needs analysis_results.duckdb"},
     "4.4": {"status": "DEFERRED", "note": "R rendering — needs built R Docker image"},
-    "5.1": {"status": "IN_PROGRESS", "note": "Artifact integrity + statistical correctness"},
-    "5.2": {"status": "NOT_STARTED", "note": "Full test suite + merge preparation"}
+    "5.1": {"status": "DONE", "note": "5 tests, verify_artifact_chain + validate_statistical_results"},
+    "5.2": {"status": "DONE", "note": "43 new tests passing, ruff clean, ready for PR"}
   },
   "convergence": {
     "reached": false,
