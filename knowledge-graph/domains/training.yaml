@@ -49,6 +49,49 @@ decisions:
     evidence: [docs/planning/calibration-conformal-prediction-plan.md]
     prd_node: knowledge-graph/decisions/L3-technology/calibration_method.yaml
 
+  calibration_training_loss:
+    status: resolved
+    winner: hl1_ace_auxiliary
+    rationale: >
+      hL1-ACE (Hard L1 Average Calibration Error) as auxiliary loss.
+      Barfoot et al. (2025), "Average Calibration Losses for Improved Calibration
+      of Medical Image Segmentation Networks", IEEE TMI (arXiv:2506.03942).
+      Added via aux_calibration=true factorial factor. Does NOT replace the
+      primary segmentation loss — it is an AUXILIARY term.
+    implementation:
+      - src/minivess/pipeline/calibration_losses.py  # HL1ACELoss
+      - src/minivess/pipeline/loss_functions.py  # AuxCalibCompoundLoss wrapper
+    last_reviewed: "2026-03-30"
+
+  calibration_metrics:
+    status: resolved
+    winner: two_tier_ece_ba_ece
+    rationale: >
+      Two-tier calibration metrics system:
+      Tier 1 (fast, training loop): ECE, MCE, Brier, NLL, overconfidence error, debiased ECE
+      Tier 2 (comprehensive, analysis flow): ACE (Nixon 2019), BA-ECE (Zeevi 2025), spatial maps
+      Co-primary calibration metrics: ECE + BA-ECE (Holm-Bonferroni at alpha/2)
+      BA-ECE is clinically critical — measures calibration at vessel boundaries.
+    implementation:
+      - src/minivess/pipeline/calibration_metrics.py  # All metrics
+      - src/minivess/pipeline/metrics.py  # Tier 1 in validation loop
+      - src/minivess/pipeline/evaluation_runner.py  # Tier 1+2 in analysis
+    last_reviewed: "2026-03-30"
+
+  three_evaluation_axes:
+    status: resolved
+    winner: accuracy_uncertainty_calibration
+    rationale: >
+      Three DISTINCT axes (NOT interchangeable):
+      1. Segmentation Accuracy: DSC, clDice, HD95, MASD, skeleton recall
+      2. Uncertainty: raw probability quality (softmax output, entropy)
+      3. Calibration: do probabilities reflect true frequencies? (ECE, BA-ECE)
+      aux_calibration=true targets axis 3 (calibration) without degrading axis 1 (accuracy).
+      Equal accuracy + better calibration = net win for deployment.
+    implementation:
+      - src/minivess/config/biostatistics_config.py  # co_primary + calibration_co_primary
+    last_reviewed: "2026-03-30"
+
 metalearning:
   - file: .claude/metalearning/2026-03-06-regex-ban.md
     applies_to: [loss_functions.py, metrics.py]
