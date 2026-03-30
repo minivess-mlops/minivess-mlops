@@ -65,7 +65,7 @@ decisions:
 
   calibration_metrics:
     status: resolved
-    winner: two_tier_global_and_spatial
+    winner: two_tier_global_and_spatial_partial
     rationale: >
       TWO GRANULARITY LEVELS (both required for segmentation):
 
@@ -114,8 +114,28 @@ decisions:
         - Joint regularization + calibration in deep ensembles (Fredsgaard & Schmidt 2025)
         - Calibration-aware ensemble selection (Issue #896)
 
+    implemented_global:
+      - ECE (Guo 2017) — compute_ece()
+      - MCE (Naeini 2015) — compute_mce()
+      - RMSCE — compute_rmsce()
+      - ACE (Nixon 2019) — compute_ace()
+      - D-ECE (Kumar 2019) — compute_debiased_ece()
+      - Brier score — compute_brier_score()
+      - NLL — compute_nll()
+      - Overconfidence error (Thulasidasan 2019) — compute_overconfidence_error()
+    implemented_spatial:
+      - BA-ECE (Zeevi 2025) — compute_ba_ece()
+      - Per-voxel Brier map — compute_brier_map()
+      - Per-voxel NLL map — compute_nll_map()
+    NOT_implemented:
+      - SPACE (Zeevi 2025) — NOT coded, planned
+      - BUC (Zeevi 2025) — NOT coded, planned
+      - pECE (Li 2025) — NOT coded, planned
+      - smECE (Blasiok 2024) — NOT coded, planned
+      - CRPS — NOT coded
+      - UD-AUC — NOT coded
     implementation:
-      - src/minivess/pipeline/calibration_metrics.py  # All metrics (global + spatial)
+      - src/minivess/pipeline/calibration_metrics.py  # 11 implemented metrics
       - src/minivess/pipeline/metrics.py  # Tier 1 (fast, global) in validation loop
       - src/minivess/pipeline/evaluation_runner.py  # Tier 1+2 (comprehensive) in analysis
     related_issues: ["#896", "#897", "#898", "#899", "#798", "#19", "#311"]
