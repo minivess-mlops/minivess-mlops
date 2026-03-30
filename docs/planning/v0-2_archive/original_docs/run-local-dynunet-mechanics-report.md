@@ -59,17 +59,28 @@ achieves ECE=0.006 — the best calibration despite lowest Dice.
 
 | Component | Status |
 |-----------|--------|
-| Ensemble evaluation | PENDING |
-| DeepVess external test | PENDING |
-| Per-volume metrics | PENDING |
+| Ensemble evaluation | ✅ DONE (Prefect flow completed) |
+| DeepVess external test | ⚠️ Flow completed but "No comparison table built" |
+| Per-volume metrics | ⚠️ Need to verify on DagsHub |
 
 ## Biostatistics Status
 
 | Component | Status |
 |-----------|--------|
-| DuckDB materialization | PENDING |
-| Pairwise comparisons | PENDING |
-| R/ggplot2 figures | PENDING |
+| DuckDB materialization | ❌ BLOCKED |
+| Pairwise comparisons | ❌ BLOCKED |
+| R/ggplot2 figures | ❌ BLOCKED |
+
+### BLOCKER: DagsHub vs local mlruns gap
+
+Training logged to DagsHub MLflow (remote). Biostatistics flow discovers runs from
+local `mlruns/` directory (empty). The `discover_source_runs()` function scans the
+filesystem, not the MLflow API.
+
+**Fix needed** (P0): Biostatistics discovery must query DagsHub MLflow API
+via `MlflowClient.search_runs()` instead of scanning local `mlruns/` directory.
+This is the same fix needed for `build_per_volume_data_from_duckdb()` — it should
+build the DuckDB from MLflow API responses, not from filesystem scanning.
 | LaTeX tables | PENDING |
 
 ## Observations
