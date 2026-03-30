@@ -234,6 +234,7 @@ services:
       <<: *common-env
       FLOW_NAME: analyze
       ANALYSIS_OUTPUT_DIR: /app/outputs/analysis
+      EXTERNAL_DATA_DIR: /app/data/raw
     volumes:
       - data_cache:/app/data:ro
       - checkpoint_cache:/app/checkpoints:ro
