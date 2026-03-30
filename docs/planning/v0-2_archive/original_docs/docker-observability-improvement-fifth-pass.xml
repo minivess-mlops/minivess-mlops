@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DOCKER OBSERVABILITY IMPROVEMENT — FIFTH PASS v2.0
+  ====================================================
+
+  COUNCIL REVIEW:
+    Iteration 1: DevOps Engineer 6/10
+    Key fixes in v2.0:
+      - DELETED stale Phase 2 (wiring already done in passes 3-4)
+      - Consolidated 3 behavioral tests into 1 smoke test (DevOps suggestion #3)
+      - Monitoring playbook as decision tree, not sequential list (suggestion #6)
+      - Added thread-local event_logger transfer test (MAJOR gap from review)
+      - Added Makefile target `make verify-observability` (suggestion #7)
+      - Added real trainer behavioral test with @pytest.mark.model_loading (suggestion #2)
+
+  WHY A 5TH PASS IS NEEDED:
+    4 prior passes wrote code that passes AST checks but was never verified at runtime.
+    This pass focuses EXCLUSIVELY on:
+      1. Behavioral tests that PROVE runtime execution
+      2. A monitoring playbook rule for Claude Code
+      3. Docker E2E verification
+
+  COUNCIL:
+    - DevOps Engineer: Docker, health checks, container monitoring
+    - ML Platform Engineer: Prefect, MLflow, GPU monitoring, training loop
+    - QA Engineer: Behavioral testing, runtime verification
+-->
+<plan id="docker-observability-fifth-pass"
+      version="2.0"
+      created="2026-03-30"
+      updated="2026-03-30"
+      council_iteration="1"
+      target_branch="test/local-dynunet-run">
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 1: BEHAVIORAL RUNTIME TESTS (Layer 4+5)
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="Behavioral Runtime Tests">
+
+    <task id="1.1" name="Observability smoke test (consolidated)">
+      <description>
+        Single parametrized test replacing 3 separate tests (DevOps suggestion #3).
+        Tests the flow_observability_context → events.jsonl chain end-to-end.
+
+        @pytest.fixture produces a tmp events dir.
+        @pytest.mark.parametrize over:
+          - flow_observability_context (CPU) → verify flow_start + flow_end in events.jsonl
+          - gpu_flow_observability_context (mocked GPU) → verify heartbeat.json created
+          - healthcheck_cpu.py → verify exit 0 with fresh events.jsonl, exit 1 without
+
+        One test function, 3 parametrized cases, catches all Layer 4+5 failures.
+      </description>
+      <tdd_spec>
+        RED: 3 parametrized test cases, all fail (module not yet smoke-tested).
+        GREEN: If context managers already produce events.jsonl (Pass 3 wiring), tests pass.
+              If not, fix the context managers.
+      </tdd_spec>
+      <files>
+        <file action="create">tests/v2/behavioral/test_observability_smoke.py</file>
+      </files>
+    </task>
+
+    <task id="1.2" name="Real trainer behavioral test (epoch_complete events)">
+      <description>
+        DevOps suggestion #2: NOT a mock test — real SegmentationTrainer.fit().
+        @pytest.mark.model_loading (prod tier only — loads DynUNet).
+
+        Creates tiny DynUNet (32 filters, 2 layers), 2 synthetic 32x32x32 volumes,
+        runs 2 epochs via trainer.fit(). After completion, verifies:
+          - events.jsonl has exactly 2 epoch_complete entries
+          - Each entry has: train_loss, epoch, epoch_wall_s
+          - Epoch numbers are monotonically increasing (1, 2)
+
+        This is the ONLY test that catches "trainer.fit() never calls log_epoch_complete()."
+      </description>
+      <tdd_spec>
+        RED: Test expects 2 epoch_complete entries — currently may be 0.
+        GREEN: Verify trainer.fit() calls log_epoch_complete() in epoch loop.
+      </tdd_spec>
+      <files>
+        <file action="create">tests/v2/behavioral/test_trainer_epoch_logging.py</file>
+      </files>
+    </task>
+
+    <task id="1.3" name="Thread-local event_logger transfer test">
+      <description>
+        DevOps MAJOR gap: train_flow.py uses thread-local storage for event_logger.
+        If Prefect ever runs tasks in separate threads, the reference is lost.
+
+        Test:
+          1. Set _flow_context.event_logger in one function
+          2. Call a function that reads _flow_context.event_logger
+          3. Verify the reference survived (same object)
+          4. Also test the FAILURE case: new thread → reference is None
+
+        This documents the in-process execution assumption.
+      </description>
+      <tdd_spec>
+        RED: Test thread-local survives same-thread call.
+        RED: Test thread-local is None in new thread.
+        GREEN: Both should pass (documenting current behavior).
+      </tdd_spec>
+      <files>
+        <file action="create">tests/v2/behavioral/test_event_logger_threading.py</file>
+      </files>
+    </task>
+
+    <task id="1.4" name="Healthcheck exit code verification">
+      <description>
+        Test healthcheck_training.py and healthcheck_cpu.py exit codes:
+          - Fresh heartbeat.json (less than 60s old) → exit 0
+          - Missing heartbeat.json → exit 1
+          - Stale heartbeat.json (older than 120s) → exit 1
+          - Fresh events.jsonl → exit 0 (CPU flows)
+
+        Mock /proc/1/stat via monkeypatch for container uptime.
+      </description>
+      <tdd_spec>
+        RED: 4 test cases for exit codes.
+        GREEN: Verify or fix healthcheck scripts.
+      </tdd_spec>
+      <files>
+        <file action="create">tests/v2/behavioral/test_healthcheck_exit_codes.py</file>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 2: MONITORING PLAYBOOK + MAKEFILE TARGET
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Monitoring Infrastructure">
+
+    <task id="2.1" name="Docker monitoring rule (decision tree format)">
+      <description>
+        ALREADY CREATED at .claude/rules/docker-monitoring.md.
+        Verify it loads correctly and is referenced by Claude Code.
+
+        DevOps suggestion #6: decision tree format, not sequential.
+        The rule file should cover:
+          - "Container running but no output" → check entrypoint, check imports
+          - "Container exited code 1" → read docker logs, check ModuleNotFoundError
+          - "Container shows unhealthy" → check healthcheck script, check file freshness
+          - "Container OOM killed (137)" → reduce batch_size, check --shm-size
+      </description>
+      <files>
+        <file action="use">.claude/rules/docker-monitoring.md</file>
+      </files>
+    </task>
+
+    <task id="2.2" name="Makefile target: make verify-observability">
+      <description>
+        DevOps suggestion #7: single command that answers "is observability working?"
+
+        Runs:
+          1. Behavioral smoke tests (Phase 1)
+          2. AST enforcement tests (existing)
+          3. docker compose config validation (healthcheck stanzas present)
+
+        Target: verify-observability in Makefile
+      </description>
+      <files>
+        <file action="modify">Makefile</file>
+      </files>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 3: DOCKER E2E VERIFICATION
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="Docker End-to-End Verification">
+
+    <task id="3.1" name="Run biostatistics flow with observability verification">
+      <description>
+        Run biostatistics flow (CPU, fast) in Docker and verify:
+          1. docker logs shows structured JSONL
+          2. events.jsonl has flow_start + flow_end
+          3. Docker HEALTHCHECK shows "healthy"
+          4. Output DuckDB files exist
+
+        Use the monitoring playbook from .claude/rules/docker-monitoring.md.
+        FOLLOW EVERY STEP — no ad-hoc monitoring.
+      </description>
+    </task>
+
+    <task id="3.2" name="Run training flow mini-test with GPU observability">
+      <description>
+        Run train flow with 1 epoch, 4 volumes (minimal GPU) and verify:
+          1. heartbeat.json updates
+          2. events.jsonl has epoch_complete
+          3. CUDA guard passes
+          4. Docker HEALTHCHECK shows "healthy"
+
+        This is the capstone — if this passes, observability is PROVEN working.
+      </description>
+    </task>
+  </phase>
+
+  <execution_order>
+    <dependency from="2.2" to="1.1" reason="Makefile target runs behavioral tests" />
+    <dependency from="3.1" to="2.1" reason="E2E uses monitoring playbook" />
+    <dependency from="3.2" to="3.1" reason="GPU test after CPU test succeeds" />
+  </execution_order>
+
+</plan>
