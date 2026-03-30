@@ -360,6 +360,7 @@ services:
     volumes:
       - mlruns_data:/app/mlruns:ro
       - outputs_biostatistics:/app/outputs/biostatistics
+      - outputs_analysis:/app/outputs/analysis:ro
       - configs_biostatistics:/app/configs/biostatistics:ro
     healthcheck:
       test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
@@ -367,6 +368,20 @@ services:
       timeout: 10s
       retries: 3
       start_period: 300s
+    networks:
+      - minivess
+    <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
+
+  # R/ggplot2 Figure Rendering (Tier C-R — rocker base)
+  r_figures:
+    build:
+      context: ../
+      dockerfile: deployment/docker/Dockerfile.r_figures
+    image: minivess-r-figures:latest
+    container_name: minivess-r-figures
+    volumes:
+      - outputs_biostatistics:/app/r_data:ro
+      - r_output:/app/r_output
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -553,6 +568,9 @@ volumes:
     driver: local
   # Model serving store
   bentoml_store:
+    driver: local
+  # R figure output
+  r_output:
     driver: local
   # GPU benchmark cache
   benchmark_data:

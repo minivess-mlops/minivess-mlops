@@ -1,0 +1,54 @@
+# Dockerfile.r_figures — R/ggplot2 publication figure rendering
+# Tier C-R: Single-stage rocker build (council fix: multi-stage with same base is pointless)
+#
+# Plan: local-dynunet-mechanics-debug-plan-biostats-finish.xml v3.0
+# Purpose: Render 10 publication-quality figures + 7 LaTeX tables from JSON sidecars
+# Input: /app/r_data/ (JSON sidecars, read-only)
+# Output: /app/r_output/ (PDF, PNG, .tex, .csv files)
+
+FROM rocker/r-ver:4.4.0
+
+# System dependencies for R packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4-openssl-dev \
+    libxml2-dev \
+    libfontconfig1-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    libtiff5-dev \
+    libjpeg-dev \
+    librsvg2-dev \
+    libharfbuzz-dev \
+    libfribidi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install R packages in dependency order
+# Core: ggplot2, tidyverse, scales, jsonlite
+# Figures: ggrain, patchwork, ggforestplot, ggsignif, ggrepel, viridis, cowplot
+# Tables: kableExtra, xtable
+# Statistics: boot, PMCMRplus
+# CONSORT: DiagrammeR, DiagrammeRsvg, rsvg (for PDF export)
+RUN R -e 'install.packages(c( \
+    "jsonlite", "ggplot2", "tidyverse", "scales", \
+    "ggrain", "patchwork", "ggsignif", "ggrepel", \
+    "viridis", "cowplot", \
+    "kableExtra", "xtable", \
+    "boot", "PMCMRplus", \
+    "DiagrammeR", "DiagrammeRsvg", "rsvg" \
+  ), repos = "https://cloud.r-project.org", Ncpus = 4)'
+
+# Note: ggforestplot is from GitHub — install separately
+# If unavailable, the forest plot uses a ggplot2 geom_pointrange fallback
+RUN R -e 'if (!require("remotes")) install.packages("remotes", repos = "https://cloud.r-project.org"); \
+  tryCatch( \
+    remotes::install_github("NightingaleHealth/ggforestplot", upgrade = "never"), \
+    error = function(e) message("ggforestplot not available — using geom_pointrange fallback") \
+  )'
+
+# Copy R scripts
+COPY src/minivess/pipeline/r_scripts/ /app/r_scripts/
+
+WORKDIR /app
+
+# Default: render all figures and tables
+CMD ["Rscript", "r_scripts/render_all.R"]
