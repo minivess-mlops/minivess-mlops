@@ -519,6 +519,71 @@ def compute_nll_map(
     return result
 
 
+def compute_pece(
+    probs: np.ndarray,
+    labels: np.ndarray,
+    *,
+    fp_weight: float,
+    n_bins: int = 10,
+) -> float:
+    """Pixel-wise Expected Calibration Error with FP overconfidence penalty.
+
+    pECE = Σ_b |(p̄_b - ā_b) + w_fp · FPConf_b| × |Ω_b| / |Ω|
+
+    Unlike standard ECE which aggregates globally, pECE penalizes per-bin
+    false-positive overconfidence — critical for segmentation where confident
+    FPs at boundaries are dangerous.
+
+    Reference: Li et al. (2025). "We Care Each Pixel: Calibrating on Medical
+    Segmentation Model." arXiv:2503.05107. Algorithm 1.
+    Implementation adapted from: github.com/EagleAdelaide/SDC-Loss (MIT license).
+
+    Parameters
+    ----------
+    probs:
+        Predicted foreground probabilities (flat or volumetric).
+    labels:
+        Ground truth binary labels (same shape as probs).
+    fp_weight:
+        Weight penalizing overconfident false positives (paper default: 2.0).
+        MUST come from config (Rule #29) — no default value here.
+    n_bins:
+        Number of confidence bins.
+
+    Returns
+    -------
+    pECE value (float). Can exceed 1.0 due to FP penalty.
+    """
+    flat_probs = probs.ravel()
+    flat_labels = labels.ravel()
+
+    total = flat_probs.size
+    if total == 0:
+        return 0.0
+
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    pece = 0.0
+
+    for i in range(n_bins):
+        lo, hi = edges[i], edges[i + 1]
+        mask = (flat_probs > lo) & (flat_probs <= hi)
+        eta = int(mask.sum())
+        if eta == 0:
+            continue
+
+        p_bar = float(flat_probs[mask].mean())
+        a_bar = float(flat_labels[mask].mean())
+
+        # False positives: predicted positive (high conf) but label=0
+        fp_mask = mask & (flat_labels == 0)
+        bp_fp = float(flat_probs[fp_mask].mean()) if fp_mask.sum() > 0 else 0.0
+        offset = fp_weight * bp_fp
+
+        pece += (eta / total) * abs((p_bar - a_bar) + offset)
+
+    return float(pece)
+
+
 # ---------------------------------------------------------------------------
 # Convenience: compute all metrics at once
 # ---------------------------------------------------------------------------
@@ -569,5 +634,8 @@ def compute_all_calibration_metrics(
     if tier == "comprehensive":
         result["ace"] = compute_ace(flat_probs, flat_labels)
         result["ba_ece"] = compute_ba_ece(probs, labels)
+        result["pece"] = compute_pece(
+            flat_probs, flat_labels, fp_weight=2.0, n_bins=n_bins
+        )
 
     return result

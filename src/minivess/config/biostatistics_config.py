@@ -140,6 +140,15 @@ class BiostatisticsConfig(BaseModel):
             "bootstrap is used. Per DiCiccio & Efron (1996, Statistical Science)."
         ),
     )
+    pece_fp_weight: float = Field(
+        default=2.0,
+        gt=0.0,
+        description=(
+            "False-positive overconfidence weight for pECE metric. "
+            "Li et al. (2025) default is 2.0. Higher values penalize "
+            "overconfident FPs more heavily."
+        ),
+    )
     rope_values: dict[str, float] = Field(
         default_factory=lambda: dict(_DEFAULT_ROPE_VALUES),
         description="Region of practical equivalence widths per metric.",
