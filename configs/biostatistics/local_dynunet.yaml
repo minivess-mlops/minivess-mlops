@@ -1,0 +1,44 @@
+# Biostatistics config for local DynUNet mechanics test.
+# Reads results from local_dynunet_mechanics_evaluation experiment.
+# Includes both trainval (MiniVess CV) and test (DeepVess) splits.
+
+experiment_names:
+  - local_dynunet_mechanics_evaluation
+
+mlruns_dir: mlruns
+output_dir: outputs/biostatistics_local_dynunet
+
+# Auto-derive factor names from the composable factorial YAML
+factorial_yaml: configs/factorial/local_dynunet_mechanics.yaml
+
+# Core metrics for the mechanics test
+metrics:
+  - dsc
+  - cldice
+  - masd
+
+primary_metric: cldice
+
+# Co-primary metrics for hierarchical gatekeeping (Dmitrienko et al. 2010)
+co_primary_metrics:
+  - cldice
+  - masd
+
+# Data splits: trainval (MiniVess CV) + test (DeepVess external — OBLIGATORY)
+splits:
+  - trainval
+  - test
+
+# Statistical testing parameters (from config, never hardcoded)
+alpha: 0.05
+n_bootstrap: 500
+seed: 42
+
+rope_values:
+  dsc: 0.01
+  cldice: 0.01
+  masd: 0.5
+
+# 2-fold CV
+min_folds_per_condition: 2
+min_conditions: 2

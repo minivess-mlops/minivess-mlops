@@ -1,0 +1,79 @@
+# Local DynUNet mechanics test: full Train → Analysis → Biostatistics pipeline.
+#
+# 2 losses × 2 aux_calib × 2 post-training × 2 ensemble = 16 conditions
+# 2 folds × 15 epochs × half data → ~4 hours on RTX 2070 Super
+#
+# Purpose: verify Flow mechanics, observability, R/ggplot2 figures, and
+# scientific correctness of the biostatistics output. NOT production results.
+#
+# DeepVess external test is OBLIGATORY (CLAUDE.md ban on skipping).
+#
+# Usage:
+#   ./scripts/run_local_dynunet_mechanics.sh
+
+experiment_name: local_dynunet_mechanics
+description: "Local mechanics test: 16 conditions, 2 folds, 15 epochs, half data, DeepVess external test"
+debug: true
+
+# ── Layer A: Training factors ─────────────────────────────────────────
+factors:
+  training:
+    model_family:
+      - dynunet
+    loss_name:
+      - dice_ce
+      - cbdice_cldice
+    aux_calibration:
+      - false
+      - true
+
+  # ── Layer B: Post-training factors ─────────────────────────────────
+  post_training:
+    method:
+      - none
+      - swag
+    recalibration:
+      - none
+
+  # ── Layer C: Analysis factors ──────────────────────────────────────
+  analysis:
+    ensemble_strategy:
+      - per_loss_single_best
+      - all_loss_single_best
+
+# ── Zero-shot baselines ─────────────────────────────────────────────
+zero_shot_baselines: []
+
+# ── Fixed settings ──────────────────────────────────────────────────
+fixed:
+  max_epochs: 15
+  num_folds: 2
+  batch_size: 2
+  compute: auto
+  # Half data: ~35 train, ~12 val per fold
+  max_train_volumes: 35
+  max_val_volumes: 12
+
+# ── External test datasets (OBLIGATORY) ─────────────────────────────
+external_test:
+  - dataset: deepvess
+    n_volumes: 1  # 1 labeled GroundTruth volume
+    metric_prefix: "test/deepvess"
+
+# ── MLflow experiments ──────────────────────────────────────────────
+mlflow:
+  training_experiment: local_dynunet_mechanics_training
+  evaluation_experiment: local_dynunet_mechanics_evaluation
+  biostatistics_experiment: local_dynunet_mechanics_biostatistics
+
+# ── Biostatistics ───────────────────────────────────────────────────
+biostatistics:
+  anova_strategy: layered
+  alpha: 0.05
+  co_primary_metrics:
+    - cldice
+    - masd
+
+# ── Infrastructure ──────────────────────────────────────────────────
+infrastructure:
+  cloud_config: local

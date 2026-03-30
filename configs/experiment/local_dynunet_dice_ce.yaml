@@ -1,0 +1,16 @@
+# @package _global_
+# Local mechanics test: DynUNet + dice_ce, aux_calib=false, 2 folds, 15 epochs
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: local_dynunet_mechanics_training
+model: dynunet
+losses:
+  - dice_ce
+max_epochs: 15
+num_folds: 2
+batch_size: 2
+max_train_volumes: 35
+max_val_volumes: 12
+with_aux_calib: false
+post_training_methods: "none,swag"
