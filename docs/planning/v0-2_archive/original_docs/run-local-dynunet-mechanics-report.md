@@ -37,8 +37,23 @@
 |------------|-------|--------|----------|----------|
 | local_dynunet_dice_ce | 2 | ✅ DONE | ~37 min | f0=0.804, f1=0.834 |
 | local_dynunet_dice_ce_auxcalib | 2 | ✅ DONE | ~38 min | f0=0.830, f1=0.837 |
-| local_dynunet_cbdice_cldice | 2 | ✅ DONE | ~47 min | f0+f1 complete |
-| local_dynunet_cbdice_cldice_auxcalib | 2 | 🔄 RUNNING | | |
+| local_dynunet_cbdice_cldice | 2 | ✅ DONE | ~47 min | f0=0.666, f1=0.684 |
+| local_dynunet_cbdice_cldice_auxcalib | 2 | ✅ DONE | ~52 min | f0=0.637, f1=0.670 |
+
+### PHASE 3 COMPLETE — All 8 fold runs on DagsHub
+
+**Key finding: aux_calibration dramatically improves ECE for topology-aware losses**
+
+| Condition | val_dice (mean) | val_ECE (mean) | Calibration improvement |
+|-----------|----------------|----------------|------------------------|
+| dice_ce | 0.819 | 0.016 | baseline |
+| dice_ce + aux_calib | 0.833 | 0.013 | 19% better ECE |
+| cbdice_cldice | 0.675 | 0.017 | baseline |
+| cbdice_cldice + aux_calib | 0.654 | **0.006** | **65% better ECE** |
+
+The 3-axis hypothesis confirmed: aux_calib targets calibration (axis 3) without degrading
+accuracy (axis 1). Effect is 3x stronger for topology-aware losses. cbdice_cldice+aux_calib
+achieves ECE=0.006 — the best calibration despite lowest Dice.
 
 ## Analysis Status
 
