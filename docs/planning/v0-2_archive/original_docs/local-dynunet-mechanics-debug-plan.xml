@@ -38,9 +38,17 @@
     - Compose: deployment/docker-compose.flows.yml
 -->
 <plan id="local-dynunet-mechanics-debug"
-      version="1.0"
+      version="1.1"
       created="2026-03-29"
+      updated="2026-03-29"
       target_branch="hotfix/pass-10-and-11">
+
+  <!-- Cross-references to related GitHub issues -->
+  <related_issues>
+    <issue id="328" title="Full OME-TIFF → NIfTI pipeline architecture" />
+    <issue id="329" title="MONAI upstream OME-TIFF reader contribution" />
+    <issue id="509" title="MONAI PR candidate tracking" />
+  </related_issues>
 
   <!-- ════════════════════════════════════════════════════════════════════
        FACTORIAL DESIGN — USER-CONFIRMED
@@ -168,110 +176,252 @@
   </deliverables>
 
   <!-- ════════════════════════════════════════════════════════════════════
-       PHASE 0: DeepVess Data Preparation
+       PHASE 0: DeepVess Data Preparation via Acquisition + Data Engineering Flows
+       ════════════════════════════════════════════════════════════════════
+
+       KEY INSIGHT: Acquisition Flow = format normalization (download + TIF → NIfTI
+       conversion + DVC versioning). Data Engineering Flow = validation/profiling
+       (NIfTI metadata, Pandera schemas, split generation). Phase 0 delegates to
+       these existing Prefect flows running in Docker — no manual scripts.
+
+       Related issues:
+         - #328: Full OME-TIFF → NIfTI pipeline architecture
+         - #329: MONAI upstream OME-TIFF reader contribution
+         - #509: MONAI PR candidate tracking
+
+       Flow implementations:
+         - src/minivess/orchestration/flows/acquisition_flow.py (Flow 0)
+         - src/minivess/orchestration/flows/data_flow.py (Flow 1)
+         - src/minivess/data/format_conversion.py (convert_tiff_to_nifti, convert_dataset_formats)
+         - src/minivess/config/acquisition_config.py (AcquisitionConfig)
+
+       Docker services:
+         - deployment/docker-compose.flows.yml::acquisition (Dockerfile.acquisition)
+         - deployment/docker-compose.flows.yml::data (Dockerfile.data)
        ════════════════════════════════════════════════════════════════════ -->
 
-  <phase id="0" name="DeepVess Data Preparation">
+  <phase id="0" name="DeepVess Data Preparation via Acquisition + Data Engineering Flows">
     <description>
-      DeepVess raw TIF files exist at data/raw/deepvess/ (26 TIF files).
-      Need to: (a) identify image vs. label volumes, (b) convert TIF to NIfTI,
-      (c) organize into MONAI-compatible layout, (d) DVC-version, (e) validate
-      Docker volume mount includes DeepVess path.
+      DeepVess raw TIF files exist at data/raw/deepvess/ (26 TIF files, 1.9 GB,
+      DVC-tracked via deepvess.dvc). DeepVess NIfTI: ZERO files — conversion has
+      never been run. MiniVess: 70 NIfTI volumes already in Docker volume.
+
+      This phase uses the EXISTING Prefect flows in Docker:
+        - Acquisition Flow (Flow 0): checks if DeepVess NIfTI exists → converts
+          raw TIF → NIfTI using tifffile + nibabel → DVC versions the output
+        - Data Engineering Flow (Flow 1): validates NIfTI metadata → runs Pandera
+          schemas → discovers external dataset pairs → registers in splits
+
+      NO manual conversion scripts. NO standalone Python scripts. The Acquisition
+      Flow's convert_formats_task() calls convert_dataset_formats() from
+      src/minivess/data/format_conversion.py, which walks images/ and labels/
+      subdirectories and converts each .tif/.tiff to .nii.gz.
 
       The DeepVess dataset (Haft-Javaherian et al. 2019) has:
-      - 1 ground truth image + 1 ground truth label (GroundTruthImage.tif, GroundTruthLabel.tif)
-      - 24 unlabeled inference volumes (OldAlzheimers, OldWildtype, YoungAlzheimers, YoungWildtype)
+        - 7 multiphoton volumes, mouse brain cortex, CC-BY-4.0
+        - Resolution: (1.0, 1.0, 1.7) μm — from external dataset registry
 
-      For external TEST evaluation, only the ground truth pair can be used
-      (others have no labels). The analysis flow evaluates model predictions
-      against GroundTruthLabel on the GroundTruthImage volume.
-
-      However, per CLAUDE.md "DeepVess 7 volumes" — check if the 7 comes from
-      sub-volumes of the ground truth TIF or from separate labeled volumes.
-      The user confirmed 7 volumes, so investigate the TIF file structure.
+      Pre-condition: Raw TIF files must be organized with images/ and labels/
+      subdirectories under data/raw/deepvess/ for convert_dataset_formats() to
+      discover them. If the current layout is flat (26 TIFs at top level),
+      Task 0.1 handles reorganization before running the Acquisition Flow.
     </description>
 
-    <gate>DeepVess NIfTI files present at data/raw/deepvess/nifti/ with at least
-          1 image-label pair discoverable by MONAI's discover_nifti_pairs()</gate>
+    <gate>
+      DeepVess NIfTI files present at data/raw/deepvess/images/*.nii.gz and
+      data/raw/deepvess/labels/*.nii.gz with at least 7 image-label pairs.
+      Both MiniVess (70 vols) and DeepVess (7 vols) accessible inside Docker
+      containers at /app/data/raw/minivess/ and /app/data/raw/deepvess/.
+      Data Engineering Flow quality gates (Pandera, GE, DATA-CARE) all pass.
+    </gate>
 
-    <task id="0.1" name="Audit DeepVess TIF structure">
+    <task id="0.1" name="Run Acquisition Flow for DeepVess (TIF → NIfTI in Docker)">
       <description>
-        Read TIF headers to determine dimensionality and identify which files
-        are images vs. labels. Use tifffile to inspect shapes without loading
-        full data into memory. Document findings.
+        Run the Acquisition Flow (Flow 0) via Docker Compose to convert DeepVess
+        raw TIF files to NIfTI. The flow orchestrates:
+
+          1. check_dataset_status_task() — checks if NIfTI output already exists
+          2. download_dataset_task() — skips (raw TIFs already present via DVC)
+          3. convert_formats_task() — calls convert_dataset_formats() which:
+             - Walks data/raw/deepvess/images/ and data/raw/deepvess/labels/
+             - Converts each .tif/.tiff to .nii.gz using tifffile + nibabel
+             - Uses voxel_spacing from EXTERNAL_DATASETS["deepvess"].resolution_um
+          4. dvc_commit_datasets_task() — DVC-versions the converted NIfTI output
+          5. log_acquisition_provenance_task() — logs to MLflow
+
+        PRE-REQUISITE: Verify that data/raw/deepvess/ has images/ and labels/
+        subdirectories (required by convert_dataset_formats). If the 26 TIF files
+        are in a flat layout, reorganize first:
+          - GroundTruthImage*.tif → data/raw/deepvess/images/
+          - GroundTruthLabel*.tif → data/raw/deepvess/labels/
+          - Unlabeled inference volumes: excluded (no labels for TEST evaluation)
+
+        The Acquisition Flow uses AcquisitionConfig with:
+          datasets=["deepvess"], skip_existing=True, convert_formats=True
+
+        Docker execution (STOP Protocol — Rule 19):
+          S: Running in Docker via docker-compose.flows.yml::acquisition
+          T: Prefect orchestration active (Flow 0 decorator)
+          O: raw_data:/app/data/raw volume-mounted (rw)
+          P: Reproducible — Docker image + DVC-tracked input + config
       </description>
       <command>
-        python3 -c "
-        import tifffile
-        from pathlib import Path
-        for f in sorted(Path('data/raw/deepvess').glob('*.tif')):
-            with tifffile.TiffFile(str(f)) as t:
-                shape = t.pages[0].shape if len(t.pages) == 1 else (len(t.pages), *t.pages[0].shape)
-                print(f'{f.name}: shape={shape}, dtype={t.pages[0].dtype}')
-        "
+        # Populate Docker volume with raw DeepVess TIFs
+        docker run --rm --user root \
+          -v deployment_raw_data:/app/data/raw \
+          -v $(pwd)/data:/src:ro \
+          ubuntu:22.04 \
+          sh -c "cp -r /src/raw/deepvess /app/data/raw/ &amp;&amp; chown -R 1000:1000 /app/data/raw/deepvess"
+
+        # Run Acquisition Flow for DeepVess only
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+          -e ACQUISITION_DATASETS=deepvess \
+          acquisition
       </command>
-      <acceptance>
-        Shape and dtype documented for all 26 TIF files.
-        GroundTruthImage and GroundTruthLabel identified with matching spatial dimensions.
-        Sub-volume strategy determined (whole-volume or crop-based 7-volume split).
-      </acceptance>
-    </task>
-
-    <task id="0.2" name="Convert TIF to NIfTI">
-      <description>
-        Use src/minivess/data/format_conversion.py::convert_tiff_to_nifti() to convert
-        DeepVess ground truth image+label to NIfTI format. Voxel spacing from the
-        external dataset registry: resolution_um=(1.0, 1.0, 1.7).
-
-        Output layout following MONAI convention:
-          data/raw/deepvess/nifti/imagesTr/deepvess_gt.nii.gz
-          data/raw/deepvess/nifti/labelsTr/deepvess_gt.nii.gz
-
-        If the ground truth TIF is a large volume that needs splitting into
-        sub-volumes (to get 7), implement a crop-based splitter that creates
-        non-overlapping sub-volumes.
-      </description>
       <files>
+        <file action="use">src/minivess/orchestration/flows/acquisition_flow.py</file>
         <file action="use">src/minivess/data/format_conversion.py</file>
-        <file action="create">scripts/prepare_deepvess.py</file>
+        <file action="use">src/minivess/config/acquisition_config.py</file>
+        <file action="use">src/minivess/data/external_datasets.py</file>
+        <file action="use">deployment/docker/Dockerfile.acquisition</file>
+        <file action="use">deployment/docker-compose.flows.yml</file>
       </files>
       <acceptance>
-        NIfTI files exist at the expected paths.
-        nibabel can load them and shapes match original TIF data.
-        At least 1 image-label pair (ideally 7 sub-volumes) available.
+        Acquisition Flow completes with DatasetAcquisitionStatus.READY or DOWNLOADED
+        for deepvess. NIfTI files exist at data/raw/deepvess/images/*.nii.gz and
+        data/raw/deepvess/labels/*.nii.gz. At least 7 image-label pairs converted.
+        MLflow logs acquisition provenance (acq_n_datasets, acq_total_volumes).
+        DVC tracking updated for the converted NIfTI files.
       </acceptance>
     </task>
 
-    <task id="0.3" name="DVC-version DeepVess NIfTI">
+    <task id="0.2" name="Run Data Engineering Flow for DeepVess (validate + register)">
       <description>
-        Add converted NIfTI files to DVC tracking.
-        Since this is local-only, use the local DVC remote.
-        Do NOT push to GCS (local-only experiment).
+        Run the Data Engineering Flow (Flow 1) via Docker Compose with DeepVess
+        as an external dataset. The flow orchestrates:
+
+          1. discover_data_task() — discovers MiniVess primary pairs
+          2. validate_data_task() — basic key-presence validation
+          3. _run_quality_gates() — advanced validation chain:
+             - extract_nifti_metadata_task() — reads NIfTI headers (shape, spacing, affine)
+             - pandera_gate_task() — NiftiMetadataSchema validation
+             - ge_gate_task() — Great Expectations nifti_metadata_suite
+             - datacare_gate_task() — DATA-CARE quality assessment
+             - deepchecks_gate_task() — DeepChecks data integrity
+          4. split_data_task() — generates K-fold splits (MiniVess only)
+          5. validate_external_data_task("deepvess") — discovers DeepVess pairs
+          6. log_data_provenance_task() — logs to MLflow
+
+        The external_dirs parameter passes DeepVess path:
+          external_dirs={"deepvess": Path("/app/data/raw/deepvess")}
+
+        Docker execution (STOP Protocol):
+          S: Running in Docker via docker-compose.flows.yml::data
+          T: Prefect orchestration active (Flow 1 decorator)
+          O: raw_data:/app/data/raw:ro, configs_splits:/app/configs/splits (rw)
+          P: Reproducible — Docker image + validated input + config
       </description>
       <command>
-        dvc add data/raw/deepvess/nifti
-        git add data/raw/deepvess/nifti.dvc data/raw/deepvess/.gitignore
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+          -e EXTERNAL_DATASETS=deepvess \
+          data
       </command>
+      <files>
+        <file action="use">src/minivess/orchestration/flows/data_flow.py</file>
+        <file action="use">src/minivess/data/external_datasets.py</file>
+        <file action="use">src/minivess/validation/gates.py</file>
+        <file action="use">deployment/docker/Dockerfile.data</file>
+      </files>
       <acceptance>
-        data/raw/deepvess/nifti.dvc tracked in git.
-        dvc status shows clean.
+        Data Engineering Flow completes successfully.
+        All quality gates pass (Pandera, GE, DATA-CARE, DeepChecks) for DeepVess NIfTI.
+        validate_external_data_task("deepvess") discovers 7 pairs.
+        NIfTI metadata extracted: shapes, voxel spacing (1.0, 1.0, 1.7), valid affines.
+        MLflow logs data provenance (data_n_volumes, data_hash).
       </acceptance>
     </task>
 
-    <task id="0.4" name="Validate Docker volume mount includes DeepVess">
+    <task id="0.3" name="Populate Docker data volume with DeepVess NIfTI">
       <description>
-        Verify docker-compose.flows.yml data_cache volume mount
-        includes path to DeepVess data. The data_cache volume mounts
-        to /app/data, and DeepVess should be accessible at
-        /app/data/raw/deepvess/ inside the container.
+        Ensure the Docker named volume (deployment_raw_data) contains both
+        MiniVess and DeepVess NIfTI data. The Acquisition Flow (Task 0.1) writes
+        NIfTI output to the raw_data volume. Verify the volume state.
 
-        If data is stored at data/raw/deepvess/ on host, and data_cache
-        maps to /app/data, then the host path data/ must be populated
-        into the Docker volume (same as MiniVess).
+        The raw_data volume is mounted at /app/data/raw in flow containers:
+          - /app/data/raw/minivess/imagesTr/ (70 volumes — already populated)
+          - /app/data/raw/deepvess/images/ (7 volumes — from Task 0.1)
+          - /app/data/raw/deepvess/labels/ (7 volumes — from Task 0.1)
+
+        If MiniVess is not yet in the volume (first-time setup), populate it:
+          docker run --rm --user root \
+            -v deployment_raw_data:/app/data/raw \
+            -v $(pwd)/data:/src:ro \
+            ubuntu:22.04 \
+            sh -c "cp -r /src/raw/minivess /app/data/raw/ &amp;&amp; chown -R 1000:1000 /app/data/raw"
       </description>
+      <command>
+        # Verify volume contents
+        docker run --rm -v deployment_raw_data:/app/data/raw:ro ubuntu:22.04 \
+          sh -c "echo '=== MiniVess ===' &amp;&amp; ls /app/data/raw/minivess/imagesTr/ | wc -l &amp;&amp; \
+                 echo '=== DeepVess images ===' &amp;&amp; ls /app/data/raw/deepvess/images/ | wc -l &amp;&amp; \
+                 echo '=== DeepVess labels ===' &amp;&amp; ls /app/data/raw/deepvess/labels/ | wc -l"
+      </command>
       <acceptance>
-        Docker container can read /app/data/raw/deepvess/nifti/ files.
-        Test with: docker compose run --rm -v $(pwd)/data:/app/data:ro train ls /app/data/raw/deepvess/nifti/
+        MiniVess: 70 NIfTI volumes at /app/data/raw/minivess/imagesTr/
+        DeepVess: 7 NIfTI images at /app/data/raw/deepvess/images/
+        DeepVess: 7 NIfTI labels at /app/data/raw/deepvess/labels/
+        All files owned by UID 1000 (minivess user inside containers).
+      </acceptance>
+    </task>
+
+    <task id="0.4" name="Verify both MiniVess + DeepVess accessible in Docker">
+      <description>
+        End-to-end verification: run a lightweight check inside the actual flow
+        containers (not ubuntu:22.04) to confirm that both datasets are readable
+        by the Python code that will consume them during training and analysis.
+
+        This verifies:
+          1. Volume mounts are correct in docker-compose.flows.yml
+          2. File permissions allow the minivess user (UID 1000) to read
+          3. NIfTI files are loadable by nibabel (not corrupt)
+          4. discover_external_test_pairs("deepvess") returns 7 pairs
+          5. discover_nifti_pairs() for MiniVess returns 70 pairs
+
+        Uses the data container (same base image as train/analyze) to run
+        a Python verification script inside Docker.
+      </description>
+      <command>
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+          data python -c "
+import nibabel as nib
+from pathlib import Path
+from minivess.data.external_datasets import discover_external_test_pairs
+from minivess.data.loader import discover_nifti_pairs
+
+# MiniVess
+mv_pairs = discover_nifti_pairs(Path('/app/data/raw/minivess'))
+print(f'MiniVess: {len(mv_pairs)} pairs')
+assert len(mv_pairs) == 70, f'Expected 70 MiniVess pairs, got {len(mv_pairs)}'
+
+# DeepVess
+dv_pairs = discover_external_test_pairs(Path('/app/data/raw/deepvess'), 'deepvess')
+print(f'DeepVess: {len(dv_pairs)} pairs')
+assert len(dv_pairs) == 7, f'Expected 7 DeepVess pairs, got {len(dv_pairs)}'
+
+# Spot-check: load one NIfTI from each dataset
+mv_img = nib.load(mv_pairs[0]['image'])
+print(f'MiniVess sample shape: {mv_img.shape}')
+dv_img = nib.load(dv_pairs[0]['image'])
+print(f'DeepVess sample shape: {dv_img.shape}')
+
+print('PHASE 0 GATE: PASSED — both datasets accessible in Docker')
+"
+      </command>
+      <acceptance>
+        MiniVess: 70 pairs discovered by discover_nifti_pairs()
+        DeepVess: 7 pairs discovered by discover_external_test_pairs()
+        At least one NIfTI from each dataset loads without error via nibabel.
+        Print: "PHASE 0 GATE: PASSED — both datasets accessible in Docker"
       </acceptance>
     </task>
   </phase>
