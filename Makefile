@@ -85,7 +85,10 @@ test-staging:
 # Prod: gate for promotion PRs main → prod. Full suite, slow + model loading.
 # Excludes integration tests (Docker stack not guaranteed).
 test-prod:
-	MINIVESS_ALLOW_HOST=1 uv run pytest tests/ -x -q \
+	MINIVESS_ALLOW_HOST=1 MINIVESS_ALLOW_CPU=1 \
+	MLFLOW_TRACKING_URI= MLFLOW_TRACKING_USERNAME= MLFLOW_TRACKING_PASSWORD= DAGSHUB_TOKEN= \
+	LOGS_DIR=/tmp/test_logs \
+	uv run pytest tests/ -x -q \
 	  -m "not integration and not gpu" \
 	  --ignore=tests/v2/quasi_e2e/ \
 	  --ignore=tests/v2/cloud/ \
