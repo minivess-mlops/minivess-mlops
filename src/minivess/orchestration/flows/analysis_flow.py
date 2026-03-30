@@ -901,6 +901,105 @@ def generate_comparison(
     return markdown
 
 
+@task(name="export-analysis-duckdb", on_completion=[_on_complete], on_failure=[_on_fail])
+def task_export_analysis_duckdb(
+    all_results: dict[str, dict[str, dict[str, Any]]],
+    manifest_runs: list[Any],
+    output_dir: Path,
+    metadata: dict[str, str],
+) -> Path | None:
+    """Export per-volume metrics to analysis_results.duckdb (DuckDB 1).
+
+    Extracts per-volume metrics from FoldResult in each EvaluationResult
+    and materializes them into a self-contained DuckDB file.
+
+    Parameters
+    ----------
+    all_results:
+        {model_name: {dataset: {subset: EvaluationResult}}}.
+    manifest_runs:
+        List of SourceRun objects for the runs table.
+    output_dir:
+        Output directory for the DuckDB file.
+    metadata:
+        Key-value pairs for the metadata table.
+
+    Returns
+    -------
+    Path to analysis_results.duckdb, or None if no per-volume data found.
+    """
+    from minivess.pipeline.biostatistics_duckdb import build_analysis_results_duckdb
+    from minivess.pipeline.biostatistics_types import SourceRunManifest
+
+    pv_records: list[dict[str, object]] = []
+    fold_records: list[dict[str, object]] = []
+
+    for model_name, datasets in all_results.items():
+        for dataset_name, subsets in datasets.items():
+            for subset_name, eval_result in subsets.items():
+                fold_result = getattr(eval_result, "fold_result", None)
+                if fold_result is None:
+                    continue
+
+                # Determine split and dataset
+                split = "test" if dataset_name != "minivess" else "trainval"
+                dataset = dataset_name
+
+                # Extract fold_id from model name or default to 0
+                fold_id = getattr(eval_result, "fold_id", 0)
+
+                # Per-volume metrics
+                pv_metrics = getattr(fold_result, "per_volume_metrics", {})
+                vol_ids = getattr(fold_result, "volume_ids", [])
+                for metric_name, values in pv_metrics.items():
+                    for idx, val in enumerate(values):
+                        vol_id = vol_ids[idx] if idx < len(vol_ids) else f"vol_{idx}"
+                        pv_records.append({
+                            "run_id": model_name,
+                            "fold_id": fold_id,
+                            "split": split,
+                            "dataset": dataset,
+                            "volume_id": vol_id,
+                            "metric_name": metric_name,
+                            "metric_value": float(val),
+                        })
+
+                # Fold-level aggregated metrics
+                aggregated = getattr(fold_result, "aggregated", {})
+                for metric_name, ci in aggregated.items():
+                    point = getattr(ci, "point_estimate", None)
+                    if point is not None:
+                        fold_records.append({
+                            "run_id": model_name,
+                            "fold_id": fold_id,
+                            "split": split,
+                            "metric_name": metric_name,
+                            "metric_value": float(point),
+                        })
+
+    if not pv_records:
+        logger.warning("No per-volume metrics found — skipping analysis DuckDB export")
+        return None
+
+    manifest = SourceRunManifest.from_runs(manifest_runs)
+    db_path = output_dir / "analysis_results.duckdb"
+
+    build_analysis_results_duckdb(
+        manifest=manifest,
+        per_volume_records=pv_records,
+        fold_metric_records=fold_records,
+        output_path=db_path,
+        metadata=metadata,
+    )
+
+    logger.info(
+        "Exported analysis_results.duckdb: %d per-volume, %d fold metrics",
+        len(pv_records),
+        len(fold_records),
+    )
+    return db_path
+
+
 @task(name="register-champion", on_completion=[_on_complete], on_failure=[_on_fail])
 def register_champion_task(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
@@ -1849,6 +1948,17 @@ def run_analysis_flow(
         # Step 7: Generate comparison
         comparison_md = generate_comparison(all_results)
 
+        # Step 7b: Export analysis DuckDB (per-volume metrics for biostatistics)
+        analysis_duckdb_path = task_export_analysis_duckdb(
+            all_results=all_results,
+            manifest_runs=runs if hasattr(runs, "__iter__") else [],
+            output_dir=output_dir or Path("outputs/analysis"),
+            metadata={
+                "git_sha": os.environ.get("GIT_SHA", "unknown"),
+                "upstream_experiment": os.environ.get("UPSTREAM_EXPERIMENT", "unknown"),
+            },
+        )
+
         # Step 8: Register champion (with model URIs for actual registration)
         promotion_info = register_champion_task(
             all_results,
@@ -1962,6 +2072,7 @@ def run_analysis_flow(
             "experiment_summary": experiment_summary,
             "mlflow_run_id": mlflow_run_id,
             "upstream_training_run_id": upstream_training_run_id,
+            "analysis_duckdb_path": analysis_duckdb_path,
         }
 
 
