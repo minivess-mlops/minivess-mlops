@@ -1,0 +1,1408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LOCAL DYNUNET MECHANICS DEBUG — REPRODUCIBLE 3-FLOW PIPELINE TEST
+  =================================================================
+
+  COUNCIL:
+    - Biostatistician: factorial correctness, statistical power, metric selection
+    - ML Platform Engineer: Docker, Prefect, MLflow, GPU, observability
+    - Nature Protocols Editor: TRIPOD+AI compliance, figure/table standards, reproducibility
+
+  PURPOSE:
+    End-to-end reproducible test of Train -> Analysis -> Biostatistics pipeline
+    on local GPU (RTX 2070 Super, 8 GB VRAM) with DynUNet model family.
+    Produces publication-quality R/ggplot2 figures + LaTeX tables.
+
+  SCOPE:
+    - 4 training conditions x 2 folds = 8 training runs
+    - 2 post-training methods x 2 ensemble strategies = 4 evaluation variants per run
+    - 32 total evaluation configurations
+    - DeepVess external test evaluation (OBLIGATORY)
+    - Full biostatistics with R/ggplot2 figures and LaTeX tables
+
+  CONSTRAINTS:
+    - Docker + Prefect for ALL execution (CLAUDE.md Rules 17-19)
+    - R/ggplot2 ONLY for publication figures (no matplotlib for final output)
+    - DeepVess evaluation OBLIGATORY (CLAUDE.md datasets section)
+    - Zero hardcoded parameters (Rule 29)
+    - DagsHub MLflow as tracking backend
+    - ~4 hour wall-clock budget
+
+  PROVENANCE:
+    - Source of truth: CLAUDE.md, knowledge-graph/navigator.yaml
+    - Factorial pattern: configs/factorial/debug.yaml, configs/factorial/smoke_local.yaml
+    - Biostatistics: src/minivess/pipeline/biostatistics_*.py
+    - R export: src/minivess/pipeline/biostatistics_r_export.py
+    - Compliance: src/minivess/pipeline/biostatistics_compliance.py
+    - Docker: deployment/docker/Dockerfile.{train,analyze,biostatistics,base,base-cpu}
+    - Compose: deployment/docker-compose.flows.yml
+-->
+<plan id="local-dynunet-mechanics-debug"
+      version="1.0"
+      created="2026-03-29"
+      target_branch="hotfix/pass-10-and-11">
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       FACTORIAL DESIGN — USER-CONFIRMED
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <factorial_design>
+    <description>
+      DynUNet-only mechanics debug: validates the 3-layer factorial pipeline
+      with the simplest model that fits on RTX 2070 Super (8 GB VRAM).
+      Isolates pipeline mechanics from model complexity (no SAM3, no VesselFM).
+    </description>
+
+    <layer_a name="Training">
+      <factor name="model_family" levels="1">
+        <level>dynunet</level>
+      </factor>
+      <factor name="loss_name" levels="2">
+        <level>dice_ce</level>
+        <level>cbdice_cldice</level>
+      </factor>
+      <factor name="aux_calibration" levels="2">
+        <level>false</level>
+        <level>true</level>
+      </factor>
+      <training_cells>4</training_cells>
+      <!-- 1 model x 2 losses x 2 aux_calib = 4 cells -->
+    </layer_a>
+
+    <layer_b name="Post-Training">
+      <factor name="method" levels="2">
+        <level>none</level>
+        <level>swag</level>
+        <!-- SWAG = Maddox et al. 2019. Requires training-time second-moment
+             collection. "none" is free from training subflow result. -->
+      </factor>
+      <factor name="recalibration" levels="1">
+        <level>none</level>
+        <!-- Temperature scaling excluded for local debug — adds
+             validation complexity without testing pipeline mechanics.
+             Full factorial (paper_full.yaml) includes it. -->
+      </factor>
+      <post_training_cells>2</post_training_cells>
+    </layer_b>
+
+    <layer_c name="Analysis">
+      <factor name="ensemble_strategy" levels="2">
+        <level>per_loss_single_best</level>
+        <level>all_loss_single_best</level>
+      </factor>
+      <analysis_cells>2</analysis_cells>
+    </layer_c>
+
+    <totals>
+      <total_conditions>16</total_conditions>
+      <!-- 4 (Layer A) x 2 (Layer B) x 2 (Layer C) = 16 -->
+      <folds>2</folds>
+      <epochs>15</epochs>
+      <data_fraction>half</data_fraction>
+      <!-- ~35 train, ~12 val per fold -->
+      <total_training_runs>8</total_training_runs>
+      <!-- 4 conditions x 2 folds = 8 GPU-bound training jobs -->
+      <total_evaluation_configs>32</total_evaluation_configs>
+      <!-- 8 training x 2 post-training x 2 ensemble = 32 -->
+      <external_test_dataset>deepvess</external_test_dataset>
+      <deepvess_volumes>7</deepvess_volumes>
+      <!-- DeepVess: 7 multiphoton volumes, mouse brain cortex,
+           CC-BY-4.0, Haft-Javaherian et al. 2019 -->
+    </totals>
+
+    <cost_estimate>
+      <compute>Local RTX 2070 Super — $0 cloud cost</compute>
+      <wall_clock_hours>4</wall_clock_hours>
+      <breakdown>
+        <training_per_run_minutes>25</training_per_run_minutes>
+        <!-- DynUNet + 15 epochs + half data ~ 25 min per run -->
+        <training_total_minutes>200</training_total_minutes>
+        <!-- 8 runs x 25 min = 200 min = 3.3 hours -->
+        <analysis_minutes>20</analysis_minutes>
+        <!-- Ensemble eval + per-volume metrics + DeepVess -->
+        <biostatistics_minutes>10</biostatistics_minutes>
+        <!-- DuckDB materialization + stats + R figures -->
+      </breakdown>
+    </cost_estimate>
+  </factorial_design>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       DELIVERABLES
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <deliverables>
+    <configs>
+      <file>configs/factorial/local_dynunet_mechanics.yaml</file>
+      <file>configs/experiment/local_dynunet_dice_ce.yaml</file>
+      <file>configs/experiment/local_dynunet_dice_ce_calib.yaml</file>
+      <file>configs/experiment/local_dynunet_cbdice_cldice.yaml</file>
+      <file>configs/experiment/local_dynunet_cbdice_cldice_calib.yaml</file>
+      <file>configs/biostatistics/local_dynunet.yaml</file>
+      <file>configs/splits/debug_half_2fold.json</file>
+    </configs>
+
+    <scripts>
+      <file>scripts/run_local_dynunet_mechanics.sh</file>
+    </scripts>
+
+    <figures description="R/ggplot2 publication figures (PDF + PNG + JSON sidecar)">
+      <figure id="F1" name="distribution_plot">Raincloud/violin per condition per metric</figure>
+      <figure id="F2" name="consort_flow">CONSORT-style flow diagram (programmatic)</figure>
+      <figure id="F3" name="effect_size_heatmap">Cliff's delta heatmap across conditions</figure>
+      <figure id="F4" name="forest_plot">Forest plot with bootstrap CIs</figure>
+      <figure id="F5" name="interaction_plot">Factorial ANOVA interaction (loss x calibration)</figure>
+      <figure id="F6" name="specification_curve">Specification curve analysis</figure>
+      <figure id="F7" name="generalization_gap">Train vs DeepVess gap analysis</figure>
+      <figure id="F8" name="cd_diagram">Critical difference diagram (Nemenyi)</figure>
+      <figure id="F9" name="variance_lollipop">Variance decomposition (condition vs fold vs residual)</figure>
+    </figures>
+
+    <tables description="LaTeX booktabs tables + JSON sidecar">
+      <table id="T1" name="comparison">Main comparison with bootstrap CIs</table>
+      <table id="T2" name="effect_sizes">Cohen's d + Cliff's delta per pair</table>
+      <table id="T3" name="variance_decomposition">ICC + Friedman + power caveat</table>
+      <table id="T4" name="rankings">Mean ranks + Nemenyi CD values</table>
+      <table id="T5" name="anova">Factorial ANOVA summary (3 factors)</table>
+      <table id="T6" name="power_analysis">Achieved power + sample size recommendation</table>
+    </tables>
+  </deliverables>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 0: DeepVess Data Preparation
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="0" name="DeepVess Data Preparation">
+    <description>
+      DeepVess raw TIF files exist at data/raw/deepvess/ (26 TIF files).
+      Need to: (a) identify image vs. label volumes, (b) convert TIF to NIfTI,
+      (c) organize into MONAI-compatible layout, (d) DVC-version, (e) validate
+      Docker volume mount includes DeepVess path.
+
+      The DeepVess dataset (Haft-Javaherian et al. 2019) has:
+      - 1 ground truth image + 1 ground truth label (GroundTruthImage.tif, GroundTruthLabel.tif)
+      - 24 unlabeled inference volumes (OldAlzheimers, OldWildtype, YoungAlzheimers, YoungWildtype)
+
+      For external TEST evaluation, only the ground truth pair can be used
+      (others have no labels). The analysis flow evaluates model predictions
+      against GroundTruthLabel on the GroundTruthImage volume.
+
+      However, per CLAUDE.md "DeepVess 7 volumes" — check if the 7 comes from
+      sub-volumes of the ground truth TIF or from separate labeled volumes.
+      The user confirmed 7 volumes, so investigate the TIF file structure.
+    </description>
+
+    <gate>DeepVess NIfTI files present at data/raw/deepvess/nifti/ with at least
+          1 image-label pair discoverable by MONAI's discover_nifti_pairs()</gate>
+
+    <task id="0.1" name="Audit DeepVess TIF structure">
+      <description>
+        Read TIF headers to determine dimensionality and identify which files
+        are images vs. labels. Use tifffile to inspect shapes without loading
+        full data into memory. Document findings.
+      </description>
+      <command>
+        python3 -c "
+        import tifffile
+        from pathlib import Path
+        for f in sorted(Path('data/raw/deepvess').glob('*.tif')):
+            with tifffile.TiffFile(str(f)) as t:
+                shape = t.pages[0].shape if len(t.pages) == 1 else (len(t.pages), *t.pages[0].shape)
+                print(f'{f.name}: shape={shape}, dtype={t.pages[0].dtype}')
+        "
+      </command>
+      <acceptance>
+        Shape and dtype documented for all 26 TIF files.
+        GroundTruthImage and GroundTruthLabel identified with matching spatial dimensions.
+        Sub-volume strategy determined (whole-volume or crop-based 7-volume split).
+      </acceptance>
+    </task>
+
+    <task id="0.2" name="Convert TIF to NIfTI">
+      <description>
+        Use src/minivess/data/format_conversion.py::convert_tiff_to_nifti() to convert
+        DeepVess ground truth image+label to NIfTI format. Voxel spacing from the
+        external dataset registry: resolution_um=(1.0, 1.0, 1.7).
+
+        Output layout following MONAI convention:
+          data/raw/deepvess/nifti/imagesTr/deepvess_gt.nii.gz
+          data/raw/deepvess/nifti/labelsTr/deepvess_gt.nii.gz
+
+        If the ground truth TIF is a large volume that needs splitting into
+        sub-volumes (to get 7), implement a crop-based splitter that creates
+        non-overlapping sub-volumes.
+      </description>
+      <files>
+        <file action="use">src/minivess/data/format_conversion.py</file>
+        <file action="create">scripts/prepare_deepvess.py</file>
+      </files>
+      <acceptance>
+        NIfTI files exist at the expected paths.
+        nibabel can load them and shapes match original TIF data.
+        At least 1 image-label pair (ideally 7 sub-volumes) available.
+      </acceptance>
+    </task>
+
+    <task id="0.3" name="DVC-version DeepVess NIfTI">
+      <description>
+        Add converted NIfTI files to DVC tracking.
+        Since this is local-only, use the local DVC remote.
+        Do NOT push to GCS (local-only experiment).
+      </description>
+      <command>
+        dvc add data/raw/deepvess/nifti
+        git add data/raw/deepvess/nifti.dvc data/raw/deepvess/.gitignore
+      </command>
+      <acceptance>
+        data/raw/deepvess/nifti.dvc tracked in git.
+        dvc status shows clean.
+      </acceptance>
+    </task>
+
+    <task id="0.4" name="Validate Docker volume mount includes DeepVess">
+      <description>
+        Verify docker-compose.flows.yml data_cache volume mount
+        includes path to DeepVess data. The data_cache volume mounts
+        to /app/data, and DeepVess should be accessible at
+        /app/data/raw/deepvess/ inside the container.
+
+        If data is stored at data/raw/deepvess/ on host, and data_cache
+        maps to /app/data, then the host path data/ must be populated
+        into the Docker volume (same as MiniVess).
+      </description>
+      <acceptance>
+        Docker container can read /app/data/raw/deepvess/nifti/ files.
+        Test with: docker compose run --rm -v $(pwd)/data:/app/data:ro train ls /app/data/raw/deepvess/nifti/
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 1: Factorial Config + Experiment Configs + Biostatistics Config
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" name="Configuration">
+    <description>
+      Create all YAML configuration files following established patterns
+      from configs/factorial/smoke_local.yaml and configs/factorial/debug.yaml.
+      Every parameter comes from config — zero hardcoded values (Rule 29).
+    </description>
+
+    <gate>All YAML files parse cleanly. make test-staging passes with new configs.</gate>
+
+    <task id="1.1" name="Create 2-fold half-data splits file">
+      <description>
+        Generate configs/splits/debug_half_2fold.json following the pattern
+        of configs/splits/debug_half_1fold.json but with 2 folds.
+
+        Use seed=42 (from config, not hardcoded in code).
+        ~35 train volumes, ~12 val volumes per fold.
+        Folds are NON-overlapping validation sets (standard k-fold CV).
+
+        Implementation: use existing split generation code, or manually construct
+        from the 3fold_seed42.json by combining folds 0+1 for fold-0 val and
+        folds 1+2 for fold-1 val. Ensure train/val partition is deterministic.
+      </description>
+      <files>
+        <file action="create">configs/splits/debug_half_2fold.json</file>
+      </files>
+      <acceptance>
+        JSON parses cleanly.
+        2 folds, each with ~35 train and ~12 val entries.
+        No train/val overlap within a fold.
+        All file paths reference data/raw/minivess/imagesTr/ and labelsTr/.
+      </acceptance>
+    </task>
+
+    <task id="1.2" name="Create factorial config YAML">
+      <description>
+        Create configs/factorial/local_dynunet_mechanics.yaml following the
+        established pattern. This is the SINGLE SOURCE OF TRUTH for the experiment.
+
+        Key differences from debug.yaml:
+        - model_family: [dynunet] only (not 4 models)
+        - loss_name: [dice_ce, cbdice_cldice] (2 losses)
+        - aux_calibration: [false, true]
+        - post_training method: [none, swag]
+        - recalibration: [none] (no temperature_scaling)
+        - ensemble_strategy: [per_loss_single_best, all_loss_single_best]
+        - max_epochs: 15
+        - num_folds: 2
+        - infrastructure.cloud_config: local
+        - No zero_shot_baselines (DynUNet-only mechanics test)
+        - splits_file: configs/splits/debug_half_2fold.json
+        - MLflow: DagsHub (from .env MLFLOW_TRACKING_URI)
+      </description>
+      <files>
+        <file action="create">configs/factorial/local_dynunet_mechanics.yaml</file>
+      </files>
+      <yaml_skeleton><![CDATA[
+experiment_name: local_dynunet_mechanics
+description: "Local DynUNet mechanics debug: 16 conditions, 2 folds, 15 epochs"
+debug: true
+
+factors:
+  training:
+    model_family:
+      - dynunet
+    loss_name:
+      - dice_ce
+      - cbdice_cldice
+    aux_calibration:
+      - false
+      - true
+
+  post_training:
+    method:
+      - none
+      - swag
+    recalibration:
+      - none
+
+  analysis:
+    ensemble_strategy:
+      - per_loss_single_best
+      - all_loss_single_best
+
+zero_shot_baselines: []
+
+fixed:
+  max_epochs: 15
+  num_folds: 2
+  max_train_volumes: 35
+  max_val_volumes: 12
+  compute: auto
+  learning_rate: 1.0e-3
+  batch_size: 2
+
+splits_file: configs/splits/debug_half_2fold.json
+
+mlflow:
+  training_experiment: local_dynunet_mechanics_training
+  evaluation_experiment: local_dynunet_mechanics_evaluation
+  biostatistics_experiment: local_dynunet_mechanics_biostatistics
+
+biostatistics:
+  anova_strategy: layered
+  alpha: 0.05
+  co_primary_metrics:
+    - cldice
+    - masd
+  foil_metrics:
+    - dsc
+
+post_training:
+  methods:
+    - none
+    - swag
+
+infrastructure:
+  cloud_config: local
+
+flows:
+  - train
+  - analyze
+  - biostatistics
+      ]]></yaml_skeleton>
+      <acceptance>
+        YAML parses cleanly with yaml.safe_load().
+        4 Layer A cells x 2 Layer B x 2 Layer C = 16 total conditions.
+        infrastructure.cloud_config is "local".
+        No cloud-specific keys (no skypilot_yaml, no region_config).
+      </acceptance>
+    </task>
+
+    <task id="1.3" name="Create per-condition experiment configs">
+      <description>
+        Create 4 Hydra experiment configs (one per training cell):
+        - local_dynunet_dice_ce.yaml (loss=dice_ce, aux_calib=false)
+        - local_dynunet_dice_ce_calib.yaml (loss=dice_ce, aux_calib=true)
+        - local_dynunet_cbdice_cldice.yaml (loss=cbdice_cldice, aux_calib=false)
+        - local_dynunet_cbdice_cldice_calib.yaml (loss=cbdice_cldice, aux_calib=true)
+
+        Each config overrides base defaults following the pattern in
+        configs/experiment/mini_experiment_dice_ce.yaml.
+
+        IMPORTANT: These configs set ONLY the varying factors. Fixed parameters
+        (max_epochs, batch_size, num_folds) come from the factorial YAML.
+        The experiment configs are Hydra composition overrides, not standalone.
+      </description>
+      <files>
+        <file action="create">configs/experiment/local_dynunet_dice_ce.yaml</file>
+        <file action="create">configs/experiment/local_dynunet_dice_ce_calib.yaml</file>
+        <file action="create">configs/experiment/local_dynunet_cbdice_cldice.yaml</file>
+        <file action="create">configs/experiment/local_dynunet_cbdice_cldice_calib.yaml</file>
+      </files>
+      <acceptance>
+        Each YAML parses cleanly.
+        Each sets model, loss, and aux_calib fields.
+        experiment_name matches factorial YAML training_experiment.
+      </acceptance>
+    </task>
+
+    <task id="1.4" name="Create biostatistics config">
+      <description>
+        Create configs/biostatistics/local_dynunet.yaml following the pattern
+        of configs/biostatistics/smoke_local.yaml.
+
+        Key settings:
+        - experiment_names: [local_dynunet_mechanics_evaluation]
+        - factorial_yaml: configs/factorial/local_dynunet_mechanics.yaml
+        - metrics: [dsc, hd95, assd, nsd, cldice, be_0, be_1, junction_f1,
+                     cal_ece, cal_mce, cal_brier, cal_nll, cal_ace, cal_ba_ece]
+        - primary_metric: cldice
+        - alpha: 0.05 (from BiostatisticsConfig, not hardcoded)
+        - n_bootstrap: 2000 (reduced from 10000 for local speed)
+        - seed: 42
+        - ROPE values per reviewer consensus
+        - min_folds_per_condition: 2 (matching num_folds=2)
+        - min_conditions: 4 (matching 4 training cells)
+        - output_dir: outputs/biostatistics_local_dynunet
+      </description>
+      <files>
+        <file action="create">configs/biostatistics/local_dynunet.yaml</file>
+      </files>
+      <acceptance>
+        YAML parses cleanly.
+        BiostatisticsConfig(**yaml.safe_load(path)) validates without errors.
+        factorial_yaml points to the correct factorial config.
+        All 14 metrics listed (8 segmentation + 6 calibration).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 2: Docker Image Rebuild
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" name="Docker Image Rebuild">
+    <description>
+      Rebuild Docker base images to include current source code and any new
+      dependencies. The biostatistics flow needs R/ggplot2 — this requires
+      a multi-stage addition to Dockerfile.base-cpu or Dockerfile.biostatistics.
+
+      CURRENT STATE: Dockerfile.biostatistics uses minivess-base-cpu:latest (Tier B).
+      The base-cpu image is Python-only (scipy/pandas/DuckDB). R is NOT installed.
+      The current biostatistics_figures.py uses matplotlib/seaborn (Python).
+
+      PLAN: Add R/ggplot2 to the biostatistics Docker image via a multi-stage
+      build that installs R + ggplot2 in the builder stage and copies the
+      R installation to the runner. Create R scripts that read the JSON
+      exports from biostatistics_r_export.py.
+    </description>
+
+    <gate>All 3 Docker images build successfully. Healthchecks pass.</gate>
+
+    <task id="2.1" name="Rebuild GPU base image">
+      <description>
+        Rebuild minivess-base:latest with current src/ and configs/.
+        This is the foundation for train and analyze flows.
+      </description>
+      <command>
+        DOCKER_BUILDKIT=1 docker build \
+          --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
+          --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+          --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+          -t minivess-base:latest \
+          -f deployment/docker/Dockerfile.base .
+      </command>
+      <acceptance>
+        docker images shows minivess-base:latest with recent timestamp.
+        python -c "import minivess" works inside container.
+      </acceptance>
+    </task>
+
+    <task id="2.2" name="Rebuild CPU base image">
+      <description>
+        Rebuild minivess-base-cpu:latest with current source.
+        Foundation for biostatistics flow.
+      </description>
+      <command>
+        DOCKER_BUILDKIT=1 docker build \
+          --build-arg UID=$(id -u) --build-arg GID=$(id -g) \
+          --build-arg GIT_COMMIT=$(git rev-parse HEAD) \
+          --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ") \
+          -t minivess-base-cpu:latest \
+          -f deployment/docker/Dockerfile.base-cpu .
+      </command>
+      <acceptance>
+        docker images shows minivess-base-cpu:latest with recent timestamp.
+      </acceptance>
+    </task>
+
+    <task id="2.3" name="Add R/ggplot2 to biostatistics Docker image">
+      <description>
+        Modify Dockerfile.biostatistics to install R + ggplot2 + required R packages.
+        Two approaches (decide during implementation):
+
+        APPROACH A (preferred): Multi-stage addition to Dockerfile.biostatistics.
+        Add R installation in the FROM stage, keeping the thin Dockerfile pattern.
+        Install R packages: ggplot2, dplyr, tidyr, jsonlite, scales, patchwork,
+        ggrepel, viridis, Cairo (for PDF/PNG output).
+
+        APPROACH B (if A bloats image): Separate R container that reads JSON
+        from a shared volume. Less integrated but smaller images.
+
+        The key insight: Python biostatistics flow exports JSON/CSV via
+        biostatistics_r_export.py (already implemented). R scripts read
+        these files and produce PDF/PNG figures. No rpy2 needed.
+
+        R package install is slow (~15 min). Use BuildKit cache mount
+        for the R library directory to avoid re-downloading on rebuilds.
+      </description>
+      <files>
+        <file action="modify">deployment/docker/Dockerfile.biostatistics</file>
+        <file action="create">deployment/r_scripts/fig_forest_plot.R</file>
+        <file action="create">deployment/r_scripts/fig_effect_size_heatmap.R</file>
+        <file action="create">deployment/r_scripts/fig_specification_curve.R</file>
+        <file action="create">deployment/r_scripts/fig_cd_diagram.R</file>
+        <file action="create">deployment/r_scripts/fig_generalization_gap.R</file>
+        <file action="create">deployment/r_scripts/fig_consort_flow.R</file>
+        <file action="create">deployment/r_scripts/render_all_figures.R</file>
+      </files>
+      <r_packages>
+        <!-- CRAN packages for publication figures -->
+        <package>ggplot2</package>
+        <package>dplyr</package>
+        <package>tidyr</package>
+        <package>jsonlite</package>
+        <package>scales</package>
+        <package>patchwork</package>
+        <package>ggrepel</package>
+        <package>viridis</package>
+        <package>Cairo</package>
+        <package>forcats</package>
+        <package>ggbeeswarm</package>
+        <package>scmamp</package>
+        <!-- scmamp: Nemenyi CD diagram (autorank alternative in R) -->
+      </r_packages>
+      <dockerfile_sketch><![CDATA[
+# Dockerfile.biostatistics — with R/ggplot2 multi-stage
+FROM minivess-base-cpu:latest AS python-base
+
+# ── R installation stage ──────────────────────────────────────────────
+FROM rocker/r-ver:4.4.0 AS r-builder
+
+# Install R packages with cache mount
+RUN --mount=type=cache,target=/usr/local/lib/R/site-library-cache \
+    install2.r --error --skipinstalled \
+    ggplot2 dplyr tidyr jsonlite scales patchwork \
+    ggrepel viridis Cairo forcats ggbeeswarm scmamp
+
+# ── Final stage ───────────────────────────────────────────────────────
+FROM python-base
+
+# Copy R installation from r-builder
+COPY --from=r-builder /usr/local/lib/R /usr/local/lib/R
+COPY --from=r-builder /usr/local/bin/R /usr/local/bin/R
+COPY --from=r-builder /usr/local/bin/Rscript /usr/local/bin/Rscript
+# R shared libraries
+COPY --from=r-builder /usr/lib/x86_64-linux-gnu/libR* /usr/lib/x86_64-linux-gnu/
+
+# Copy R figure scripts
+COPY --chown=minivess:minivess deployment/r_scripts/ /app/r_scripts/
+
+LABEL flow="biostatistics"
+LABEL description="Biostatistics flow — stats + R/ggplot2 figures + LaTeX tables"
+LABEL tier="cpu"
+
+# ... (rest as existing Dockerfile.biostatistics)
+      ]]></dockerfile_sketch>
+      <acceptance>
+        docker build -t minivess-biostatistics:latest succeeds.
+        Rscript -e "library(ggplot2); cat('OK\n')" works inside container.
+        python -c "import minivess" works inside container.
+        Image size is reasonable (&lt; 3 GB).
+      </acceptance>
+      <note>
+        CRITICAL: This is the most complex task in the plan. The rocker/r-ver
+        base image is Debian-based, same as python:3.13-slim-bookworm, so
+        library copying should work. If it does not, fall back to installing
+        R directly in the runner stage with apt-get (increases image size but
+        guarantees compatibility). Test with a minimal R script first before
+        installing all packages.
+      </note>
+    </task>
+
+    <task id="2.4" name="Build flow images">
+      <description>
+        Build the thin flow images on top of the refreshed base images.
+      </description>
+      <command>
+        docker compose -f deployment/docker-compose.flows.yml build train analyze biostatistics
+      </command>
+      <acceptance>
+        All 3 flow images built successfully.
+        docker images shows minivess-train:latest, minivess-analyze:latest,
+        minivess-biostatistics:latest with recent timestamps.
+      </acceptance>
+    </task>
+
+    <task id="2.5" name="Validate Docker network and infrastructure stack">
+      <description>
+        Ensure the Docker infrastructure stack is running (MLflow, Prefect, MinIO).
+        For this local experiment, MLflow tracking uses DagsHub
+        (MLFLOW_TRACKING_URI from .env), so the local MLflow container is optional.
+        Prefect server is required for flow orchestration.
+      </description>
+      <command>
+        # Create network if not exists
+        docker network create minivess-network 2>/dev/null || true
+        # Start Prefect (required for flow orchestration)
+        docker compose -f deployment/docker-compose.yml --profile dev up -d prefect
+        # Verify Prefect API is reachable
+        curl -sf http://localhost:4200/api/health || echo "Prefect not ready"
+      </command>
+      <acceptance>
+        docker network ls shows minivess-network.
+        Prefect health endpoint returns 200.
+        .env has MLFLOW_TRACKING_URI set to DagsHub URL.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 3: Training (8 Runs)
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" name="Training">
+    <description>
+      Execute 8 training runs (4 conditions x 2 folds) sequentially on local GPU.
+      Each run trains DynUNet for 15 epochs on half MiniVess data.
+
+      EXECUTION MODEL:
+      - Docker Compose run with GPU access (CDI: nvidia.com/gpu=all)
+      - Prefect flow orchestration (train_flow.py)
+      - MLflow tracking to DagsHub
+      - Post-training SWAG runs as subflow inside the same container
+      - Observability: GPU heartbeat, structured JSONL logging, CUDA guard
+
+      SEQUENTIAL because: local single GPU, can only run 1 training at a time.
+      The launcher script handles the loop.
+
+      Post-training (Layer B) runs INSIDE the training container as a subflow.
+      "none" is free (just the trained checkpoint). "swag" runs SWAG collection
+      (Maddox et al. 2019) after training completes.
+    </description>
+
+    <gate>All 8 training runs SUCCEEDED in MLflow. Checkpoints logged as MLflow artifacts.
+          Each run has: val/cldice, val/dsc metrics, checkpoint artifact, config artifact.</gate>
+
+    <task id="3.1" name="Create launcher script">
+      <description>
+        Create scripts/run_local_dynunet_mechanics.sh — the SINGLE COMMAND
+        that reproduces the entire experiment end-to-end.
+
+        The script:
+        1. Validates prerequisites (.env, Docker images, data, network)
+        2. Loops over 4 conditions x 2 folds = 8 training runs
+        3. Each run: docker compose run --rm --shm-size 8g train (with env vars)
+        4. After all training: runs analysis flow (Phase 4)
+        5. After analysis: runs biostatistics flow (Phase 5)
+        6. Reports final summary
+
+        CRITICAL: Uses Docker Compose (not SkyPilot) since this is local.
+        Passes EXPERIMENT, HYDRA_OVERRIDES, FOLD_ID etc. as -e env vars.
+        Uses --env-file .env for DagsHub credentials (Rule: Docker Compose V2
+        needs --env-file explicitly).
+      </description>
+      <files>
+        <file action="create">scripts/run_local_dynunet_mechanics.sh</file>
+      </files>
+      <script_skeleton><![CDATA[
+#!/usr/bin/env bash
+# run_local_dynunet_mechanics.sh — Reproducible 3-flow local pipeline test
+#
+# Single command to run the full DynUNet mechanics debug:
+#   Train (8 runs) → Analyze (ensemble + DeepVess) → Biostatistics (R figures)
+#
+# Usage:
+#   ./scripts/run_local_dynunet_mechanics.sh
+#   ./scripts/run_local_dynunet_mechanics.sh --dry-run
+#   ./scripts/run_local_dynunet_mechanics.sh --skip-training  # analysis + biostats only
+#
+# Prerequisites:
+#   - .env with MLFLOW_TRACKING_URI, DAGSHUB_TOKEN, HF_TOKEN
+#   - Docker images built (make build-bases && docker compose -f ... build)
+#   - MiniVess data at data/raw/minivess/
+#   - DeepVess NIfTI at data/raw/deepvess/nifti/
+#   - Docker network: docker network create minivess-network
+#
+# Time estimate: ~4 hours total (3.3h training + 0.3h analysis + 0.2h biostats)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_FILE="configs/factorial/local_dynunet_mechanics.yaml"
+ENV_FILE="${REPO_ROOT}/.env"
+COMPOSE_FILE="${REPO_ROOT}/deployment/docker-compose.flows.yml"
+TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+JOB_LOG="${REPO_ROOT}/outputs/${TIMESTAMP}_local_dynunet_mechanics.log"
+
+# ... (flags, validation, preflight checks)
+
+# ─── Phase 3: Training ──────────────────────────────────────────────
+MODELS=("dynunet")
+LOSSES=("dice_ce" "cbdice_cldice")
+CALIBS=("false" "true")
+FOLDS=(0 1)
+PT_METHODS="none,swag"
+
+CONDITION=0
+for loss in "${LOSSES[@]}"; do
+  for calib in "${CALIBS[@]}"; do
+    for fold in "${FOLDS[@]}"; do
+      CONDITION=$((CONDITION + 1))
+      echo "[${CONDITION}/8] dynunet x ${loss} x calib=${calib} x fold=${fold}"
+      docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run --rm \
+        --shm-size 8g \
+        -e MODEL_FAMILY=dynunet \
+        -e LOSS_NAME="${loss}" \
+        -e FOLD_ID="${fold}" \
+        -e WITH_AUX_CALIB="${calib}" \
+        -e MAX_EPOCHS=15 \
+        -e MAX_TRAIN_VOLUMES=35 \
+        -e MAX_VAL_VOLUMES=12 \
+        -e EXPERIMENT_NAME=local_dynunet_mechanics_training \
+        -e POST_TRAINING_METHODS="${PT_METHODS}" \
+        -e BATCH_SIZE=2 \
+        train
+    done
+  done
+done
+
+# ─── Phase 4: Analysis ──────────────────────────────────────────────
+docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run --rm \
+  -e FACTORIAL_YAML="${CONFIG_FILE}" \
+  -e EVAL_DATASETS="minivess,deepvess" \
+  analyze
+
+# ─── Phase 5: Biostatistics ─────────────────────────────────────────
+docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" run --rm \
+  -e BIOSTATISTICS_CONFIG=configs/biostatistics/local_dynunet.yaml \
+  biostatistics
+      ]]></script_skeleton>
+      <acceptance>
+        Script is executable (chmod +x).
+        --dry-run prints all 8 docker compose run commands without executing.
+        Passes shellcheck with no errors.
+        Uses --env-file .env (Docker Compose V2 requirement).
+        Uses --shm-size 8g for GPU flows (SIGBUS prevention).
+      </acceptance>
+    </task>
+
+    <task id="3.2" name="Execute training runs">
+      <description>
+        Run the 8 training jobs sequentially via the launcher script.
+        Monitor via:
+        - docker logs minivess-flow-train (real-time)
+        - DagsHub MLflow UI (experiment: local_dynunet_mechanics_training)
+        - outputs/logs/ (structured JSONL events)
+
+        Expected per run:
+        - ~25 min wall clock
+        - ~4-5 GB VRAM usage (DynUNet + BS=2 + half data)
+        - val/cldice, val/dsc, val/loss logged per epoch
+        - Best checkpoint saved + logged to MLflow
+
+        SWAG subflow adds ~5 min per run (2nd moment collection, SWAG checkpoint).
+
+        Total: 8 runs x 30 min (with SWAG) = ~4 hours.
+      </description>
+      <monitoring>
+        <check interval="per_run">MLflow UI shows new run with correct tags</check>
+        <check interval="per_run">Checkpoint artifact logged (model/best.pt)</check>
+        <check interval="per_run">SWAG checkpoint logged (model/swag.pt) for SWAG runs</check>
+        <check interval="per_run">No OOM (DynUNet BS=2 fits in 8 GB)</check>
+        <check interval="per_run">No NaN in loss (DynUNet uses FP32, no BF16 issues)</check>
+        <check interval="hourly">GPU utilization &gt;70% during training</check>
+      </monitoring>
+      <failure_protocol>
+        If a run fails:
+        1. Check docker logs for error (OOM? NaN? MLflow auth?)
+        2. Check MLflow for partial metrics
+        3. If OOM: reduce batch_size to 1 + gradient_accumulation_steps=2
+        4. If MLflow auth: verify DAGSHUB_TOKEN in .env
+        5. If NaN: check loss function compatibility with data
+        6. Re-run ONLY the failed condition (script is idempotent with --resume)
+      </failure_protocol>
+      <acceptance>
+        8/8 training runs show SUCCEEDED in MLflow.
+        Each run has:
+        - val/cldice &gt; 0.3 (sanity check — 15 epochs is not much)
+        - val/dsc &gt; 0.5 (sanity check)
+        - checkpoint/best.pt artifact
+        - config/resolved_config.yaml artifact
+        - train/loss monotonically decreasing (broadly)
+        SWAG runs additionally have:
+        - model/swag.pt artifact
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 4: Analysis (Ensemble + DeepVess Evaluation)
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" name="Analysis">
+    <description>
+      Run the Analysis Flow (Flow 3) to:
+      1. Discover training runs from MLflow (8 runs)
+      2. Build ensemble models using 2 strategies:
+         - per_loss_single_best: best model per loss function
+         - all_loss_single_best: best model across all losses
+      3. Evaluate all models (single + ensemble) on:
+         - MiniVess validation set (per-volume metrics)
+         - DeepVess external test set (per-volume metrics, OBLIGATORY)
+      4. Log evaluation results to MLflow (experiment: local_dynunet_mechanics_evaluation)
+      5. Compute per-volume metrics for paired bootstrap in biostatistics
+
+      EXECUTION: Docker container with GPU (sliding_window_inference needs GPU).
+      Reads checkpoints from MLflow artifacts. Writes evaluation results to MLflow.
+
+      DeepVess evaluation is OBLIGATORY (CLAUDE.md). This is the ONLY external
+      test dataset. Results tagged with test/deepvess/{metric} prefix.
+    </description>
+
+    <gate>32 evaluation configs completed in MLflow. Per-volume metrics logged for
+          both MiniVess val and DeepVess test. At least N=12 val volumes and N=7
+          DeepVess volumes per evaluation.</gate>
+
+    <task id="4.1" name="Execute analysis flow">
+      <description>
+        Run analysis flow via Docker Compose:
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+          --shm-size 8g \
+          -e FACTORIAL_YAML=configs/factorial/local_dynunet_mechanics.yaml \
+          -e EVAL_DATASETS=minivess,deepvess \
+          analyze
+
+        The analysis flow:
+        1. Queries MLflow for all runs in local_dynunet_mechanics_training
+        2. Groups runs by condition (model x loss x aux_calib)
+        3. For each condition x fold: loads checkpoint, runs sliding_window_inference
+        4. Evaluates on val set + DeepVess test set
+        5. Builds ensemble models (2 strategies)
+        6. Evaluates ensembles on both datasets
+        7. Logs all per-volume metrics to MLflow
+        8. Tags champion model per metric
+
+        Per-volume metrics are critical for downstream biostatistics:
+        - N=12 val volumes per fold allows paired bootstrap
+        - N=7 DeepVess volumes allows external test statistics
+        - Metrics: dsc, hd95, assd, nsd, cldice, be_0, be_1, junction_f1
+        - Calibration metrics: cal_ece, cal_mce, cal_brier, cal_nll, cal_ace, cal_ba_ece
+      </description>
+      <acceptance>
+        MLflow experiment local_dynunet_mechanics_evaluation has runs.
+        Each evaluation run has per-volume metrics logged.
+        DeepVess test metrics present with test/deepvess/ prefix.
+        MiniVess val metrics present with eval/minivess/ prefix.
+        Ensemble evaluation runs present for both strategies.
+      </acceptance>
+    </task>
+
+    <task id="4.2" name="Validate per-volume metric completeness">
+      <description>
+        Query MLflow to verify that per-volume metrics were logged correctly.
+        Each evaluation should have:
+        - Per-volume DSC, clDice for MiniVess val (N=12 per fold)
+        - Per-volume DSC, clDice for DeepVess test (N=7)
+        - Summary statistics (mean, std, CI)
+
+        This data feeds directly into the biostatistics paired bootstrap.
+        If per-volume metrics are missing, the biostatistics flow will fail.
+      </description>
+      <command>
+        python3 -c "
+        import mlflow
+        mlflow.set_tracking_uri('$MLFLOW_TRACKING_URI')
+        exp = mlflow.get_experiment_by_name('local_dynunet_mechanics_evaluation')
+        runs = mlflow.search_runs(experiment_ids=[exp.experiment_id])
+        print(f'Evaluation runs: {len(runs)}')
+        for _, run in runs.iterrows():
+            metrics = [k for k in run.index if k.startswith('metrics.')]
+            print(f'  {run[\"run_id\"][:8]}: {len(metrics)} metrics')
+        "
+      </command>
+      <acceptance>
+        At least 32 evaluation runs found.
+        Each run has per-volume metrics.
+        DeepVess metrics present for at least 7 volumes.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 5: Biostatistics (DuckDB + Statistics + R Figures)
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="5" name="Biostatistics">
+    <description>
+      Run the Biostatistics Flow (Flow 5b) to:
+      1. Discover evaluation runs from MLflow
+      2. Materialize per-volume metrics into DuckDB
+      3. Compute statistical analyses:
+         - Pairwise comparisons (stratified permutation test)
+         - Effect sizes (Cohen's d, Cliff's delta, VDA)
+         - Bayesian signed-rank tests (Benavoli et al. 2017)
+         - Factorial ANOVA (3 factors: loss x calibration x post-training)
+         - Variance decomposition (condition vs fold vs residual)
+         - Friedman test + Nemenyi post-hoc (rankings)
+         - Specification curve analysis
+         - Rank concordance (bootstrap stability)
+      4. Export JSON/CSV for R consumption (biostatistics_r_export.py)
+      5. Generate R/ggplot2 figures (render_all_figures.R)
+      6. Generate LaTeX tables
+      7. Generate CONSORT data + TRIPOD mapping
+      8. Log all artifacts to MLflow
+
+      EXECUTION: CPU Docker container (no GPU needed for stats + R).
+      Reads from MLflow evaluation experiment. Writes to outputs/biostatistics_local_dynunet/.
+    </description>
+
+    <gate>All figures (PDF + PNG + JSON sidecar) and tables (LaTeX + JSON sidecar)
+          generated. DuckDB materialized. CONSORT JSON present. All artifacts
+          logged to MLflow biostatistics experiment.</gate>
+
+    <task id="5.1" name="Execute biostatistics flow">
+      <description>
+        Run biostatistics flow via Docker Compose:
+        docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+          -e BIOSTATISTICS_CONFIG=configs/biostatistics/local_dynunet.yaml \
+          biostatistics
+
+        The flow pipeline:
+        1. task_discover_source_runs: finds evaluation runs in MLflow
+        2. task_validate_source_completeness: checks min_folds, min_conditions
+        3. task_build_duckdb: materializes per-volume metrics into DuckDB
+        4. task_compute_pairwise: stratified permutation + bootstrap CIs
+        5. task_compute_bayesian: Bayesian signed-rank (ROPE)
+        6. task_compute_anova: 3-factor factorial ANOVA
+        7. task_compute_variance: ICC + Friedman
+        8. task_compute_rankings: mean ranks + Nemenyi CD
+        9. task_compute_specification_curve: multiverse analysis
+        10. task_export_r_data: JSON/CSV for R
+        11. task_render_r_figures: Rscript render_all_figures.R
+        12. task_generate_tables: LaTeX with booktabs
+        13. task_generate_consort: CONSORT flow diagram data
+        14. task_log_to_mlflow: upload all artifacts
+      </description>
+      <acceptance>
+        Prefect flow completes without errors.
+        Output directory has: figures/, tables/, r_data/, duckdb/
+        All JSON sidecars present alongside figures and tables.
+      </acceptance>
+    </task>
+
+    <task id="5.2" name="Validate R figures">
+      <description>
+        Check that R/ggplot2 produced all expected figures:
+        - F3_effect_size_heatmap.pdf + .png + .json
+        - F4_forest_plot.pdf + .png + .json
+        - F6_specification_curve.pdf + .png + .json
+        - F7_generalization_gap.pdf + .png + .json
+        - F8_cd_diagram.pdf + .png + .json
+        - F2_consort_flow.pdf + .png + .json
+        - F5_interaction_plot.pdf + .png + .json
+        - F9_variance_lollipop.pdf + .png + .json
+
+        Each figure should be publication-quality:
+        - 300 DPI minimum
+        - Okabe-Ito colorblind-safe palette
+        - 9pt font size
+        - PDF fonttype 42 (TrueType, not bitmap)
+        - Proper axis labels, legend, title
+      </description>
+      <acceptance>
+        All expected figure files exist (PDF + PNG).
+        Each has a JSON sidecar with metadata (figure_id, generation_timestamp,
+        data_source, n_datapoints).
+        PDFs are non-empty and openable.
+        PNGs are at least 300 DPI (check with: identify -verbose figure.png | grep Resolution).
+      </acceptance>
+    </task>
+
+    <task id="5.3" name="Validate LaTeX tables">
+      <description>
+        Check that all expected tables were generated:
+        - T1_comparison.tex + .json
+        - T2_effect_sizes.tex + .json
+        - T3_variance_decomposition.tex + .json
+        - T4_rankings.tex + .json
+        - T5_anova.tex + .json
+        - T6_power_analysis.tex + .json
+
+        Each table should:
+        - Use booktabs formatting (\toprule, \midrule, \bottomrule)
+        - Have proper column alignment
+        - Include caption and label
+        - Compile with pdflatex without errors
+      </description>
+      <acceptance>
+        All expected .tex files exist.
+        Each has a JSON sidecar.
+        Tables contain actual data (not placeholders).
+        booktabs macros present in .tex files.
+      </acceptance>
+    </task>
+
+    <task id="5.4" name="Validate statistical correctness">
+      <description>
+        Sanity checks on the statistical results:
+        1. All p-values in [0, 1]
+        2. Bonferroni/Holm-corrected p-values >= uncorrected p-values
+        3. Cohen's d magnitude reasonable for 15-epoch models
+        4. Cliff's delta in [-1, 1]
+        5. ROPE probabilities sum to ~1 (left + rope + right)
+        6. ICC values in [0, 1]
+        7. Variance decomposition percentages sum to 100%
+        8. Rankings are valid permutations of condition names
+        9. DeepVess metrics present in generalization gap figure data
+        10. Bootstrap CIs are narrower than the metric range
+      </description>
+      <acceptance>
+        All sanity checks pass.
+        No NaN or Inf values in any statistical output.
+        CONSORT JSON has correct counts (matching factorial design).
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 6: Verification
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="6" name="Verification">
+    <description>
+      Final verification that the full pipeline produced correct, complete,
+      and reproducible results. This phase does NOT generate new artifacts —
+      it validates what Phases 3-5 produced.
+    </description>
+
+    <gate>All verification criteria pass. Experiment is reproducible from
+          a single command.</gate>
+
+    <task id="6.1" name="Artifact inventory">
+      <description>
+        Verify ALL expected artifacts exist:
+
+        MLflow (DagsHub):
+        - local_dynunet_mechanics_training: 8 runs, each with checkpoint + config
+        - local_dynunet_mechanics_evaluation: 32 evaluation configs
+        - local_dynunet_mechanics_biostatistics: 1 run with all figures/tables
+
+        Local filesystem:
+        - outputs/biostatistics_local_dynunet/figures/ (9 figures x 3 formats)
+        - outputs/biostatistics_local_dynunet/tables/ (6 tables x 2 formats)
+        - outputs/biostatistics_local_dynunet/r_data/ (4 JSON files)
+        - outputs/biostatistics_local_dynunet/duckdb/ (materialized database)
+        - outputs/biostatistics_local_dynunet/consort_data.json
+        - outputs/biostatistics_local_dynunet/tripod_mapping.json
+      </description>
+      <acceptance>
+        All artifacts present.
+        No placeholder or empty files.
+        MLflow experiment names match factorial YAML.
+      </acceptance>
+    </task>
+
+    <task id="6.2" name="Reproducibility check">
+      <description>
+        Verify the experiment can be reproduced:
+        1. All config files are checked into git
+        2. splits file is deterministic (seed=42)
+        3. Docker images have git commit label
+        4. .env.example documents all required variables
+        5. scripts/run_local_dynunet_mechanics.sh is self-contained
+
+        The goal: another researcher clones the repo, copies .env.example to .env,
+        fills in credentials, builds Docker images, and runs the script.
+        They should get statistically equivalent results.
+      </description>
+      <acceptance>
+        git status shows configs tracked (not in .gitignore).
+        Docker image labels contain correct git commit hash.
+        .env.example lists all variables used by the launcher script.
+        Script does not depend on any unversioned state.
+      </acceptance>
+    </task>
+
+    <task id="6.3" name="DeepVess generalization assessment">
+      <description>
+        Key scientific finding from this experiment:
+        - How much does DynUNet performance degrade from MiniVess val to DeepVess test?
+        - Does loss function choice affect generalization gap?
+        - Does calibration affect generalization?
+
+        This is the PLATFORM FRAMING contribution (CLAUDE.md):
+        the platform's ability to automatically assess generalization across
+        datasets with subgroup analysis. The actual numbers are standard practice.
+
+        Extract from the generalization gap figure (F7) data:
+        - Mean DSC drop from MiniVess to DeepVess
+        - Mean clDice drop
+        - Per-condition gap magnitude
+      </description>
+      <acceptance>
+        Generalization gap data present in F7 JSON sidecar.
+        Both MiniVess and DeepVess metrics present per condition.
+        Gap magnitude is plausible (positive drop expected for cross-dataset eval).
+      </acceptance>
+    </task>
+
+    <task id="6.4" name="Test suite validation">
+      <description>
+        Run make test-staging to verify that the new configs and scripts
+        don't break any existing tests.
+      </description>
+      <command>
+        make test-staging
+      </command>
+      <acceptance>
+        0 failures, 0 errors.
+        Skip count documented and justified.
+        New configs are discoverable by existing test infrastructure.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       OBSERVABILITY
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <observability>
+    <description>
+      All observability is wired through existing infrastructure.
+      No new observability code needed — just ensure it is activated.
+    </description>
+
+    <component name="CUDA Guard">
+      <description>
+        gpu_flow_observability_context() in train_flow.py and analysis_flow.py
+        checks CUDA availability before starting. Fails loud if no GPU.
+      </description>
+      <wired_in>src/minivess/observability/flow_observability.py</wired_in>
+    </component>
+
+    <component name="GPU Heartbeat">
+      <description>
+        Background thread logging GPU utilization, temperature, VRAM every 30s.
+        Configured via GPU_HEARTBEAT_INTERVAL_S in docker-compose.flows.yml.
+        Alerts if utilization &lt;5% for &gt;120s (stall detection).
+      </description>
+      <wired_in>src/minivess/observability/gpu_heartbeat.py</wired_in>
+      <config_source>.env.example: GPU_HEARTBEAT_INTERVAL_S, GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT</config_source>
+    </component>
+
+    <component name="Structured JSONL Logging">
+      <description>
+        StructuredEventLogger writes flow_start, epoch_end, flow_end events
+        to outputs/logs/events.jsonl. Machine-parseable for post-hoc analysis.
+      </description>
+      <wired_in>src/minivess/observability/structured_logging.py</wired_in>
+    </component>
+
+    <component name="Docker HEALTHCHECK">
+      <description>
+        Each flow Dockerfile has HEALTHCHECK defined. For GPU flows,
+        scripts/healthcheck_training.py checks that the training process
+        is making progress (not stalled).
+      </description>
+      <wired_in>deployment/docker/Dockerfile.train, Dockerfile.analyze</wired_in>
+    </component>
+
+    <component name="MLflow Tracking">
+      <description>
+        All metrics, params, artifacts logged to DagsHub MLflow.
+        resolve_tracking_uri() reads MLFLOW_TRACKING_URI from .env.
+        No fallback — fails loud if not set.
+      </description>
+      <wired_in>src/minivess/observability/tracking.py</wired_in>
+    </component>
+
+    <component name="Prefect UI">
+      <description>
+        Prefect server at http://localhost:4200 provides flow/task visibility.
+        Each training run appears as a Prefect flow run with task-level timing.
+      </description>
+      <wired_in>src/minivess/orchestration/flows/train_flow.py</wired_in>
+    </component>
+  </observability>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       RISK REGISTER
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <risks>
+    <risk id="R1" severity="medium" probability="low">
+      <description>DynUNet OOM on RTX 2070 Super with batch_size=2</description>
+      <mitigation>DynUNet BS=2 tested on RTX 2070 (8 GB) in prior experiments.
+        If OOM, reduce to BS=1 + gradient_accumulation_steps=2.</mitigation>
+    </risk>
+
+    <risk id="R2" severity="high" probability="medium">
+      <description>R/ggplot2 Docker installation fails (cross-stage copy)</description>
+      <mitigation>Fall back to apt-get install r-base in runner stage.
+        Alternatively, run R scripts in a separate container sharing a volume.
+        The Python matplotlib figures (existing) serve as backup.</mitigation>
+    </risk>
+
+    <risk id="R3" severity="medium" probability="low">
+      <description>DagsHub MLflow authentication fails during training</description>
+      <mitigation>Verify DAGSHUB_TOKEN and MLFLOW_TRACKING_URI before starting.
+        Pre-flight check in launcher script: mlflow.set_tracking_uri() + list_experiments().
+        If auth fails, can fall back to local file-based MLflow (mlruns/).</mitigation>
+    </risk>
+
+    <risk id="R4" severity="medium" probability="medium">
+      <description>DeepVess TIF-to-NIfTI conversion produces wrong orientation/spacing</description>
+      <mitigation>Validate with nibabel after conversion: check shape, affine, dtype.
+        Cross-reference with original TIF metadata. The analysis flow uses
+        sliding_window_inference which is orientation-agnostic, but spacing
+        affects physical-unit metrics (HD95, ASSD).</mitigation>
+    </risk>
+
+    <risk id="R5" severity="low" probability="medium">
+      <description>15 epochs insufficient for meaningful metric separation between conditions</description>
+      <mitigation>15 epochs is a mechanics test — we care about pipeline correctness,
+        not SOTA numbers. Even small metric differences validate that the statistical
+        pipeline detects them. If all conditions produce identical metrics, the
+        biostatistics will correctly report no significant differences (also a valid result).</mitigation>
+    </risk>
+
+    <risk id="R6" severity="medium" probability="low">
+      <description>SWAG subflow fails (second-moment collection requires stable training)</description>
+      <mitigation>SWAG failure for one condition does not block the rest.
+        The "none" post-training method is always available as fallback.
+        If SWAG fails consistently, proceed with method=[none] only (halves Layer B).</mitigation>
+    </risk>
+
+    <risk id="R7" severity="low" probability="low">
+      <description>2 folds provides low statistical power for bootstrap tests</description>
+      <mitigation>Expected: power analysis will report low achieved power.
+        This is a mechanics test — the power caveat is documented in T6.
+        Full paper_full.yaml uses 3 folds with 50 epochs for adequate power.</mitigation>
+    </risk>
+
+    <risk id="R8" severity="medium" probability="low">
+      <description>DeepVess has only 1 labeled ground truth pair (not 7 volumes)</description>
+      <mitigation>Phase 0 Task 0.1 audits the TIF structure. If only 1 GT pair,
+        N=7 comes from splitting the volume into sub-volumes. If splitting is
+        not feasible (too small), proceed with N=1 (per-volume metrics become
+        per-voxel or per-patch statistics instead of per-volume bootstrap).</mitigation>
+    </risk>
+  </risks>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       COUNCIL REVIEW CHECKLIST
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <council_review>
+    <biostatistician>
+      <check status="designed">Factorial design is balanced: 1x2x2 = 4 Layer A cells, 2 Layer B, 2 Layer C</check>
+      <check status="designed">Co-primary metrics pre-registered: clDice + MASD</check>
+      <check status="designed">ROPE values from reviewer consensus (DSC 0.01, clDice 0.01, HD95 0.5)</check>
+      <check status="designed">Holm-Bonferroni correction for multiple comparisons</check>
+      <check status="designed">Per-volume metrics enable paired bootstrap (N=12 val, N=7 test)</check>
+      <check status="designed">Specification curve captures multiverse (4 conditions x 2 post-training x 2 ensemble)</check>
+      <check status="designed">Variance decomposition: condition vs fold vs residual</check>
+      <check status="designed">Power caveat for 2-fold design documented in T6</check>
+      <check status="acknowledged">15 epochs may not produce enough metric separation — acceptable for mechanics test</check>
+    </biostatistician>
+
+    <ml_platform_engineer>
+      <check status="designed">Docker + Prefect for ALL execution (Rules 17-19)</check>
+      <check status="designed">STOP protocol: Source=Docker, Tracking=Prefect, Outputs=volume-mounted, Provenance=git+Docker</check>
+      <check status="designed">--shm-size 8g for GPU flows (SIGBUS prevention)</check>
+      <check status="designed">--env-file .env for Docker Compose V2</check>
+      <check status="designed">DagsHub MLflow via MLFLOW_TRACKING_URI (no hardcoded URL)</check>
+      <check status="designed">CDI GPU access (nvidia.com/gpu=all, Docker 25+)</check>
+      <check status="designed">GPU heartbeat + CUDA guard + structured JSONL logging</check>
+      <check status="designed">R multi-stage Docker build preserves thin Dockerfile pattern</check>
+      <check status="designed">No SkyPilot (local only, cloud_config: local)</check>
+      <check status="designed">Sequential training (single GPU constraint)</check>
+    </ml_platform_engineer>
+
+    <nature_protocols_editor>
+      <check status="designed">CONSORT flow diagram (TRIPOD Items 6, 20a)</check>
+      <check status="designed">External validation on DeepVess (TRIPOD Item 24)</check>
+      <check status="designed">Pre-registration via git tag</check>
+      <check status="designed">R/ggplot2 for publication figures (journal standard)</check>
+      <check status="designed">LaTeX booktabs tables (Nature Protocols formatting)</check>
+      <check status="designed">JSON sidecars for programmatic provenance</check>
+      <check status="designed">Effect sizes with CIs (TRIPOD Item 12)</check>
+      <check status="designed">Sample size justification / power analysis (TRIPOD Item 9a)</check>
+      <check status="designed">Single-command reproducibility (./scripts/run_local_dynunet_mechanics.sh)</check>
+      <check status="acknowledged">Platform framing — metrics demonstrate platform capability, not SOTA claims</check>
+    </nature_protocols_editor>
+  </council_review>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       EXECUTION TIMELINE
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <timeline>
+    <step phase="0" duration_minutes="30" cumulative_hours="0.5">
+      DeepVess TIF audit + NIfTI conversion + DVC versioning
+    </step>
+    <step phase="1" duration_minutes="30" cumulative_hours="1.0">
+      Create all YAML configs (factorial, experiment, biostatistics, splits)
+    </step>
+    <step phase="2" duration_minutes="45" cumulative_hours="1.75">
+      Docker image rebuild (base-gpu, base-cpu, biostatistics with R, flow images)
+    </step>
+    <step phase="3" duration_minutes="240" cumulative_hours="5.75">
+      Training: 8 runs x 30 min (15 epochs + SWAG subflow)
+    </step>
+    <step phase="4" duration_minutes="20" cumulative_hours="6.1">
+      Analysis: ensemble eval + DeepVess test + per-volume metrics
+    </step>
+    <step phase="5" duration_minutes="15" cumulative_hours="6.35">
+      Biostatistics: DuckDB + stats + R figures + LaTeX tables
+    </step>
+    <step phase="6" duration_minutes="15" cumulative_hours="6.6">
+      Verification: artifact inventory + reproducibility check + test suite
+    </step>
+
+    <total_hours>6.6</total_hours>
+    <note>
+      Wall clock estimate includes Docker build time and potential retries.
+      The ~4h budget from the user covers Phases 3-5 (training + analysis + biostats).
+      Phases 0-2 are setup (1.75h) and Phase 6 is verification (0.25h).
+      Total including setup: ~6.6 hours.
+      Training can run overnight (nohup ./scripts/run_local_dynunet_mechanics.sh &amp;).
+    </note>
+  </timeline>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       DEPENDENCIES AND CROSS-REFERENCES
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <dependencies>
+    <dependency from="Phase 3" to="Phase 2">Docker images must be built before training</dependency>
+    <dependency from="Phase 3" to="Phase 1">Config files must exist before training</dependency>
+    <dependency from="Phase 3" to="Phase 0">DeepVess NIfTI must exist (for analysis flow)</dependency>
+    <dependency from="Phase 4" to="Phase 3">Training runs must be logged to MLflow</dependency>
+    <dependency from="Phase 5" to="Phase 4">Evaluation metrics must be in MLflow</dependency>
+    <dependency from="Phase 6" to="Phase 5">All artifacts must be generated</dependency>
+  </dependencies>
+
+  <cross_references>
+    <ref doc="CLAUDE.md" relevance="Constitution — all rules apply">
+      Rules 2 (TDD), 17-19 (Docker+Prefect), 22 (single-source config),
+      27 (debug=production), 29 (zero hardcoded params), 30 (algorithms match literature)
+    </ref>
+    <ref doc="configs/factorial/debug.yaml" relevance="Pattern for factorial YAML structure"/>
+    <ref doc="configs/factorial/smoke_local.yaml" relevance="Pattern for local-only factorial"/>
+    <ref doc="configs/biostatistics/smoke_local.yaml" relevance="Pattern for biostatistics config"/>
+    <ref doc="src/minivess/pipeline/biostatistics_r_export.py" relevance="Python-to-R data bridge"/>
+    <ref doc="src/minivess/pipeline/biostatistics_compliance.py" relevance="CONSORT + TRIPOD mapping"/>
+    <ref doc="deployment/CLAUDE.md" relevance="Docker infrastructure conventions"/>
+    <ref doc="src/minivess/data/format_conversion.py" relevance="TIF-to-NIfTI converter"/>
+    <ref doc="src/minivess/data/external_datasets.py" relevance="DeepVess registry entry"/>
+    <ref doc="docs/planning/v0-2_archive/original_docs/biostatistics-polishing-plan.xml" relevance="Prior biostatistics architecture"/>
+    <ref doc="knowledge-graph/domains/data.yaml" relevance="Dataset strategy decisions"/>
+    <ref doc="knowledge-graph/domains/training.yaml" relevance="Loss function decisions"/>
+  </cross_references>
+
+</plan>
