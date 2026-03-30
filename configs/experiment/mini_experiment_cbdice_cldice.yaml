@@ -1,0 +1,17 @@
+# @package _global_
+# Smoke mini-experiment: DynUNet + cbdice_cldice, 3 folds, 20 epochs.
+# Part of the biostatistics polishing plan (Phase 3).
+#
+# Usage:
+#   docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=smoke_mini_cbdice_cldice train
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_mini_training
+model: dynunet
+losses:
+  - cbdice_cldice
+max_epochs: 20
+num_folds: 3
+batch_size: 2

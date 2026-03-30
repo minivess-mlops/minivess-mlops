@@ -10,12 +10,16 @@ Issue: #683
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 from mlflow.tracking import MlflowClient
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.ghost_cleanup import cleanup_ghost_runs, find_ghost_runs
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_TRAINING,
@@ -25,8 +29,10 @@ from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="cleanup-stale-runs")
+
+@task(name="cleanup-stale-runs", on_completion=[_on_complete], on_failure=[_on_fail])
 def cleanup_stale_runs_task(
     *,
     experiment_name: str = EXPERIMENT_TRAINING,
@@ -92,15 +98,18 @@ def maintenance_flow(
     Designed for Prefect scheduling (e.g., daily at 03:00 UTC).
     """
     require_docker_context("maintenance")
-    logger.info("Maintenance flow started (dry_run=%s)", dry_run)
 
-    result = cleanup_stale_runs_task(
-        experiment_name=experiment_name,
-        dry_run=dry_run,
-    )
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("maintenance", logs_dir=logs_dir):
+        logger.info("Maintenance flow started (dry_run=%s)", dry_run)
 
-    logger.info("Maintenance flow complete: %s", result)
-    return result
+        result = cleanup_stale_runs_task(
+            experiment_name=experiment_name,
+            dry_run=dry_run,
+        )
+
+        logger.info("Maintenance flow complete: %s", result)
+        return result
 
 
 if __name__ == "__main__":

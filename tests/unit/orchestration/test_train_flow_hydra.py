@@ -271,16 +271,6 @@ class TestLoadCheckpointRaisesOnMismatch:
 class TestUpstreamExperiment:
     """Verify UPSTREAM_EXPERIMENT env var support in flow __main__ blocks."""
 
-    def test_post_training_flow_reads_upstream_experiment(self) -> None:
-        """post_training_flow.py __main__ must read UPSTREAM_EXPERIMENT env var."""
-        pt_path = Path("src/minivess/orchestration/flows/post_training_flow.py")
-        if not pt_path.exists():
-            pytest.skip("post_training_flow.py not found")
-        source = pt_path.read_text(encoding="utf-8")
-        assert "UPSTREAM_EXPERIMENT" in source, (
-            "post_training_flow.py __main__ must read UPSTREAM_EXPERIMENT env var "
-            "to discover the correct MLflow experiment from training."
-        )
 
     def test_analysis_flow_reads_upstream_experiment(self) -> None:
         """analysis_flow.py __main__ must read UPSTREAM_EXPERIMENT env var."""

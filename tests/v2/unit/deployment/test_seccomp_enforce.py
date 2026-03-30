@@ -107,7 +107,7 @@ def test_train_enforce_includes_gpu_specific_syscalls() -> None:
 def test_compose_gpu_services_reference_enforce_profile() -> None:
     """train, hpo, hpo-worker must have seccomp security_opt pointing to train-enforce.json."""
     compose = yaml.safe_load(COMPOSE_FLOWS.read_text(encoding="utf-8"))
-    gpu_services = ["train", "hpo", "hpo-worker", "post_training", "analyze"]
+    gpu_services = ["train", "hpo", "hpo-worker", "analyze"]
     for svc_name in gpu_services:
         svc = compose["services"][svc_name]
         security_opts: list[str] = svc.get("security_opt", [])

@@ -134,6 +134,13 @@ _KNOWN_SIGNATURE_VIOLATIONS: set[str] = {
     "biostatistics_statistics.py:compute_bayesian_comparisons:rope",
     # topology_comparison.py — n_bootstrap default
     "topology_comparison.py:paired_bootstrap:n_bootstrap",
+    # biostatistics_statistics.py — utility functions with sensible defaults
+    # (flow always passes config values; defaults are for standalone/test use)
+    "biostatistics_statistics.py:stratified_permutation_test:n_permutations",
+    "biostatistics_statistics.py:stratified_permutation_test:seed",
+    "biostatistics_statistics.py:bootstrap_ci:seed",
+    "biostatistics_statistics.py:bootstrap_ci:n_bootstrap",
+    "biostatistics_statistics.py:bootstrap_ci:bca_min_n",
 }
 
 # Known existing keyword argument violations (hardcoded params in calls).

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_TRAINING,
@@ -34,10 +35,14 @@ if TYPE_CHECKING:
         PipelineDashboardSection,
     )
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="collect-data-section")
+
+@task(name="collect-data-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_data_section_task(
     n_volumes: int,
     quality_gate_passed: bool,
@@ -70,7 +75,7 @@ def collect_data_section_task(
     )
 
 
-@task(name="collect-config-section")
+@task(name="collect-config-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_config_section_task(
     environment: str,
     experiment_config: str,
@@ -112,7 +117,7 @@ def collect_config_section_task(
     )
 
 
-@task(name="collect-model-section")
+@task(name="collect-model-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_model_section_task(
     architecture_name: str,
     param_count: int,
@@ -134,7 +139,7 @@ def collect_model_section_task(
     )
 
 
-@task(name="collect-pipeline-section")
+@task(name="collect-pipeline-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_pipeline_section_task(
     flow_results: dict[str, str],
     last_data_version: str,
@@ -154,7 +159,7 @@ def collect_pipeline_section_task(
     )
 
 
-@task(name="collect-drift-section")
+@task(name="collect-drift-section", on_completion=[_on_complete], on_failure=[_on_fail])
 def collect_drift_section_task(
     *,
     tracking_uri: str,
@@ -397,84 +402,86 @@ def run_dashboard_flow(
     """
     require_docker_context("dashboard")
 
-    if output_dir is None:
-        output_dir = Path(
-            os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("dashboard", logs_dir=logs_dir):
+        if output_dir is None:
+            output_dir = Path(
+                os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")
+            )
+        logger.info("Starting everything dashboard flow → %s", output_dir)
+
+        # Collect sections
+        data_section = collect_data_section_task(
+            n_volumes=n_volumes,
+            quality_gate_passed=quality_gate_passed,
+            external_datasets=external_datasets or {},
+            drift_summary=drift_summary,
         )
-    logger.info("Starting everything dashboard flow → %s", output_dir)
-
-    # Collect sections
-    data_section = collect_data_section_task(
-        n_volumes=n_volumes,
-        quality_gate_passed=quality_gate_passed,
-        external_datasets=external_datasets or {},
-        drift_summary=drift_summary,
-    )
-    config_section = collect_config_section_task(
-        environment=environment,
-        experiment_config=experiment_config,
-        model_profile_name=model_profile_name,
-    )
-    model_section = collect_model_section_task(
-        architecture_name=architecture_name,
-        param_count=param_count,
-        onnx_exported=onnx_exported,
-        champion_category=champion_category,
-        loss_name=loss_name,
-    )
-    pipeline_section = collect_pipeline_section_task(
-        flow_results=flow_results or {},
-        last_data_version=last_data_version,
-        last_training_run_id=last_training_run_id,
-        trigger_source=trigger_source,
-    )
-
-    # Build everything dashboard
-    from minivess.orchestration.flows.dashboard_sections import (
-        EverythingDashboard,
-    )
-
-    dashboard = EverythingDashboard(
-        data=data_section,
-        config=config_section,
-        model=model_section,
-        pipeline=pipeline_section,
-        generated_at=datetime.now(UTC).isoformat(),
-    )
-
-    # Generate outputs
-    report_path = generate_report(dashboard=dashboard, output_dir=output_dir)
-    metadata_path = export_metadata(dashboard=dashboard, output_dir=output_dir)
-
-    logger.info("Everything dashboard flow complete")
-
-    # --- FlowContract: tag run and log completion ---
-    _tracking_uri = resolve_tracking_uri()
-    mlflow_run_id: str | None = None
-    try:
-        import mlflow
-
-        from minivess.orchestration.flow_contract import FlowContract
-
-        mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_TRAINING))
-        with mlflow.start_run(tags={"flow_name": "dashboard"}) as active_run:
-            mlflow_run_id = active_run.info.run_id
-
-        contract = FlowContract(tracking_uri=_tracking_uri)
-        contract.log_flow_completion(
-            flow_name="dashboard",
-            run_id=mlflow_run_id,
+        config_section = collect_config_section_task(
+            environment=environment,
+            experiment_config=experiment_config,
+            model_profile_name=model_profile_name,
         )
-    except Exception:
-        logger.warning("Failed to log dashboard_flow to MLflow", exc_info=True)
+        model_section = collect_model_section_task(
+            architecture_name=architecture_name,
+            param_count=param_count,
+            onnx_exported=onnx_exported,
+            champion_category=champion_category,
+            loss_name=loss_name,
+        )
+        pipeline_section = collect_pipeline_section_task(
+            flow_results=flow_results or {},
+            last_data_version=last_data_version,
+            last_training_run_id=last_training_run_id,
+            trigger_source=trigger_source,
+        )
 
-    return {
-        "dashboard": dashboard,
-        "report_path": report_path,
-        "metadata_path": metadata_path,
-        "mlflow_run_id": mlflow_run_id,
-    }
+        # Build everything dashboard
+        from minivess.orchestration.flows.dashboard_sections import (
+            EverythingDashboard,
+        )
+
+        dashboard = EverythingDashboard(
+            data=data_section,
+            config=config_section,
+            model=model_section,
+            pipeline=pipeline_section,
+            generated_at=datetime.now(UTC).isoformat(),
+        )
+
+        # Generate outputs
+        report_path = generate_report(dashboard=dashboard, output_dir=output_dir)
+        metadata_path = export_metadata(dashboard=dashboard, output_dir=output_dir)
+
+        logger.info("Everything dashboard flow complete")
+
+        # --- FlowContract: tag run and log completion ---
+        _tracking_uri = resolve_tracking_uri()
+        mlflow_run_id: str | None = None
+        try:
+            import mlflow
+
+            from minivess.orchestration.flow_contract import FlowContract
+
+            mlflow.set_tracking_uri(_tracking_uri)
+            mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_TRAINING))
+            with mlflow.start_run(tags={"flow_name": "dashboard"}) as active_run:
+                mlflow_run_id = active_run.info.run_id
+
+            contract = FlowContract(tracking_uri=_tracking_uri)
+            contract.log_flow_completion(
+                flow_name="dashboard",
+                run_id=mlflow_run_id,
+            )
+        except Exception:
+            logger.warning("Failed to log dashboard_flow to MLflow", exc_info=True)
+
+        return {
+            "dashboard": dashboard,
+            "report_path": report_path,
+            "metadata_path": metadata_path,
+            "mlflow_run_id": mlflow_run_id,
+        }
 
 
 if __name__ == "__main__":

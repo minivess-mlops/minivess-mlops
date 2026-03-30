@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -222,6 +224,128 @@ def export_parquet(db_path: Path, output_dir: Path) -> list[Path]:
     conn.close()
     logger.info("Exported %d Parquet files to %s", len(paths), output_dir)
     return paths
+
+
+def build_per_volume_data_from_duckdb(
+    db_path: Path,
+    metrics: list[str] | None = None,
+    split: str = "trainval",
+) -> dict[str, dict[str, dict[int, np.ndarray]]]:
+    """Build per-volume data structure from DuckDB (not mlruns).
+
+    This is the DuckDB-only replacement for _build_per_volume_data() which
+    scans mlruns filesystem directly. The DuckDB is the single input contract.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the biostatistics DuckDB file.
+    metrics:
+        List of metric names to extract. If None, extract all.
+    split:
+        ``"trainval"`` reads per_volume_metrics (eval/ prefix),
+        ``"test"`` reads test_metrics (test/ prefix).
+
+    Returns
+    -------
+    ``{metric_name: {condition_key: {fold_id: scores_array}}}``
+    where condition_key is built from the runs table (loss_function + factors).
+    """
+    import duckdb
+
+    from minivess.pipeline.biostatistics_statistics import encode_condition_key
+
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    if split == "trainval":
+        # Join per_volume_metrics with runs to get factor tags
+        query = """
+            SELECT
+                r.run_id,
+                r.loss_function,
+                r.model_family,
+                r.with_aux_calib,
+                r.post_training_method,
+                r.recalibration,
+                r.ensemble_strategy,
+                pv.fold_id,
+                pv.volume_id,
+                pv.metric_name,
+                pv.metric_value
+            FROM per_volume_metrics pv
+            JOIN runs r ON pv.run_id = r.run_id
+        """
+        if metrics:
+            placeholders = ", ".join(f"'{m}'" for m in metrics)
+            query += f" WHERE pv.metric_name IN ({placeholders})"
+        query += " ORDER BY pv.metric_name, r.run_id, pv.fold_id, pv.volume_id"
+    else:
+        # Test split: read from test_metrics table (no fold structure)
+        query = """
+            SELECT
+                r.run_id,
+                r.loss_function,
+                r.model_family,
+                r.with_aux_calib,
+                r.post_training_method,
+                r.recalibration,
+                r.ensemble_strategy,
+                0 AS fold_id,
+                tm.subset_name AS volume_id,
+                tm.metric_name,
+                tm.point_estimate AS metric_value
+            FROM test_metrics tm
+            JOIN runs r ON tm.run_id = r.run_id
+        """
+        if metrics:
+            placeholders = ", ".join(f"'{m}'" for m in metrics)
+            query += f" WHERE tm.metric_name IN ({placeholders})"
+
+    rows = conn.execute(query).fetchall()
+    conn.close()
+
+    # Build nested dict: metric -> condition_key -> fold_id -> list[float]
+    data: dict[str, dict[str, dict[int, list[float]]]] = {}
+
+    for row in rows:
+        (
+            _run_id,
+            loss_function,
+            model_family,
+            with_aux_calib,
+            post_training_method,
+            recalibration,
+            ensemble_strategy,
+            fold_id,
+            _volume_id,
+            metric_name,
+            metric_value,
+        ) = row
+
+        condition_key = encode_condition_key({
+            "ensemble_strategy": str(ensemble_strategy or "none"),
+            "loss_function": str(loss_function or "unknown"),
+            "model_family": str(model_family or "unknown"),
+            "post_training_method": str(post_training_method or "none"),
+            "recalibration": str(recalibration or "none"),
+            "with_aux_calib": str(with_aux_calib).lower() if with_aux_calib is not None else "false",
+        })
+
+        data.setdefault(metric_name, {}).setdefault(condition_key, {}).setdefault(
+            int(fold_id), []
+        ).append(float(metric_value))
+
+    # Convert lists to numpy arrays
+    result: dict[str, dict[str, dict[int, np.ndarray]]] = {}
+    for metric, conditions in data.items():
+        result[metric] = {}
+        for cond, folds in conditions.items():
+            result[metric][cond] = {
+                fold_id: np.array(values, dtype=np.float64)
+                for fold_id, values in sorted(folds.items())
+            }
+
+    return result
 
 
 # ---------------------------------------------------------------------------

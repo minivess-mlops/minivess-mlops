@@ -41,6 +41,7 @@ doi: [10.1038/s41597-023-02048-8](https://doi.org/10.1038/s41597-023-02048-8)
 - **15 Prefect flows** with Docker-per-flow isolation, spanning the full ML lifecycle from data engineering through biostatistics reporting
 - **SkyPilot intercloud broker** ([Yang et al., NSDI'23](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng)) -- one command to launch GPU jobs on RunPod or GCP
 - **[OpenLineage](https://openlineage.io/) ([Marquez](https://marquezproject.ai/)) data lineage** for [IEC 62304](https://www.iso.org/standard/38421.html) traceability -- automated audit trail for every pipeline execution
+- **5-layer observability** -- CUDA guard (fail-fast), GPU heartbeat (pynvml), structured epoch logging (JSONL), [Grafana LGTM](https://grafana.com/docs/opentelemetry/docker-lgtm/) backend ([OpenTelemetry](https://opentelemetry.io/) + Prometheus + Tempo + Loki), [DCGM Exporter](https://github.com/NVIDIA/dcgm-exporter) GPU hardware metrics -- Docker HEALTHCHECK on all 10 flow services
 - **[Evidently](https://www.evidentlyai.com/) drift detection** + [whylogs](https://whylogs.readthedocs.io/) profiling + [Prometheus](https://prometheus.io/)/[Grafana](https://grafana.com/) monitoring stack
 - **[BentoML](https://www.bentoml.com/) + [ONNX Runtime](https://onnxruntime.ai/) serving** with champion model discovery and [Gradio](https://www.gradio.app/) demo UI
 - **MetricsReloaded evaluation** -- clDice (trusted), MASD (trusted), DSC (foil) per [Maier-Hein et al. (2024)](https://doi.org/10.1038/s41592-023-02151-z)
@@ -174,11 +175,36 @@ Tier C (Light): python:3.13-slim   --> minivess-base-light:latest  (~1.0-1.5 GB)
 Each tier uses a **two-stage builder-runner** pattern. Flow Dockerfiles
 are thin -- only `COPY`, `ENV`, `CMD` -- they never run `apt-get` or `uv`.
 
+### Observability Architecture
+
+Every flow and every Docker container has production-grade observability,
+enforced by AST tests that verify context managers are **called**, not just imported.
+
+| Layer | Component | What It Monitors | Implementation |
+|-------|-----------|-----------------|----------------|
+| **1. Fail-Fast Guard** | `require_cuda_context()` | CUDA driver/toolkit mismatch | Raises `RuntimeError` before any GPU allocation |
+| **2. GPU Heartbeat** | `GpuHeartbeatMonitor` | GPU utilisation, memory, temperature | Background thread writes `heartbeat.json` every 30s |
+| **3. Structured Epoch Logging** | `StructuredEventLogger` | Per-epoch train/val loss, dice, LR, ETA | JSONL events to `events.jsonl` + `sys.stdout.flush()` |
+| **4. Telemetry Backend** | [Grafana LGTM](https://grafana.com/docs/opentelemetry/docker-lgtm/) | Traces, metrics, logs (unified) | Single container: [OpenTelemetry](https://opentelemetry.io/) Collector + Prometheus + Tempo + Loki + Grafana |
+| **5. GPU Hardware Metrics** | [DCGM Exporter](https://github.com/NVIDIA/dcgm-exporter) | GPU util%, memory, temp, ECC errors, PCIe | Prometheus scrape at `:9400`, pre-built Grafana dashboard |
+
+**Docker HEALTHCHECK** on all 10 flow services: GPU flows check `heartbeat.json`
+staleness, CPU flows check `events.jsonl` staleness. `docker ps` shows
+`(healthy)` / `(unhealthy)` for every container.
+
+**Prefect task hooks** on all 77 `@task` decorators: automatic timing and failure
+logging for every pipeline task, visible in Prefect UI at `localhost:4200`.
+
+Activate the observability stack:
+```bash
+docker compose --env-file .env -f deployment/docker-compose.yml --profile observability up -d
+```
+
 ---
 
 ## Regulatory Readiness and Compliance Architecture
 
-While MinIVess is a **preclinical research platform** (rodent cerebrovasculature),
+While VASCADIA is a **preclinical research platform** (rodent cerebrovasculature),
 its architecture is designed to scale to clinical MLOps without retrofitting.
 The compliance infrastructure supports future [FDA SaMD](https://www.fda.gov/medical-devices/digital-health-center-excellence/software-medical-device-samd) and EU MDR/IVDR pathways.
 
@@ -282,10 +308,10 @@ All cloud compute is managed through [SkyPilot](https://skypilot.readthedocs.io/
 an intercloud broker that operates like Slurm for multi-cloud environments.
 SkyPilot YAML files specify Docker images (bare VM setup is banned).
 
-| Provider | Environment | Role | Data Storage |
-|----------|------------|------|--------------|
-| **RunPod** | env (dev) | Quick GPU experiments, instant provisioning | Network Volume |
-| **GCP** | staging + prod | Production runs, Pulumi IaC | GCS (`gs://minivess-mlops-dvc-data`) |
+| Provider | Environment | Role | Data Storage | MLflow |
+|----------|------------|------|--------------|--------|
+| **RunPod** | env (dev) | Quick GPU experiments, instant provisioning | Network Volume | [DagsHub](https://dagshub.com/) (remote) |
+| **GCP** | staging + prod | Production runs, Pulumi IaC | GCS (`gs://minivess-mlops-dvc-data`) | [DagsHub](https://dagshub.com/) (remote) |
 
 Cloud configuration flows through **Hydra config groups** (`configs/cloud/`,
 `configs/registry/`). Research groups with different cloud providers override
@@ -295,7 +321,7 @@ via `configs/lab/lab_name.yaml` -- zero code changes required.
 
 ## Knowledge Graph
 
-The project employs a **6-layer knowledge architecture** with 69+ Bayesian
+The project employs a **6-layer knowledge architecture** with 75+ Bayesian
 decision nodes across 11 domains for systematic architectural decision-making:
 
 ```
@@ -351,6 +377,9 @@ Skills: `/search-metalearning` (search failure patterns), `/plan-context-load` (
 | Drift Detection | [Evidently](https://www.evidentlyai.com/) AI | KS test, PSI, kernel MMD |
 | Data Profiling | [whylogs](https://whylogs.readthedocs.io/) | Lightweight statistical profiling |
 | Monitoring | [Prometheus](https://prometheus.io/) + [Grafana](https://grafana.com/) + AlertManager | Dashboards, alerting |
+| Observability Backend | [Grafana LGTM](https://grafana.com/docs/opentelemetry/docker-lgtm/) | Unified OTel Collector + Prometheus + Tempo + Loki |
+| GPU Metrics | [DCGM Exporter](https://github.com/NVIDIA/dcgm-exporter) | Hardware GPU metrics (Prometheus format) |
+| Telemetry | [OpenTelemetry](https://opentelemetry.io/) | Traces, metrics, logs standard |
 | Compute | SkyPilot | Intercloud broker (RunPod + GCP) |
 | Infrastructure | [Docker Compose](https://docs.docker.com/compose/) + [Pulumi](https://www.pulumi.com/) | Local dev stack, GCP IaC |
 | Linter/Formatter | ruff | Linting and formatting |
@@ -386,11 +415,11 @@ vascadia/
 |   |-- adapters/                  ModelAdapter ABC + 6 model families
 |   |-- pipeline/                  Training, evaluation, metrics, losses
 |   |-- ensemble/                  Ensembling, UQ, calibration
-|   |-- orchestration/flows/       12+ Prefect 3.x flows
+|   |-- orchestration/flows/       15 Prefect 3.x flows (all with observability context managers)
 |   |-- config/                    Pydantic v2 config models
 |   |-- data/                      Data loading, profiling, DVC
 |   |-- serving/                   BentoML, ONNX, Gradio
-|   |-- observability/             MLflow tracking, OpenLineage lineage, DuckDB analytics
+|   |-- observability/             MLflow tracking, GPU heartbeat, structured logging, OTel, DuckDB analytics
 |   |-- agents/                    Pydantic AI micro-orchestration (ADR-0007)
 |   |-- compliance/                IEC 62304 audit trail, model cards, regulatory docs
 |   +-- validation/                Pandera, Great Expectations
@@ -461,7 +490,7 @@ If you use this platform, please cite the underlying dataset:
 - Evaluation (MetricsReloaded suite, bootstrap CIs, paired tests)
 - Ensembling (7 strategies) + conformal UQ (5 methods)
 - Serving (BentoML, ONNX Runtime, Gradio)
-- Observability (MLflow, DuckDB, Prometheus, Grafana, Evidently, whylogs)
+- Observability (MLflow, DuckDB, Prometheus, Grafana, Evidently, whylogs, Grafana LGTM, DCGM Exporter, GPU heartbeat, structured epoch logging, Docker HEALTHCHECK on all 10 services, Prefect task hooks on all 77 tasks)
 - Post-training plugin architecture (7 plugins including SWAG, Flow 2.5)
 - SAM3 integration (3 adapter variants)
 - Pydantic AI agent layer (experiment summariser, drift triage, figure narration)
@@ -469,7 +498,12 @@ If you use this platform, please cite the underlying dataset:
 
 ### In Progress
 
-- 4-layer factorial experiment on GCP L4 spot instances (24 training cells x 2 post-training x analysis layers)
+- Biostatistics flow polishing — statistical engine verified on fixture DuckDB (stratified permutation, BCa/percentile CI, hierarchical gatekeeping, specification curve). Training: dice_ce 3 folds complete on DagsHub MLflow, cbdice_cldice pending
+- OTel trace propagation from Python to Grafana Tempo ([#974](https://github.com/petteriTeikari/vascadia/issues/974))
+- Dashboard flow as observability consumer ([#975](https://github.com/petteriTeikari/vascadia/issues/975))
+- `prefect-opentelemetry` package integration ([#976](https://github.com/petteriTeikari/vascadia/issues/976))
+- Behavioral end-to-end observability verification test ([#977](https://github.com/petteriTeikari/vascadia/issues/977))
+- 4-layer factorial experiment on RunPod + DagsHub MLflow (24 training cells x 2 post-training x analysis layers)
 - OpenLineage flow wiring (Issue [#799](https://github.com/petteriTeikari/vascadia/issues/799))
 - [CycloneDX](https://cyclonedx.org/) SBOM generation (Issue [#821](https://github.com/petteriTeikari/vascadia/issues/821))
 

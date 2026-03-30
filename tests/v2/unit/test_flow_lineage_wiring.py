@@ -16,7 +16,6 @@ from pathlib import Path
 _FLOWS_DIR = Path("src/minivess/orchestration/flows")
 _WIRED_FLOWS = [
     "train_flow.py",
-    "post_training_flow.py",
     "analysis_flow.py",
     "biostatistics_flow.py",
     "deploy_flow.py",
@@ -54,12 +53,6 @@ class TestFlowsImportLineageHelper:
             "train_flow.py must import emit_flow_lineage or LineageEmitter"
         )
 
-    def test_post_training_flow_imports_lineage(self) -> None:
-        names = _get_imported_names(_FLOWS_DIR / "post_training_flow.py")
-        assert "emit_flow_lineage" in names or "LineageEmitter" in names, (
-            "post_training_flow.py must import emit_flow_lineage or LineageEmitter"
-        )
-
     def test_analysis_flow_imports_lineage(self) -> None:
         names = _get_imported_names(_FLOWS_DIR / "analysis_flow.py")
         assert "emit_flow_lineage" in names or "LineageEmitter" in names, (
@@ -87,13 +80,6 @@ class TestFlowsCallLineageEmission:
             _FLOWS_DIR / "train_flow.py", "emit_flow_lineage"
         ) or _source_contains(_FLOWS_DIR / "train_flow.py", "pipeline_run"), (
             "train_flow.py must call emit_flow_lineage() or pipeline_run()"
-        )
-
-    def test_post_training_flow_calls_lineage(self) -> None:
-        assert _source_contains(
-            _FLOWS_DIR / "post_training_flow.py", "emit_flow_lineage"
-        ) or _source_contains(_FLOWS_DIR / "post_training_flow.py", "pipeline_run"), (
-            "post_training_flow.py must call emit_flow_lineage() or pipeline_run()"
         )
 
     def test_analysis_flow_calls_lineage(self) -> None:

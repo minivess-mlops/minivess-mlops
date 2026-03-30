@@ -1,0 +1,17 @@
+# @package _global_
+# Smoke mini-experiment: DynUNet + dice_ce, 3 folds, 20 epochs.
+# Part of the biostatistics polishing plan (Phase 3).
+#
+# Usage:
+#   docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+#     -e EXPERIMENT=smoke_mini_dice_ce train
+defaults:
+  - override /checkpoint: lightweight
+
+experiment_name: smoke_mini_training
+model: dynunet
+losses:
+  - dice_ce
+max_epochs: 20
+num_folds: 3
+batch_size: 2

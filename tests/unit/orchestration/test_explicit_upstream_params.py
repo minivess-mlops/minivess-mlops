@@ -35,26 +35,6 @@ class TestTrainingFlowUpstreamParam:
         assert param.default is None
 
 
-class TestPostTrainingFlowUpstreamParam:
-    def test_post_training_flow_accepts_upstream_training_run_id(self) -> None:
-        """post_training_flow() accepts optional upstream_training_run_id parameter."""
-        from minivess.orchestration.flows.post_training_flow import post_training_flow
-
-        params = _get_param_names(post_training_flow)
-        assert "upstream_training_run_id" in params, (
-            "post_training_flow() missing upstream_training_run_id parameter"
-        )
-
-    def test_upstream_training_run_id_default_is_none(self) -> None:
-        """upstream_training_run_id default must be None."""
-        from minivess.orchestration.flows.post_training_flow import post_training_flow
-
-        sig = inspect.signature(post_training_flow)
-        param = sig.parameters.get("upstream_training_run_id")
-        assert param is not None
-        assert param.default is None
-
-
 class TestAnalysisFlowUpstreamParam:
     def test_analysis_flow_accepts_upstream_training_run_id(self) -> None:
         """run_analysis_flow() accepts optional upstream_training_run_id parameter."""

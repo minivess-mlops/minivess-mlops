@@ -66,9 +66,6 @@ FLOW_NAME_POST_TRAINING_SUBFLOW: str = "post-training-subflow"
 FLOW_NAME_DATA: str = "data-flow"
 """Prefect flow name for the data engineering flow (Flow 1)."""
 
-FLOW_NAME_POST_TRAINING: str = "post-training-flow"
-"""Prefect flow name for the post-training flow."""
-
 FLOW_NAME_ANALYSIS: str = "analysis-flow"
 """Prefect flow name for the model analysis flow (Flow 3)."""
 

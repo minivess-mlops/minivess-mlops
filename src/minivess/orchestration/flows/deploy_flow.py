@@ -17,14 +17,13 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from prefect import flow, get_run_logger, task
 
 from minivess.config.deploy_config import DeployConfig
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
@@ -41,7 +40,11 @@ from minivess.orchestration.mlflow_helpers import (
 if TYPE_CHECKING:
     from minivess.pipeline.deploy_champion_discovery import ChampionModel
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +96,7 @@ class DeployResult:
 # ---------------------------------------------------------------------------
 
 
-@task(name="discover-champions")
+@task(name="discover-champions", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_task(
     config: DeployConfig,
     experiment_id: str,
@@ -111,7 +114,7 @@ def discover_task(
     return champions
 
 
-@task(name="export-onnx")
+@task(name="export-onnx", on_completion=[_on_complete], on_failure=[_on_fail])
 def export_task(
     champion: ChampionModel,
     output_dir: Path,
@@ -130,7 +133,7 @@ def export_task(
     return onnx_path
 
 
-@task(name="import-bento")
+@task(name="import-bento", on_completion=[_on_complete], on_failure=[_on_fail])
 def import_task(
     champion: ChampionModel,
     onnx_path: Path,
@@ -144,7 +147,7 @@ def import_task(
     return result.tag
 
 
-@task(name="generate-artifacts")
+@task(name="generate-artifacts", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_artifacts_task(
     champions: list[ChampionModel],
     bento_tags: dict[str, str],
@@ -175,7 +178,7 @@ def generate_artifacts_task(
     return output_dir
 
 
-@task(name="promote-model")
+@task(name="promote-model", on_completion=[_on_complete], on_failure=[_on_fail])
 def promote_task(
     champion: ChampionModel,
 ) -> bool:
@@ -229,159 +232,161 @@ def deploy_flow(
     """
     require_docker_context("deploy")
 
-    if config is None:
-        config = DeployConfig.from_env()
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("deploy", logs_dir=logs_dir):
+        if config is None:
+            config = DeployConfig.from_env()
 
-    log = get_run_logger()
-    log.info("Starting deploy flow for experiment %s", experiment_id)
+        log = get_run_logger()
+        log.info("Starting deploy flow for experiment %s", experiment_id)
 
-    # Ensure BentoML uses mounted volume instead of container-ephemeral ~/.bentoml
-    os.environ.setdefault("BENTOML_HOME", "/home/minivess/bentoml")
+        # Ensure BentoML uses mounted volume instead of container-ephemeral ~/.bentoml
+        os.environ.setdefault("BENTOML_HOME", "/home/minivess/bentoml")
 
-    # 1. Discover champions
-    champions = discover_task(config, experiment_id)
+        # 1. Discover champions
+        champions = discover_task(config, experiment_id)
 
-    if not champions:
-        log.warning("No champions found — returning empty result")
-        config.output_dir.mkdir(parents=True, exist_ok=True)
-        return DeployResult(
-            champions=[],
-            onnx_paths={},
-            bento_tags={},
-            artifacts_dir=config.output_dir,
-            promotion_results={},
-        )
-
-    # 2. Export each champion to ONNX
-    onnx_dir = config.output_dir / "onnx"
-    onnx_dir.mkdir(parents=True, exist_ok=True)
-
-    onnx_paths: dict[str, Path] = {}
-    failed_operations: list[str] = []
-    for champion in champions:
-        if champion.checkpoint_path is not None:
-            try:
-                onnx_path = export_task(
-                    champion,
-                    onnx_dir,
-                    opset_version=config.onnx_opset,
-                )
-                onnx_paths[champion.category] = onnx_path
-            except Exception:
-                log.exception("ONNX export failed for %s", champion.run_id)
-                failed_operations.append(
-                    f"onnx_export:{champion.category}:{champion.run_id}"
-                )
-        else:
-            log.warning(
-                "No checkpoint for champion %s — skipping ONNX export",
-                champion.run_id,
+        if not champions:
+            log.warning("No champions found — returning empty result")
+            config.output_dir.mkdir(parents=True, exist_ok=True)
+            return DeployResult(
+                champions=[],
+                onnx_paths={},
+                bento_tags={},
+                artifacts_dir=config.output_dir,
+                promotion_results={},
             )
 
-    # 3. Import to BentoML
-    bento_tags: dict[str, str] = {}
-    for category, onnx_path in onnx_paths.items():
-        matching = [c for c in champions if c.category == category]
-        if matching:
+        # 2. Export each champion to ONNX
+        onnx_dir = config.output_dir / "onnx"
+        onnx_dir.mkdir(parents=True, exist_ok=True)
+
+        onnx_paths: dict[str, Path] = {}
+        failed_operations: list[str] = []
+        for champion in champions:
+            if champion.checkpoint_path is not None:
+                try:
+                    onnx_path = export_task(
+                        champion,
+                        onnx_dir,
+                        opset_version=config.onnx_opset,
+                    )
+                    onnx_paths[champion.category] = onnx_path
+                except Exception:
+                    log.exception("ONNX export failed for %s", champion.run_id)
+                    failed_operations.append(
+                        f"onnx_export:{champion.category}:{champion.run_id}"
+                    )
+            else:
+                log.warning(
+                    "No checkpoint for champion %s — skipping ONNX export",
+                    champion.run_id,
+                )
+
+        # 3. Import to BentoML
+        bento_tags: dict[str, str] = {}
+        for category, onnx_path in onnx_paths.items():
+            matching = [c for c in champions if c.category == category]
+            if matching:
+                try:
+                    tag = import_task(matching[0], onnx_path)
+                    bento_tags[category] = tag
+                except Exception:
+                    log.exception("BentoML import failed for %s — skipping", category)
+
+        # 4. Generate deployment artifacts
+        artifacts_dir = config.output_dir / "artifacts"
+        generate_artifacts_task(
+            champions, bento_tags, artifacts_dir, config.bento_service_name
+        )
+
+        # 5. Promote models
+        promotion_results: dict[str, bool] = {}
+        audit_trails: list[dict[str, Any]] = []
+        for champion in champions:
             try:
-                tag = import_task(matching[0], onnx_path)
-                bento_tags[category] = tag
+                approved = promote_task(champion)
+                promotion_results[champion.category] = approved
+
+                from minivess.pipeline.deploy_promotion import (
+                    create_deployment_audit_trail,
+                )
+
+                trail = create_deployment_audit_trail(
+                    champion=champion,
+                    onnx_path=onnx_paths.get(champion.category, config.output_dir / "none"),
+                    bento_tag=bento_tags.get(champion.category, "unknown"),
+                    promotion_approved=approved,
+                )
+                audit_trails.append(trail)
             except Exception:
-                log.exception("BentoML import failed for %s — skipping", category)
+                log.exception("Promotion failed for %s — skipping", champion.category)
 
-    # 4. Generate deployment artifacts
-    artifacts_dir = config.output_dir / "artifacts"
-    generate_artifacts_task(
-        champions, bento_tags, artifacts_dir, config.bento_service_name
-    )
+        result = DeployResult(
+            champions=champions,
+            onnx_paths=onnx_paths,
+            bento_tags=bento_tags,
+            artifacts_dir=artifacts_dir,
+            promotion_results=promotion_results,
+            audit_trails=audit_trails,
+            failed_operations=failed_operations,
+        )
 
-    # 5. Promote models
-    promotion_results: dict[str, bool] = {}
-    audit_trails: list[dict[str, Any]] = []
-    for champion in champions:
+        log.info("Deploy flow complete: %s", result.to_summary())
+
+        # --- FlowContract: tag run and log completion ---
+        _tracking_uri = resolve_tracking_uri()
+        # Use provided upstream ID or auto-discover from MLflow
+        _experiment = resolve_experiment_name(EXPERIMENT_TRAINING)
+        if upstream_analysis_run_id is None:
+            upstream = find_upstream_safely(
+                tracking_uri=_tracking_uri,
+                experiment_name=_experiment,
+                upstream_flow="analyze",
+            )
+            upstream_analysis_run_id = upstream["run_id"] if upstream else None
+        mlflow_run_id: str | None = None
         try:
-            approved = promote_task(champion)
-            promotion_results[champion.category] = approved
+            import mlflow
 
-            from minivess.pipeline.deploy_promotion import (
-                create_deployment_audit_trail,
-            )
-
-            trail = create_deployment_audit_trail(
-                champion=champion,
-                onnx_path=onnx_paths.get(champion.category, config.output_dir / "none"),
-                bento_tag=bento_tags.get(champion.category, "unknown"),
-                promotion_approved=approved,
-            )
-            audit_trails.append(trail)
+            mlflow.set_tracking_uri(_tracking_uri)
+            mlflow.set_experiment(_experiment)
+            with mlflow.start_run(
+                tags={
+                    "flow_name": "deploy-flow",
+                    "upstream_analysis_run_id": upstream_analysis_run_id,
+                }
+            ) as active_run:
+                mlflow_run_id = active_run.info.run_id
         except Exception:
-            log.exception("Promotion failed for %s — skipping", champion.category)
+            log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
 
-    result = DeployResult(
-        champions=champions,
-        onnx_paths=onnx_paths,
-        bento_tags=bento_tags,
-        artifacts_dir=artifacts_dir,
-        promotion_results=promotion_results,
-        audit_trails=audit_trails,
-        failed_operations=failed_operations,
-    )
-
-    log.info("Deploy flow complete: %s", result.to_summary())
-
-    # --- FlowContract: tag run and log completion ---
-    _tracking_uri = resolve_tracking_uri()
-    # Use provided upstream ID or auto-discover from MLflow
-    _experiment = resolve_experiment_name(EXPERIMENT_TRAINING)
-    if upstream_analysis_run_id is None:
-        upstream = find_upstream_safely(
+        # Log flow completion (best-effort, non-blocking) via FlowContract.log_flow_completion()
+        log_completion_safe(
+            flow_name="deploy-flow",
             tracking_uri=_tracking_uri,
-            experiment_name=_experiment,
-            upstream_flow="analyze",
+            run_id=mlflow_run_id,
         )
-        upstream_analysis_run_id = upstream["run_id"] if upstream else None
-    mlflow_run_id: str | None = None
-    try:
-        import mlflow
 
-        mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment(_experiment)
-        with mlflow.start_run(
-            tags={
-                "flow_name": "deploy-flow",
-                "upstream_analysis_run_id": upstream_analysis_run_id,
-            }
-        ) as active_run:
-            mlflow_run_id = active_run.info.run_id
-    except Exception:
-        log.warning("Failed to log deploy_flow to MLflow", exc_info=True)
+        # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+        try:
+            _emitter = LineageEmitter(namespace="minivess")
+            emit_flow_lineage(
+                emitter=_emitter,
+                job_name="deploy-flow",
+                inputs=[
+                    {"namespace": "minivess", "name": "champion_model"},
+                    {"namespace": "minivess", "name": "mlflow_registry"},
+                ],
+                outputs=[
+                    {"namespace": "minivess", "name": "onnx_export"},
+                    {"namespace": "minivess", "name": "bentoml_model"},
+                ],
+            )
+        except Exception:
+            log.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
 
-    # Log flow completion (best-effort, non-blocking) via FlowContract.log_flow_completion()
-    log_completion_safe(
-        flow_name="deploy-flow",
-        tracking_uri=_tracking_uri,
-        run_id=mlflow_run_id,
-    )
-
-    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
-    try:
-        _emitter = LineageEmitter(namespace="minivess")
-        emit_flow_lineage(
-            emitter=_emitter,
-            job_name="deploy-flow",
-            inputs=[
-                {"namespace": "minivess", "name": "champion_model"},
-                {"namespace": "minivess", "name": "mlflow_registry"},
-            ],
-            outputs=[
-                {"namespace": "minivess", "name": "onnx_export"},
-                {"namespace": "minivess", "name": "bentoml_model"},
-            ],
-        )
-    except Exception:
-        log.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
-
-    return result
+        return result
 
 
 if __name__ == "__main__":

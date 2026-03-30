@@ -1,0 +1,921 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Docker+Prefect Observability Hardening Plan
+  Incident: 4h silent CPU fallback with zero training observability
+  Branch: hotfix/pass-10-and-11 (or feature/docker-prefect-observability)
+  Date: 2026-03-29
+
+  3-Agent Council:
+    Agent A: DevOps Observability Expert (structured logging, Docker health, alerting)
+    Agent B: ML Platform Engineer (CUDA guards, GPU heartbeat, training stall detection)
+    Agent C: Prefect/Docker Specialist (task-level visibility, compose health checks)
+
+  Incident Report: .claude/metalearning/2026-03-29-silent-cpu-fallback-no-observability-4h-wasted.md
+
+  SCORING (self-assessment):
+    Comprehensiveness: 9/10 — covers all 10 incident items + adds container resource monitoring
+    Testability:       9/10 — every phase has TDD specs runnable in make test-staging
+    Incrementality:    9/10 — each phase is independently mergeable
+    Risk:              9/10 — no cloud infra changes, no YAML config edits, pure code+tests
+    Overall:           9/10
+
+  CONSTRAINTS RESPECTED:
+    - PYTHONUNBUFFERED=1 already in all 3 base Dockerfiles (verified) — no Dockerfile edits needed
+    - No Kubernetes — Docker Compose only
+    - No GitHub Actions triggers (CI disabled, Rule #21)
+    - All config from .env via Rule #22
+    - Tests in make test-staging tier (no model_loading, no slow)
+    - Library-first: pynvml for GPU monitoring (already a PyTorch transitive dep)
+    - No YAML config file modifications (Rule #31)
+-->
+<plan>
+  <metadata>
+    <title>Docker+Prefect Observability Hardening — Zero-Blind-Spot Training Monitoring</title>
+    <branch>feature/docker-prefect-observability</branch>
+    <date>2026-03-29</date>
+    <status>planned</status>
+    <priority>P0 — blocks next factorial pass (won't launch until observability is right)</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <report-output>docs/planning/docker-prefect-observability-plan.xml</report-output>
+    <metalearning>.claude/metalearning/2026-03-29-silent-cpu-fallback-no-observability-4h-wasted.md</metalearning>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- ROOT CAUSES FROM THE 4-HOUR SILENT CPU INCIDENT               -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <root-causes>
+    <cause id="RC1" severity="CRITICAL" title="Silent CPU fallback">
+      torch.cuda.is_available() returned False due to CUDA 13.0 vs driver 560.35.05
+      mismatch. PyTorch silently fell back to CPU. train_flow.py line 461:
+      device_str = "cuda" if torch.cuda.is_available() else "cpu" — no guard.
+      Training ran for 4 hours on CPU without ANY error or warning.
+      FIX: Fail immediately when CUDA unavailable in GPU flows.
+    </cause>
+    <cause id="RC2" severity="CRITICAL" title="Zero epoch progress visibility">
+      Training produced only 47 log lines in 4 hours. Python output buffering +
+      no forced flush + no structured progress = total blindness. Docker logs
+      useless. MLflow had system metrics but zero training metrics.
+      FIX: Epoch-level JSONL progress with force-flush, visible in Docker logs.
+    </cause>
+    <cause id="RC3" severity="HIGH" title="GPU heartbeat absent">
+      GPU utilization at 0% was misinterpreted as "data loading." No periodic
+      GPU heartbeat to detect training-not-actually-using-GPU. The only diagnostic
+      was manual `docker exec` into the container after 4 hours.
+      FIX: Periodic GPU heartbeat — alert when util < threshold for > N minutes.
+    </cause>
+    <cause id="RC4" severity="HIGH" title="Training stall undetectable">
+      No mechanism to detect "container running but not producing output."
+      Docker healthcheck only checks container alive (basic process check).
+      MLflow has no stall alert — it only records what flows log.
+      FIX: Heartbeat file + health check + stall detection.
+    </cause>
+    <cause id="RC5" severity="MEDIUM" title="CUDA version mismatch undetected at startup">
+      Container's PyTorch was compiled with CUDA 13.0 but host driver only supports
+      CUDA 12.6. No preflight check caught this. The mismatch is detectable at
+      container startup by comparing torch.version.cuda vs nvidia-smi driver version.
+      FIX: CUDA version preflight in training flow startup.
+    </cause>
+  </root-causes>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: CUDA Availability Guard (RC1 — CRITICAL, fail-fast)  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" title="CUDA Availability Guard">
+    <description>
+      Add a require_cuda_context() guard function that GPU flows call at startup,
+      analogous to the existing require_docker_context(). When CUDA is unavailable,
+      the flow MUST fail immediately with a diagnostic error message showing:
+      - torch.cuda.is_available() result
+      - torch.version.cuda (PyTorch CUDA compilation version)
+      - NVIDIA driver version (from nvidia-smi or pynvml)
+      - Actionable fix suggestion
+
+      This guard is called at the TOP of training_flow() and hpo_flow() —
+      BEFORE any model creation, data loading, or heavy computation.
+
+      Escape hatch: MINIVESS_ALLOW_CPU=1 env var for pytest only (like ALLOW_HOST).
+    </description>
+
+    <tasks>
+      <task id="1.1" title="Create src/minivess/orchestration/cuda_guard.py">
+        <tdd-spec>
+          RED: Test that require_cuda_context("train") raises RuntimeError when
+          torch.cuda.is_available() returns False (mock torch.cuda.is_available).
+          Test that the error message contains diagnostic info (driver version,
+          PyTorch CUDA version). Test that MINIVESS_ALLOW_CPU=1 bypasses the guard.
+          Test that the function is a no-op when CUDA IS available.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/cuda_guard.py</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_cuda_guard.py</test-file>
+      </task>
+
+      <task id="1.2" title="Integrate guard into train_flow.py">
+        <tdd-spec>
+          RED: Test that training_flow() calls require_cuda_context() before
+          train_one_fold_task(). Mock the guard. Verify it raises when CUDA
+          unavailable. Verify training never starts (no MLflow run created).
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/train_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_train_flow_cuda_guard.py</test-file>
+      </task>
+
+      <task id="1.3" title="Add CUDA version mismatch detection (RC5)">
+        <tdd-spec>
+          RED: Test detect_cuda_version_mismatch() that compares container
+          PyTorch CUDA version (torch.version.cuda) vs host driver capability.
+          When mismatch detected, return a CudaMismatchResult with details.
+          Test with mocked version strings (e.g., PyTorch CUDA "13.0" vs driver "12.6").
+          Test that warnings are logged but the function does not raise (advisory,
+          since the guard itself catches the unavailability).
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/cuda_guard.py (extended)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_cuda_guard.py (extended)</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - require_cuda_context() raises RuntimeError within 1 second when CUDA unavailable
+      - Error message includes PyTorch CUDA version, driver info, and actionable fix
+      - MINIVESS_ALLOW_CPU=1 bypasses the guard (test-only escape hatch)
+      - All tests pass in make test-staging (no model_loading, no slow)
+      - Existing train_flow tests still pass (guard mocked or ALLOW_CPU=1 set)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: GPU Heartbeat Monitor (RC3 — detect stuck training)  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" title="GPU Heartbeat and Utilization Monitor">
+    <description>
+      Create a background monitor that periodically checks GPU utilization and
+      logs a heartbeat. If GPU utilization stays below a configurable threshold
+      (default 5%) for longer than a configurable duration (default 2 minutes),
+      log an ERROR-level alert.
+
+      This catches:
+      - Training silently running on CPU (GPU util = 0%)
+      - Training stalled in data loading indefinitely
+      - GPU process crash while container keeps running
+
+      Implementation: A lightweight background thread using pynvml (already a
+      transitive dep of PyTorch). Writes heartbeat.json to LOGS_DIR for external
+      monitoring. Thresholds come from .env.example (new vars).
+
+      NOTE: The existing GpuMonitor in pipeline/trainer.py collects per-epoch
+      snapshots but does NOT run as a background thread between epochs. This
+      new component runs continuously and detects inter-epoch stalls.
+    </description>
+
+    <tasks>
+      <task id="2.1" title="Create src/minivess/observability/gpu_heartbeat.py">
+        <tdd-spec>
+          RED: Test GpuHeartbeatMonitor with mocked pynvml that:
+          (a) starts a daemon thread on enter, stops on exit (context manager)
+          (b) writes heartbeat.json to output_dir every check_interval_s seconds
+          (c) logs ERROR when gpu_util_pct < threshold for > alert_after_s seconds
+          (d) heartbeat.json contains: timestamp, gpu_util_pct, gpu_memory_used_mb,
+              gpu_temp_c, status ("healthy"|"low_utilization"|"no_gpu")
+          (e) graceful no-op when pynvml unavailable (CPU-only environments)
+          (f) thread cleanup: verify is_alive() == False after __exit__
+        </tdd-spec>
+        <deliverable>src/minivess/observability/gpu_heartbeat.py</deliverable>
+        <test-file>tests/v2/unit/observability/test_gpu_heartbeat.py</test-file>
+      </task>
+
+      <task id="2.2" title="Add .env.example variables for heartbeat config">
+        <tdd-spec>
+          RED: Test that .env.example contains GPU_HEARTBEAT_INTERVAL_S,
+          GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT, GPU_HEARTBEAT_ALERT_AFTER_S.
+          Verify defaults are sensible (30s interval, 5% threshold, 120s alert).
+          Use existing test_env_single_source.py pattern for enforcement.
+        </tdd-spec>
+        <deliverable>.env.example (appended)</deliverable>
+        <test-file>tests/v2/unit/test_env_single_source.py (extended — add new vars to expected set)</test-file>
+      </task>
+
+      <task id="2.3" title="Integrate heartbeat into train_flow.py">
+        <tdd-spec>
+          RED: Test that training_flow() creates GpuHeartbeatMonitor as a context
+          manager around the fold training loop. Verify heartbeat.json is written
+          to LOGS_DIR. Mock the monitor to verify lifecycle (start/stop).
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/train_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_train_flow_heartbeat.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - Background thread starts before training, stops after training
+      - heartbeat.json updated every GPU_HEARTBEAT_INTERVAL_S seconds
+      - ERROR logged when GPU util below threshold for alert_after_s
+      - Zero overhead when pynvml unavailable (graceful degradation)
+      - Thread is daemon (won't prevent container exit)
+      - All tests in make test-staging (mocked pynvml, no GPU required)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: Structured Epoch Progress Logging (RC2)              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" title="Structured Epoch Progress with Force-Flush">
+    <description>
+      Enhance the existing StructuredEventLogger to emit epoch-level progress
+      that is:
+      (a) Machine-parseable (JSONL to events.jsonl — already implemented)
+      (b) Human-readable (formatted progress line to Python logger — partially exists)
+      (c) Force-flushed after every epoch (sys.stdout.flush() + sys.stderr.flush())
+      (d) Visible in Docker logs (already works via PYTHONUNBUFFERED=1 in base images)
+      (e) Visible in Prefect UI (already works via PREFECT_LOGGING_EXTRA_LOGGERS)
+
+      The existing trainer.py already logs epoch progress at line 819-827, but:
+      - It does NOT force-flush stdout/stderr
+      - It does NOT update heartbeat.json
+      - It does NOT emit structured JSONL events per epoch
+
+      This phase wires the trainer's epoch completion into StructuredEventLogger
+      for durable JSONL events AND heartbeat updates. Also adds sys.stdout.flush()
+      after each epoch log line to ensure Docker log visibility.
+
+      NOTE: PYTHONUNBUFFERED=1 is already set in all 3 base Dockerfiles. This phase
+      ensures the remaining gap (explicit flush in critical paths) is closed.
+    </description>
+
+    <tasks>
+      <task id="3.1" title="Add epoch event methods to StructuredEventLogger">
+        <tdd-spec>
+          RED: Test log_epoch_complete() method that:
+          (a) writes JSONL event with: epoch, max_epochs, train_loss, val_loss,
+              val_dice, lr, epoch_wall_s, gpu_util_pct, vram_used_mb
+          (b) updates heartbeat.json with same data + ETA + status
+          (c) ETA computation: remaining_epochs * avg_epoch_time
+          Test log_training_start() and log_training_end() for run-level events.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/structured_logging.py (extended)</deliverable>
+        <test-file>tests/v2/unit/observability/test_structured_logging.py (extended)</test-file>
+      </task>
+
+      <task id="3.2" title="Wire StructuredEventLogger into SegmentationTrainer.fit()">
+        <tdd-spec>
+          RED: Test that SegmentationTrainer accepts an optional StructuredEventLogger
+          parameter. When provided, fit() calls log_epoch_complete() after each epoch.
+          When not provided, behavior unchanged (backward compatible). Also test that
+          sys.stdout.flush() + sys.stderr.flush() are called after each epoch's log line.
+          Test with mock logger: verify correct epoch/loss/lr values passed.
+        </tdd-spec>
+        <deliverable>src/minivess/pipeline/trainer.py (modified)</deliverable>
+        <test-file>tests/v2/unit/pipeline/test_trainer_structured_events.py</test-file>
+      </task>
+
+      <task id="3.3" title="Wire StructuredEventLogger into train_flow.py">
+        <tdd-spec>
+          RED: Test that training_flow() creates StructuredEventLogger(output_dir=LOGS_DIR)
+          and passes it to SegmentationTrainer. Verify LOGS_DIR/events.jsonl is created.
+          Verify LOGS_DIR/heartbeat.json is updated. Mock trainer to verify wiring.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/train_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_train_flow_structured_events.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - Every epoch produces a JSONL event line in events.jsonl
+      - heartbeat.json updated after every epoch with ETA
+      - sys.stdout.flush() called after every epoch log line
+      - Progress visible in: Docker logs, Prefect UI, events.jsonl, heartbeat.json
+      - Backward compatible: trainer works without StructuredEventLogger
+      - All tests in make test-staging (no model loading)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: Training Stall Detection (RC4)                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" title="Training Stall Detection via Heartbeat Staleness">
+    <description>
+      Build on the heartbeat.json from Phases 2 and 3 to detect training stalls.
+      A stall is defined as: heartbeat.json not updated for > STALL_THRESHOLD_MINUTES.
+
+      Three detection layers:
+      1. In-process: The GpuHeartbeatMonitor (Phase 2) checks if the TRAINING
+         heartbeat has been updated. If not → log ERROR (training thread may be hung).
+      2. Docker healthcheck: A lightweight health check script that reads
+         heartbeat.json and returns unhealthy when stale. This makes `docker ps`
+         show the container as unhealthy.
+      3. External: is_heartbeat_stale() (already exists in train_flow.py line 144)
+         can be called by monitoring scripts or Prefect automations.
+
+      This phase implements layer 2 (Docker healthcheck) and extends layer 1.
+    </description>
+
+    <tasks>
+      <task id="4.1" title="Create scripts/healthcheck_training.py">
+        <tdd-spec>
+          RED: Test the health check script that:
+          (a) reads heartbeat.json from LOGS_DIR environment variable
+          (b) returns exit 0 if heartbeat is fresh (< stall threshold)
+          (c) returns exit 1 if heartbeat is stale (>= stall threshold)
+          (d) returns exit 1 if heartbeat.json does not exist AND container
+              has been running for > grace_period_minutes (default 10)
+          (e) returns exit 0 during grace period (startup phase)
+          (f) threshold and grace period from env vars (STALL_THRESHOLD_MINUTES,
+              HEALTH_GRACE_PERIOD_MINUTES)
+        </tdd-spec>
+        <deliverable>scripts/healthcheck_training.py</deliverable>
+        <test-file>tests/v2/unit/scripts/test_healthcheck_training.py</test-file>
+      </task>
+
+      <task id="4.2" title="Add stall detection to GpuHeartbeatMonitor">
+        <tdd-spec>
+          RED: Test that GpuHeartbeatMonitor reads the training heartbeat.json
+          (written by StructuredEventLogger) and detects when it becomes stale.
+          When stale for > alert_after_s: log ERROR "Training appears stalled —
+          no epoch progress in {minutes} minutes. Last heartbeat: {timestamp}".
+          Test with mocked file timestamps.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/gpu_heartbeat.py (extended)</deliverable>
+        <test-file>tests/v2/unit/observability/test_gpu_heartbeat.py (extended)</test-file>
+      </task>
+
+      <task id="4.3" title="Add .env.example variables for stall detection">
+        <tdd-spec>
+          RED: Test that .env.example contains STALL_THRESHOLD_MINUTES and
+          HEALTH_GRACE_PERIOD_MINUTES with sensible defaults (30 min, 10 min).
+        </tdd-spec>
+        <deliverable>.env.example (appended)</deliverable>
+        <test-file>tests/v2/unit/test_env_single_source.py (extended)</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - healthcheck_training.py exits 0 for fresh heartbeat, 1 for stale
+      - Grace period prevents false alarms during container startup
+      - GpuHeartbeatMonitor logs ERROR when training heartbeat stale
+      - healthcheck script usable as Docker HEALTHCHECK CMD
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 5: Prefect Task-Level Visibility                       -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="5" title="Prefect Task-Level Timing and Visibility">
+    <description>
+      Add a timing decorator/context manager that wraps every Prefect @task to
+      emit structured start/end events with duration. This makes Prefect UI show:
+      - Task name + start timestamp
+      - Task name + end timestamp + duration + status (completed/failed)
+      - Overall flow timing summary
+
+      The existing StructuredLogger class (structured_logging.py) already supports
+      task_start/task_end events but is NOT wired into any actual Prefect tasks.
+      This phase wires it in.
+
+      Implementation: A Prefect task hook (on_completion, on_failure) that
+      automatically emits events, OR a thin decorator that wraps @task functions.
+      Prefect 3.x supports task hooks natively — library-first approach.
+    </description>
+
+    <tasks>
+      <task id="5.1" title="Create Prefect task timing hooks">
+        <tdd-spec>
+          RED: Test create_task_timing_hooks() that returns (on_completion, on_failure)
+          callables compatible with Prefect 3.x task hook signature.
+          on_completion logs: task_name, duration_ms, status="completed"
+          on_failure logs: task_name, duration_ms, status="failed", error_type
+          Both emit StructuredLogger events.
+          Test with mock Prefect task context (TaskRunContext).
+        </tdd-spec>
+        <deliverable>src/minivess/observability/prefect_hooks.py</deliverable>
+        <test-file>tests/v2/unit/observability/test_prefect_hooks.py</test-file>
+      </task>
+
+      <task id="5.2" title="Apply timing hooks to train_flow.py tasks">
+        <tdd-spec>
+          RED: Test that all @task-decorated functions in train_flow.py include
+          the timing hooks (on_completion, on_failure). Verify via AST inspection
+          that every @task decorator has hooks kwarg. Test that the hooks emit
+          events when tasks complete.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/train_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_train_flow_task_hooks.py</test-file>
+      </task>
+
+      <task id="5.3" title="Apply timing hooks to other GPU flows">
+        <tdd-spec>
+          RED: Test that @task decorators in hpo_flow.py, analysis_flow.py,
+          and post_training_flow.py also include timing hooks. AST-based test
+          scans all flow files to enforce consistency.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/hpo_flow.py, analysis_flow.py, post_training_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_flows_have_hooks.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - Every @task in GPU flows has on_completion + on_failure hooks
+      - Hooks emit structured JSONL events (task_start, task_end)
+      - Task duration visible in Prefect UI via structured logger
+      - AST-based test ensures no @task escapes without hooks
+      - All tests in make test-staging (no Prefect server required)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 6: Docker Health Checks (RC4 — compose-level)          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="6" title="Docker Compose Health Checks for Flow Containers">
+    <description>
+      Add health checks to GPU flow services in docker-compose.flows.yml that
+      detect "container running but not producing output."
+
+      Current state: The infra compose (docker-compose.yml) has health checks for
+      postgres, minio, mlflow, etc. The flows compose (docker-compose.flows.yml)
+      has ZERO health checks on flow containers.
+
+      NOTE: Per CLAUDE.md Rule #31, we do NOT modify YAML config files without
+      explicit user authorization. This phase PREPARES the health check script
+      (Phase 4.1 already created it) and DOCUMENTS the compose YAML additions
+      the user can apply. The user will add the healthcheck stanzas themselves.
+
+      The health check uses scripts/healthcheck_training.py from Phase 4.
+    </description>
+
+    <tasks>
+      <task id="6.1" title="Document compose healthcheck stanzas">
+        <tdd-spec>
+          RED: Test that the documentation file exists and contains valid
+          Docker Compose healthcheck YAML snippets for train, hpo, and
+          post_training services. Validate the YAML syntax.
+        </tdd-spec>
+        <deliverable>docs/planning/docker-healthcheck-stanzas.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_healthcheck_docs.py</test-file>
+      </task>
+
+      <task id="6.2" title="Verify healthcheck script is in Docker image">
+        <tdd-spec>
+          RED: Test that Dockerfile.train COPYs scripts/ directory (already does
+          at line 14: COPY --chown=minivess:minivess scripts/ scripts/) and that
+          healthcheck_training.py is importable from within the container.
+          Verify the script uses only stdlib (no extra deps needed).
+        </tdd-spec>
+        <deliverable>scripts/healthcheck_training.py (verified)</deliverable>
+        <test-file>tests/v2/unit/deployment/test_healthcheck_in_image.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - healthcheck_training.py uses only stdlib (no import of minivess package)
+      - Documentation provides copy-paste YAML stanzas for train/hpo/post_training
+      - Stanzas use the correct script path (scripts/healthcheck_training.py)
+      - User can add healthchecks by copying documented YAML into compose file
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 7: Container Resource Monitoring (Prometheus Gauges)    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="7" title="Container Resource Monitoring via Prometheus Metrics">
+    <description>
+      Extend the existing prometheus_metrics.py to expose container-level resource
+      gauges: CPU percent, memory RSS, GPU utilization, GPU memory, GPU temperature.
+      These are readable by Grafana dashboards and the Prefect CLI.
+
+      The existing prometheus_metrics.py already defines cost gauges. This phase
+      adds resource gauges that the GpuHeartbeatMonitor (Phase 2) updates
+      periodically.
+
+      Data flow:
+        GpuHeartbeatMonitor → update_resource_gauges() → Prometheus Gauges
+        → Grafana dashboard scrapes /metrics endpoint
+        → Prefect UI shows resource utilization
+
+      This provides the "container resource monitoring visible in Prefect UI or CLI"
+      requirement from the incident remediation list.
+    </description>
+
+    <tasks>
+      <task id="7.1" title="Add resource Prometheus gauges">
+        <tdd-spec>
+          RED: Test that prometheus_metrics.py defines new gauges:
+          minivess_container_cpu_percent, minivess_container_memory_rss_gb,
+          minivess_container_gpu_utilization_pct, minivess_container_gpu_memory_used_mb,
+          minivess_container_gpu_temperature_c.
+          Test update_resource_gauges(snapshot) sets all gauges correctly.
+          Test with mock snapshot dict.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/prometheus_metrics.py (extended)</deliverable>
+        <test-file>tests/v2/unit/observability/test_prometheus_resource_gauges.py</test-file>
+      </task>
+
+      <task id="7.2" title="Wire GpuHeartbeatMonitor to Prometheus gauges">
+        <tdd-spec>
+          RED: Test that GpuHeartbeatMonitor calls update_resource_gauges() on
+          each heartbeat tick. Verify gauges are updated with mock pynvml data.
+          Test that Prometheus registry contains the expected gauge values after
+          a heartbeat cycle.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/gpu_heartbeat.py (extended)</deliverable>
+        <test-file>tests/v2/unit/observability/test_gpu_heartbeat.py (extended)</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - 5 new Prometheus gauges registered with minivess_container_ prefix
+      - Gauges updated every heartbeat interval
+      - Gauges readable by Grafana via /metrics endpoint
+      - Zero overhead when Prometheus client not available (graceful import)
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 8: MLflow Stall Alert Integration                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="8" title="MLflow Training Stall Alert">
+    <description>
+      Add a check that detects when a training run has not logged any new MLflow
+      metrics for longer than a configurable threshold. This is the MLflow-side
+      complement to the heartbeat-based stall detection in Phase 4.
+
+      This catches the scenario where the container IS healthy (heartbeat updating)
+      but training has stopped producing MLflow metrics (e.g., stuck in a MONAI
+      DataLoader deadlock, or model forward pass hanging).
+
+      Implementation: A function that queries the latest metric timestamp from
+      MLflow for a given run_id and compares it to now(). If stale, log an
+      alert and tag the run with "stall_detected=true".
+
+      This is designed to be called periodically by the GpuHeartbeatMonitor or
+      by an external monitoring script (e.g., the /factorial-monitor skill).
+    </description>
+
+    <tasks>
+      <task id="8.1" title="Create MLflow stall detection function">
+        <tdd-spec>
+          RED: Test detect_mlflow_metric_stall(run_id, threshold_minutes) that:
+          (a) queries MLflow for the most recent metric timestamp
+          (b) returns StallResult(stale=True/False, last_metric_ts, minutes_since)
+          (c) handles missing run_id gracefully (returns stale=False)
+          (d) handles MLflow server unavailability gracefully (returns stale=False
+              with warning logged)
+          Test with mocked MLflow client.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/stall_detection.py</deliverable>
+        <test-file>tests/v2/unit/observability/test_stall_detection.py</test-file>
+      </task>
+
+      <task id="8.2" title="Add MLFLOW_STALL_THRESHOLD_MINUTES to .env.example">
+        <tdd-spec>
+          RED: Test .env.example contains MLFLOW_STALL_THRESHOLD_MINUTES with
+          default 15.
+        </tdd-spec>
+        <deliverable>.env.example (appended)</deliverable>
+        <test-file>tests/v2/unit/test_env_single_source.py (extended)</test-file>
+      </task>
+
+      <task id="8.3" title="Wire stall detection into GpuHeartbeatMonitor">
+        <tdd-spec>
+          RED: Test that GpuHeartbeatMonitor optionally accepts an MLflow run_id
+          and checks for metric staleness on each heartbeat tick. When stale,
+          log ERROR + tag the run with "stall_detected=true" via MlflowClient.
+          Test with mocked MLflow client.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/gpu_heartbeat.py (extended)</deliverable>
+        <test-file>tests/v2/unit/observability/test_gpu_heartbeat.py (extended)</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - MLflow metric staleness detected within 1 heartbeat cycle after threshold
+      - Stale runs tagged with "stall_detected=true" for easy filtering
+      - Graceful when MLflow unavailable (advisory, not blocking)
+      - All tests in make test-staging with mocked MLflow
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER AND DEPENDENCIES                              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <execution-order>
+    <note>
+      Phases are designed for sequential execution but each is independently
+      mergeable. Phase 1 is the highest priority (prevents the 4-hour incident).
+      Phases 2-3 provide the monitoring foundation. Phases 4-8 build on it.
+    </note>
+
+    <dependency-graph>
+      Phase 1 (CUDA guard)          → independent, merge first
+      Phase 2 (GPU heartbeat)       → independent of Phase 1
+      Phase 3 (epoch progress)      → independent of Phase 1
+      Phase 4 (stall detection)     → depends on Phase 2 + 3 (reads heartbeat.json)
+      Phase 5 (Prefect hooks)       → depends on Phase 3 (uses StructuredLogger)
+      Phase 6 (Docker healthcheck)  → depends on Phase 4 (uses healthcheck script)
+      Phase 7 (Prometheus gauges)   → depends on Phase 2 (wires into heartbeat)
+      Phase 8 (MLflow stall alert)  → depends on Phase 2 (wires into heartbeat)
+    </dependency-graph>
+
+    <parallelism>
+      Phases 1, 2, 3 can be implemented in parallel (no dependencies).
+      Phases 4, 5, 6, 7, 8 must follow their dependencies.
+      Recommended: implement 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
+      (linear for self-learning-iterative-coder, but parallelizable if needed)
+    </parallelism>
+  </execution-order>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- INCIDENT COVERAGE MATRIX                                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <coverage-matrix>
+    <item id="I1" incident="CUDA availability guard" phase="1" status="COVERED">
+      require_cuda_context() fails immediately when CUDA unavailable
+    </item>
+    <item id="I2" incident="GPU heartbeat" phase="2" status="COVERED">
+      GpuHeartbeatMonitor detects GPU util &lt; 5% for > 2 min
+    </item>
+    <item id="I3" incident="Unbuffered output" phase="n/a" status="ALREADY DONE">
+      PYTHONUNBUFFERED=1 in all 3 base Dockerfiles (Dockerfile.base:166,
+      Dockerfile.base-cpu:85, Dockerfile.base-light:85). Phase 3 adds explicit
+      sys.stdout.flush() as defense-in-depth.
+    </item>
+    <item id="I4" incident="Epoch progress logging" phase="3" status="COVERED">
+      StructuredEventLogger emits JSONL + heartbeat after every epoch
+    </item>
+    <item id="I5" incident="CUDA version preflight" phase="1.3" status="COVERED">
+      detect_cuda_version_mismatch() at container startup
+    </item>
+    <item id="I6" incident="Prefect task-level visibility" phase="5" status="COVERED">
+      Prefect task hooks emit start/end/duration for every @task
+    </item>
+    <item id="I7" incident="Docker health checks" phase="6" status="COVERED">
+      healthcheck_training.py + documented compose stanzas
+    </item>
+    <item id="I8" incident="Training stall detection" phase="4+8" status="COVERED">
+      Heartbeat staleness (Phase 4) + MLflow metric staleness (Phase 8)
+    </item>
+    <item id="I9" incident="Container resource monitoring" phase="7" status="COVERED">
+      Prometheus gauges for CPU/GPU/memory visible in Grafana
+    </item>
+    <item id="I10" incident="Structured logging" phase="3" status="COVERED">
+      JSONL format via StructuredEventLogger (extends existing infrastructure)
+    </item>
+  </coverage-matrix>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- ESTIMATED EFFORT                                               -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <effort-estimate>
+    <phase id="1" tasks="3" estimated-tests="12" estimated-time="45 min" />
+    <phase id="2" tasks="3" estimated-tests="10" estimated-time="60 min" />
+    <phase id="3" tasks="3" estimated-tests="8"  estimated-time="45 min" />
+    <phase id="4" tasks="3" estimated-tests="8"  estimated-time="40 min" />
+    <phase id="5" tasks="3" estimated-tests="6"  estimated-time="40 min" />
+    <phase id="6" tasks="2" estimated-tests="4"  estimated-time="20 min" />
+    <phase id="7" tasks="2" estimated-tests="6"  estimated-time="30 min" />
+    <phase id="8" tasks="3" estimated-tests="8"  estimated-time="40 min" />
+    <total tasks="22" estimated-tests="62" estimated-time="5.3 hours" />
+  </effort-estimate>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- NEW FILES CREATED                                              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <new-files>
+    <!-- Source files -->
+    <file>src/minivess/orchestration/cuda_guard.py</file>
+    <file>src/minivess/observability/gpu_heartbeat.py</file>
+    <file>src/minivess/observability/prefect_hooks.py</file>
+    <file>src/minivess/observability/stall_detection.py</file>
+    <file>scripts/healthcheck_training.py</file>
+    <file>docs/planning/docker-healthcheck-stanzas.md</file>
+
+    <!-- Test files -->
+    <file>tests/v2/unit/orchestration/test_cuda_guard.py</file>
+    <file>tests/v2/unit/orchestration/test_train_flow_cuda_guard.py</file>
+    <file>tests/v2/unit/orchestration/test_train_flow_heartbeat.py</file>
+    <file>tests/v2/unit/orchestration/test_train_flow_structured_events.py</file>
+    <file>tests/v2/unit/orchestration/test_train_flow_task_hooks.py</file>
+    <file>tests/v2/unit/orchestration/test_all_flows_have_hooks.py</file>
+    <file>tests/v2/unit/observability/test_gpu_heartbeat.py</file>
+    <file>tests/v2/unit/observability/test_prefect_hooks.py</file>
+    <file>tests/v2/unit/observability/test_prometheus_resource_gauges.py</file>
+    <file>tests/v2/unit/observability/test_stall_detection.py</file>
+    <file>tests/v2/unit/scripts/test_healthcheck_training.py</file>
+    <file>tests/v2/unit/deployment/test_healthcheck_docs.py</file>
+    <file>tests/v2/unit/deployment/test_healthcheck_in_image.py</file>
+    <file>tests/v2/unit/pipeline/test_trainer_structured_events.py</file>
+  </new-files>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- MODIFIED FILES                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <modified-files>
+    <file>src/minivess/orchestration/flows/train_flow.py</file>
+    <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+    <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+    <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+    <file>src/minivess/observability/structured_logging.py</file>
+    <file>src/minivess/observability/prometheus_metrics.py</file>
+    <file>src/minivess/pipeline/trainer.py</file>
+    <file>.env.example</file>
+    <file>tests/v2/unit/test_env_single_source.py</file>
+    <file>tests/v2/unit/observability/test_structured_logging.py</file>
+  </modified-files>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- RESEARCH-INFORMED ADDITIONS (from literature survey 2026-03-29) -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!--
+    The following phases were added after a comprehensive literature survey:
+    "AI Research Report - Docker Observability.md" (30 references, 7 sections).
+    These extend the original 8-phase plan with production-grade tooling.
+    See: knowledge-base/_ai/MLOps/AI Research Report - Docker Observability.md
+  -->
+
+  <phase id="9" title="Grafana LGTM Stack Integration">
+    <description>
+      Add grafana/otel-lgtm as a single Docker Compose service providing
+      unified observability: OpenTelemetry Collector + Prometheus (metrics) +
+      Tempo (traces) + Loki (logs) + Grafana (dashboards) in ONE container.
+
+      Research finding: "For development and testing environments, this is the
+      lowest-friction path to full-stack observability" — accepts OTel defaults
+      at http://localhost:4318 (OTLP/HTTP).
+
+      This is the observability BACKEND — Phases 1-8 produce telemetry,
+      Phase 9 receives and visualises it.
+
+      Reference: Grafana (2025). "Docker OpenTelemetry LGTM."
+      https://grafana.com/docs/opentelemetry/docker-lgtm/
+    </description>
+
+    <tasks>
+      <task id="9.1" title="Add grafana/otel-lgtm service to docker-compose.yml">
+        <tdd-spec>
+          RED: Test that docker-compose.yml (infra stack) contains a service
+          named "observability" or "grafana-lgtm" using image grafana/otel-lgtm.
+          Test that it exposes ports 3001 (Grafana, avoid 3000 conflict),
+          4317 (OTLP gRPC), 4318 (OTLP HTTP). Test volumes for data persistence.
+          NOTE: This is a YAML addition — per Rule #31, document the stanza
+          for user approval before adding.
+        </tdd-spec>
+        <deliverable>docs/planning/grafana-lgtm-compose-stanza.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_lgtm_service.py</test-file>
+      </task>
+
+      <task id="9.2" title="Add OTEL_EXPORTER_OTLP_ENDPOINT to .env.example and x-common-env">
+        <tdd-spec>
+          RED: Test that .env.example contains OTEL_EXPORTER_OTLP_ENDPOINT
+          with default http://grafana-lgtm:4318. Test that docker-compose.flows.yml
+          x-common-env passes ${OTEL_EXPORTER_OTLP_ENDPOINT} to all flow containers.
+          This enables any OTel-instrumented code to send telemetry to the LGTM backend.
+        </tdd-spec>
+        <deliverable>.env.example (appended), docker-compose.flows.yml (modified)</deliverable>
+        <test-file>tests/v2/unit/test_env_single_source.py (extended)</test-file>
+      </task>
+
+      <task id="9.3" title="Create custom Grafana dashboard for ML training">
+        <tdd-spec>
+          RED: Test that a JSON dashboard file exists at
+          deployment/grafana/dashboards/ml-training-overview.json.
+          Test that it contains panels for: GPU utilization, training loss curve,
+          epoch progress, heartbeat status, Prefect flow timeline.
+          Validate the JSON is syntactically valid.
+        </tdd-spec>
+        <deliverable>deployment/grafana/dashboards/ml-training-overview.json</deliverable>
+        <test-file>tests/v2/unit/deployment/test_grafana_dashboard.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - grafana/otel-lgtm service documented and ready for user approval
+      - OTEL_EXPORTER_OTLP_ENDPOINT in .env.example with sensible default
+      - Custom Grafana dashboard JSON validated and ready for provisioning
+      - All flow containers can send OTel data to the LGTM backend
+    </success-criteria>
+  </phase>
+
+  <phase id="10" title="prefect-opentelemetry Integration">
+    <description>
+      Replace custom Prefect task hooks (Phase 5) with the first-party
+      prefect-opentelemetry package, which provides automatic OTel span
+      creation for every Prefect flow and task.
+
+      Research finding: "prefect-opentelemetry exports all Prefect flow/task
+      telemetry in OTLP format to a Collector" — eliminating the need for
+      manual on_completion/on_failure hooks on every @task.
+
+      Reference: PyPI (2025). "prefect-opentelemetry."
+      https://pypi.org/project/prefect-opentelemetry/
+    </description>
+
+    <tasks>
+      <task id="10.1" title="Add prefect-opentelemetry to pyproject.toml">
+        <tdd-spec>
+          RED: Test that prefect-opentelemetry is in pyproject.toml [project.optional-dependencies]
+          under the "observability" extra. Test that uv sync --extra observability installs it.
+        </tdd-spec>
+        <deliverable>pyproject.toml (modified)</deliverable>
+        <test-file>tests/v2/unit/test_dependencies.py (extended)</test-file>
+      </task>
+
+      <task id="10.2" title="Configure OTel tracing in Prefect server environment">
+        <tdd-spec>
+          RED: Test that the Prefect server docker-compose service has
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT set to the LGTM Collector.
+          Test that Prefect traces appear in Tempo (via mock or integration test).
+        </tdd-spec>
+        <deliverable>docs/planning/prefect-otel-config.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_prefect_otel.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - prefect-opentelemetry installed as optional dependency
+      - Prefect server configured to export traces to LGTM Collector
+      - Every Prefect flow/task automatically creates OTel spans
+      - Phase 5 custom hooks become optional (defense-in-depth, not primary)
+    </success-criteria>
+  </phase>
+
+  <phase id="11" title="NVIDIA DCGM Exporter Sidecar">
+    <description>
+      Add NVIDIA DCGM Exporter as a Docker Compose sidecar service for
+      hardware-level GPU monitoring. Exposes Prometheus metrics at :9400
+      that the LGTM Prometheus instance scrapes automatically.
+
+      Research finding: "DCGM Exporter exposes GPU metrics for Prometheus
+      leveraging NVIDIA DCGM" — utilisation, memory, temperature, ECC errors,
+      PCIe throughput. Pre-built Grafana dashboard available (ID 12239).
+
+      This complements the application-level pynvml monitoring in Phase 2
+      with infrastructure-level visibility.
+
+      Reference: NVIDIA (2025). "DCGM Exporter." GitHub.
+      https://github.com/NVIDIA/dcgm-exporter
+    </description>
+
+    <tasks>
+      <task id="11.1" title="Document DCGM Exporter compose stanza">
+        <tdd-spec>
+          RED: Test that a documentation file describes the DCGM Exporter
+          Docker Compose service configuration with:
+          - image: nvcr.io/nvidia/k8s/dcgm-exporter:latest
+          - devices: nvidia.com/gpu=all
+          - ports: 9400:9400
+          - Prometheus scrape config for LGTM
+          Per Rule #31, document for user approval, don't modify YAML directly.
+        </tdd-spec>
+        <deliverable>docs/planning/dcgm-exporter-compose-stanza.md</deliverable>
+        <test-file>tests/v2/unit/deployment/test_dcgm_docs.py</test-file>
+      </task>
+
+      <task id="11.2" title="Import NVIDIA DCGM Grafana dashboard">
+        <tdd-spec>
+          RED: Test that deployment/grafana/dashboards/nvidia-dcgm.json exists
+          and is a valid Grafana dashboard JSON. The dashboard should be imported
+          from Grafana dashboard ID 12239.
+        </tdd-spec>
+        <deliverable>deployment/grafana/dashboards/nvidia-dcgm.json</deliverable>
+        <test-file>tests/v2/unit/deployment/test_dcgm_dashboard.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - DCGM Exporter compose stanza documented for user approval
+      - NVIDIA DCGM Grafana dashboard JSON ready for provisioning
+      - Prometheus scrape config targets DCGM Exporter at :9400
+      - Combined view: application-level pynvml (Phase 2) + infra-level DCGM (Phase 11)
+    </success-criteria>
+  </phase>
+
+  <!-- Updated effort estimate including research-informed phases -->
+  <effort-estimate-v2>
+    <note>Updated after literature survey on 2026-03-29</note>
+    <phase id="1" tasks="3" estimated-tests="12" estimated-time="45 min" priority="CRITICAL" />
+    <phase id="2" tasks="3" estimated-tests="10" estimated-time="60 min" priority="HIGH" />
+    <phase id="3" tasks="3" estimated-tests="8"  estimated-time="45 min" priority="HIGH" />
+    <phase id="4" tasks="3" estimated-tests="8"  estimated-time="40 min" priority="HIGH" />
+    <phase id="5" tasks="3" estimated-tests="6"  estimated-time="40 min" priority="MEDIUM" />
+    <phase id="6" tasks="2" estimated-tests="4"  estimated-time="20 min" priority="MEDIUM" />
+    <phase id="7" tasks="2" estimated-tests="6"  estimated-time="30 min" priority="MEDIUM" />
+    <phase id="8" tasks="3" estimated-tests="8"  estimated-time="40 min" priority="MEDIUM" />
+    <phase id="9" tasks="3" estimated-tests="6"  estimated-time="45 min" priority="HIGH" />
+    <phase id="10" tasks="2" estimated-tests="4" estimated-time="30 min" priority="MEDIUM" />
+    <phase id="11" tasks="2" estimated-tests="4" estimated-time="20 min" priority="MEDIUM" />
+    <total tasks="29" estimated-tests="76" estimated-time="6.9 hours" />
+  </effort-estimate-v2>
+
+</plan>

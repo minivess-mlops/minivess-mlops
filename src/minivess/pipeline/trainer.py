@@ -239,6 +239,16 @@ class SegmentationTrainer:
 
         self._multi_tracker: MultiMetricTracker = _build_multi_tracker(config)
         self._metric_history: MetricHistory = MetricHistory()
+        self._event_logger: Any | None = None  # Set by set_event_logger()
+
+    def set_event_logger(self, event_logger: Any) -> None:
+        """Set the structured event logger for epoch-level JSONL output.
+
+        Called by train_flow to thread the event_logger from the flow context
+        into the trainer. The event_logger is not a constructor parameter
+        because Prefect @task args must be serializable.
+        """
+        self._event_logger = event_logger
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
         """Build the optimizer from training config."""
@@ -783,6 +793,19 @@ class SegmentationTrainer:
 
             self.scheduler.step()
             epoch_wall_time = time.perf_counter() - t0
+
+            # Structured JSONL epoch logging (Pass 4 — G1 fix)
+            if self._event_logger is not None:
+                current_lr = self.optimizer.param_groups[0]["lr"]
+                self._event_logger.log_epoch_complete(
+                    epoch=epoch + 1,
+                    max_epochs=self.config.max_epochs,
+                    train_loss=train_result.loss,
+                    val_loss=val_result.loss,
+                    val_dice=val_result.metrics.get("val/dice", 0.0) if hasattr(val_result, "metrics") and val_result.metrics else 0.0,
+                    lr=current_lr,
+                    epoch_wall_s=epoch_wall_time,
+                )
 
             # Log first/steady epoch wall time for profiling (#683)
             if epoch == 0 and self.tracker is not None:

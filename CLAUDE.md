@@ -293,11 +293,14 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     Every failure point must use `try/except` with `logger.error()` so both humans
     reading logs AND Claude Code monitoring runs understand what is happening.
     See: `.claude/metalearning/2026-03-19-external-test-datasets-never-wired-silent-failure.md`
-26. **Greenfield Project — No Legacy (Non-Negotiable)** — This is a greenfield project
-    with zero production users and zero legacy data. NEVER maintain backward compatibility.
-    NEVER create migration/normalization layers. NEVER offer "keep both formats." When
-    changing conventions (metric keys, config formats, API schemas), DELETE the old
-    convention entirely. Clean slate always.
+26. **Greenfield Project — No Legacy, No Deprecation Notices (Non-Negotiable)** — This
+    is a greenfield project with zero production users and zero legacy data. NEVER maintain
+    backward compatibility. NEVER create migration/normalization layers. NEVER offer "keep
+    both formats." NEVER add deprecation notices or "deprecated" comments — DELETE the old
+    code entirely. No "keep for reference," no "marked as deprecated," no dual implementations.
+    When there are two ways to do the same thing, DELETE one immediately. When changing
+    conventions (metric keys, config formats, flow architecture), DELETE the old convention
+    entirely. Clean slate always. One way to do each thing.
     See: `.claude/metalearning/2026-03-19-backward-compat-resistance-greenfield-project.md`
 27. **Debug Run = Full Production (Non-Negotiable)** — A debug run is the FULL production
     experiment with ONLY 3 differences: (1) fewer epochs, (2) less data, (3) fewer folds.
@@ -410,8 +413,45 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     just try this real quick."
     See: `.claude/metalearning/2026-03-24-reactive-rushing-instead-of-proactive-quality.md`
 
+33. **Docker+Prefect Execution Is Non-Negotiable — Zero Bypass on staging/prod (Non-Negotiable)** —
+    On ANY branch derived from `main` or `prod`, training and pipeline execution MUST go
+    through Docker containers orchestrated by Prefect. There are ZERO edge cases:
+    - `MINIVESS_ALLOW_HOST=1` is **pytest-only** — NEVER in scripts, suggestions, or AskUserQuestion options
+    - `PREFECT_DISABLED=1` is **pytest-only** — NEVER in production, staging, or development runs
+    - "Local launcher scripts" that call `training_flow()` directly are BANNED
+    - Framing Docker+Prefect as "heavy" or "slower" is BANNED — it IS the execution model
+    - The correct local training command is ALWAYS: `docker compose run --shm-size 8g train`
+    - All config comes from: `.env` (secrets/URIs) + YAML (experiment params) — never hardcoded
+    **Claude's recurring failure**: proposing `MINIVESS_ALLOW_HOST=1` shortcuts because LLM
+    training data is saturated with bare-metal `python train.py` patterns. This has been
+    documented 7+ times in metalearning. The "quick" path IS the Docker path.
+    See: `.claude/metalearning/2026-03-29-local-launcher-hack-proposed-instead-of-docker-prefect.md`
+    See: `.claude/metalearning/2026-03-14-docker-resistance-anti-pattern.md`
+    See: `.claude/metalearning/2026-03-06-standalone-script-antipattern.md`
+    Guard: Issue #971, Issue #972
+
+34. **"Import ≠ Done" — Code Must Be CALLED, DEPLOYED, and OBSERVABLE (Non-Negotiable)** —
+    Writing a module and importing it is NOT implementing it. A task is DONE when:
+    (1) Code is CALLED in the production code path (not just imported)
+    (2) Docker image is REBUILT with the change
+    (3) Feature produces OBSERVABLE OUTPUT (logs, heartbeat.json, metrics, dashboard)
+    (4) A `docker compose run` invocation DEMONSTRATES the feature working
+    (5) AST "import exists" tests are NECESSARY but NOT SUFFICIENT
+    **Banned pattern**: Write module → import it → test import exists → mark DONE → move on.
+    This creates dead code that passes all tests but provides zero functionality.
+    **Required pattern**: Write module → call it from flow → rebuild Docker → run flow →
+    verify output is visible in Docker logs / Grafana / Prefect UI → THEN mark DONE.
+    **NEVER start training or experiment runs until the observability infrastructure is
+    VERIFIED FUNCTIONAL** — not "code exists" but "I can see training metrics updating
+    in Grafana, heartbeat.json is being written, Docker healthcheck shows healthy."
+    See: `.claude/metalearning/2026-03-30-observability-code-written-but-never-wired-deployed.md`
+
 ## What AI Must NEVER Do
 
+- Recommend switching to a fresh session between planning and execution. Context amnesia
+  on session switch is a PROVEN failure pattern (14+ metalearning docs). Execute plans in
+  the SAME session that created them. Use context compaction if needed, not session breaks.
+  See: `.claude/metalearning/2026-03-28-context-amnesia-deferred-deepvess-whac-a-mole.md`
 - Confabulate — web-search instead. Hardcode task names, cloud providers, GPU types.
 - Use `import re` for structured data. Use pip/conda/poetry. Skip pre-commit hooks.
 - Suggest `python scripts/*.py` for training — use Prefect flows in Docker.

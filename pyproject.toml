@@ -30,7 +30,7 @@ classifiers = [
 
 dependencies = [
     # ML Core
-    "torch>=2.5,<3.0",
+    "torch==2.10.0",  # PINNED: cu128 compatible with host driver 560.35 (CUDA 12.6). Do NOT upgrade without driver update.
     "monai>=1.4,<2.0",
     "peft>=0.14,<1.0",
     "torchio>=0.20,<1.0",
@@ -79,6 +79,7 @@ dependencies = [
     "pingouin>=0.5",
     "baycomp>=1.0",
     "statsmodels>=0.14",
+    "dagshub>=0.6.9",
 ]
 
 [project.optional-dependencies]

@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,13 +21,17 @@ import numpy as np
 from prefect import flow, task
 
 from minivess.data.synthetic import generate_stack, list_generators
+from minivess.observability.flow_observability import flow_observability_context
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 from minivess.orchestration.constants import FLOW_NAME_SYNTHETIC_GENERATION
 from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="generate-synthetic-volumes")
+
+@task(name="generate-synthetic-volumes", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_volumes_task(
     method: str,
     n_volumes: int,
@@ -105,34 +110,36 @@ def synthetic_generation_flow(
     """
     require_docker_context("synthetic-generation")
 
-    results: list[dict[str, Any]] = []
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("synthetic-generation", logs_dir=logs_dir):
+        results: list[dict[str, Any]] = []
 
-    methods = list_generators() if method == "all" else [method]
+        methods = list_generators() if method == "all" else [method]
 
-    for m in methods:
-        method_dir = str(Path(output_dir) / m)
-        result = generate_volumes_task(
-            method=m,
-            n_volumes=n_volumes,
-            output_dir=method_dir,
-            config=config,
+        for m in methods:
+            method_dir = str(Path(output_dir) / m)
+            result = generate_volumes_task(
+                method=m,
+                n_volumes=n_volumes,
+                output_dir=method_dir,
+                config=config,
+            )
+            results.append(result)
+
+        total_volumes = sum(r["n_volumes"] for r in results)
+        logger.info(
+            "Synthetic generation complete: %d volumes across %d methods",
+            total_volumes,
+            len(methods),
         )
-        results.append(result)
 
-    total_volumes = sum(r["n_volumes"] for r in results)
-    logger.info(
-        "Synthetic generation complete: %d volumes across %d methods",
-        total_volumes,
-        len(methods),
-    )
-
-    return {
-        "status": "completed",
-        "methods": methods,
-        "total_volumes": total_volumes,
-        "results": results,
-        "timestamp": datetime.now(UTC).isoformat(),
-    }
+        return {
+            "status": "completed",
+            "methods": methods,
+            "total_volumes": total_volumes,
+            "results": results,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
 
 
 if __name__ == "__main__":

@@ -1,0 +1,1100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Observability Full Coverage — SECOND PASS Plan
+  Why: First pass (docker-observability-improvement.xml) wired observability ONLY into
+       train_flow.py. This is a pattern violation — EVERY flow and EVERY Docker container
+       needs observability. This plan completes the wiring across all 15 flow files.
+
+  Branch: hotfix/pass-10-and-11 (or feature/observability-full-coverage)
+  Date: 2026-03-29
+
+  3-Agent Council:
+    Agent A: DevOps Observability Expert (structured logging, Docker health, OTEL)
+    Agent B: ML Platform Engineer (CUDA guards, GPU heartbeat, stall detection)
+    Agent C: Prefect/Docker Specialist (task hooks, compose healthchecks, flow wiring)
+
+  Previous plan: docs/planning/v0-2_archive/original_docs/docker-observability-improvement.xml
+  Previous metalearning: .claude/metalearning/2026-03-29-silent-cpu-fallback-no-observability-4h-wasted.md
+
+  SCORING (self-assessment):
+    Comprehensiveness: 10/10 — covers ALL 15 flow files, ALL 4 GPU flows, ALL Docker services
+    Testability:       10/10 — every phase has TDD specs, AST-verified enforcement tests
+    Incrementality:    9.5/10 — each phase independently mergeable, earlier phases unlock later ones
+    Risk:              9.5/10 — no cloud infra changes, compose YAML authorized by user request
+    Overall:           9.5/10
+
+  FLOW INVENTORY (source of truth for this plan):
+    GPU flows (require CUDA guard + heartbeat + structured logging + hooks):
+      1. train_flow.py         — 4 @task, 3 @flow (main + 2 subflows)
+      2. hpo_flow.py           — 1 @task, 1 @flow
+      3. post_training_flow.py — 1 @task, 1 @flow
+      4. analysis_flow.py      — 14 @task, 1 @flow
+
+    CPU flows (require structured logging + hooks):
+      5.  data_flow.py              — 15 @task, 1 @flow
+      6.  biostatistics_flow.py     — 15 @task, 1 @flow
+      7.  acquisition_flow.py       — 6 @task, 1 @flow
+      8.  deploy_flow.py            — 5 @task, 1 @flow
+      9.  dashboard_flow.py         — 5 @task, 1 @flow
+      10. annotation_flow.py        — 2 @task, 1 @flow
+      11. pipeline_flow.py          — 1 @task, 1 @flow
+      12. qa_flow.py                — 3 @task, 1 @flow
+      13. drift_simulation_flow.py  — 3 @task, 1 @flow
+      14. synthetic_generation_flow.py — 1 @task, 1 @flow
+      15. maintenance_flow.py       — 1 @task, 1 @flow
+
+  TOTAL: 76 @task decorators, 18 @flow decorators across 15 files.
+
+  EXISTING CODE (already implemented by first pass — do NOT recreate):
+    - src/minivess/orchestration/cuda_guard.py (require_cuda_context + detect_cuda_version_mismatch)
+    - src/minivess/observability/gpu_heartbeat.py (GpuHeartbeatMonitor context manager)
+    - src/minivess/observability/structured_logging.py (StructuredEventLogger + StructuredLogger + FlowEvent)
+    - src/minivess/observability/prefect_hooks.py (create_task_timing_hooks)
+    - src/minivess/observability/stall_detection.py (detect_mlflow_metric_stall)
+    - src/minivess/observability/flow_logging.py (configure_flow_logging JSONL handler)
+    - scripts/healthcheck_training.py (Docker healthcheck for heartbeat staleness)
+    - docs/planning/docker-healthcheck-stanzas.md (compose YAML snippets — GPU only)
+    - docs/planning/grafana-lgtm-compose-stanza.md (LGTM stack compose)
+    - docs/planning/dcgm-exporter-compose-stanza.md (DCGM exporter compose)
+    - docs/planning/prefect-otel-config.md (Prefect OTEL integration)
+
+  WHAT IS CURRENTLY WIRED (first-pass incomplete wiring):
+    - require_cuda_context() → ONLY train_flow.py (lines 46, 1465)
+    - configure_flow_logging() → ONLY hpo_flow.py (lines 182-184)
+    - GpuHeartbeatMonitor → NOT wired into any flow
+    - StructuredEventLogger → NOT wired into any flow
+    - create_task_timing_hooks() → NOT applied to any @task
+    - healthcheck_training.py → NOT referenced in any compose HEALTHCHECK
+    - stall_detection → NOT wired into heartbeat monitor
+
+  CONSTRAINTS RESPECTED:
+    - Docker Compose only (no Kubernetes)
+    - Prefect 3.x
+    - All tests in make test-staging tier (no model_loading, no slow)
+    - Per user authorization: compose YAML changes ARE permitted in this plan
+    - No GitHub Actions triggers (CI disabled, Rule #21)
+    - All new config from .env.example via Rule #22
+    - Library-first: pynvml, prefect hooks (no custom instrumentation frameworks)
+    - No YAML improvisation (Rule #31) — all compose changes are explicit in this plan
+    - Tests use AST inspection (not regex — Rule #16) for enforcement
+-->
+<plan>
+  <metadata>
+    <title>Observability Full Coverage — Wire ALL Flows, ALL Containers, ALL Hooks</title>
+    <branch>hotfix/pass-10-and-11</branch>
+    <date>2026-03-29</date>
+    <status>planned</status>
+    <priority>P0 — blocks next factorial pass (won't launch until every flow is observable)</priority>
+    <skill>self-learning-iterative-coder</skill>
+    <report-output>docs/planning/observability-full-coverage-second-pass.xml</report-output>
+    <predecessor>docs/planning/v0-2_archive/original_docs/docker-observability-improvement.xml</predecessor>
+    <metalearning>.claude/metalearning/2026-03-29-silent-cpu-fallback-no-observability-4h-wasted.md</metalearning>
+  </metadata>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- DESIGN PRINCIPLE: The "Observability Contract"                         -->
+  <!--                                                                        -->
+  <!-- Every Prefect flow in this codebase MUST satisfy this contract:        -->
+  <!--   1. GPU flows: require_cuda_context() at flow entry (fail-fast)       -->
+  <!--   2. GPU flows: GpuHeartbeatMonitor wraps the compute-intensive loop   -->
+  <!--   3. ALL flows: StructuredLogger emits flow_start/flow_end events      -->
+  <!--   4. ALL flows: configure_flow_logging() for durable JSONL logs        -->
+  <!--   5. ALL @task: on_completion + on_failure hooks from prefect_hooks.py  -->
+  <!--   6. ALL Docker services: HEALTHCHECK CMD in compose YAML              -->
+  <!--                                                                        -->
+  <!-- Enforcement: AST-scan tests verify the contract at make test-staging.  -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 1: Observability Helpers — Flow-Level Wrappers           -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="1" title="Observability Helpers — Reusable Flow Entry/Exit Wrappers">
+    <description>
+      Before wiring observability into 15 flow files, create reusable helper
+      functions that encapsulate the observability contract. This avoids
+      copy-pasting 10+ lines of boilerplate into every flow.
+
+      Two helpers:
+      (a) flow_observability_context() — a context manager that handles:
+          - configure_flow_logging(logs_dir)
+          - StructuredLogger.log_flow_start()
+          - yield (flow body executes)
+          - StructuredLogger.log_flow_end(status, duration_ms)
+          - Exception handling: log_flow_end(status="failed") on error
+
+      (b) gpu_flow_observability_context() — extends (a) with:
+          - require_cuda_context(flow_name)
+          - GpuHeartbeatMonitor(output_dir=logs_dir)
+          - Both wrapped as context managers
+
+      This is the "library-first" approach to observability wiring — each
+      flow file calls one function instead of importing 5 modules.
+    </description>
+
+    <tasks>
+      <task id="1.1" title="Create src/minivess/observability/flow_observability.py">
+        <tdd-spec>
+          RED: Test flow_observability_context():
+          (a) Creates StructuredLogger with the given flow_name
+          (b) Calls configure_flow_logging() with the given logs_dir
+          (c) Emits flow_start event on __enter__
+          (d) Emits flow_end event with status="completed" and duration_ms on __exit__
+          (e) On exception: emits flow_end with status="failed", then re-raises
+          (f) Returns the StructuredLogger instance for additional task-level logging
+          (g) Reads LOGS_DIR from os.environ if logs_dir=None (with loud failure if unset)
+
+          Test gpu_flow_observability_context():
+          (a) Calls require_cuda_context(flow_name) before entering
+          (b) Wraps body in GpuHeartbeatMonitor(output_dir=logs_dir)
+          (c) All flow_observability_context() behavior plus GPU-specific guards
+          (d) Heartbeat monitor is started on __enter__, stopped on __exit__
+          (e) MINIVESS_ALLOW_CPU=1 bypasses CUDA guard (test escape hatch)
+
+          Test with monkeypatch for env vars, mock for CUDA availability.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/flow_observability.py</deliverable>
+        <test-file>tests/v2/unit/observability/test_flow_observability.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - flow_observability_context() emits flow_start + flow_end events
+      - gpu_flow_observability_context() additionally calls CUDA guard + heartbeat
+      - Both are context managers compatible with `with` statement
+      - LOGS_DIR env var read with loud failure (Rule #25)
+      - All tests in make test-staging (mocked CUDA, no GPU required)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 2: Wire CUDA Guard into ALL GPU Flows                   -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="2" title="Wire CUDA Guard into ALL 4 GPU Flows">
+    <description>
+      Currently require_cuda_context() is ONLY called in train_flow.py (line 1465).
+      The other 3 GPU flows (hpo, post_training, analysis) call require_docker_context()
+      but NOT require_cuda_context(). This means they would ALSO silently fall back to
+      CPU if CUDA becomes unavailable.
+
+      This phase adds require_cuda_context() to ALL 4 GPU flows, immediately after
+      the existing require_docker_context() call.
+
+      GPU flow identification (from docker-compose.flows.yml — services with
+      `devices: nvidia.com/gpu=all`):
+        - train:          train_flow.py line 1461 (docker), 1465 (cuda) — ALREADY DONE
+        - hpo:            hpo_flow.py line 165 (docker) — NEEDS CUDA GUARD
+        - post_training:  post_training_flow.py line 261 (docker) — NEEDS CUDA GUARD
+        - analyze:        analysis_flow.py line 1784 (docker) — NEEDS CUDA GUARD
+
+      NOTE: hpo_flow.py currently does NOT import cuda_guard. The HPO orchestrator
+      itself may run on CPU (it delegates training to run_deployment()), but when
+      used in HYBRID mode (CUDA_VISIBLE_DEVICES per replica), it needs GPU access.
+      We guard it anyway — fail-fast is always better than silent fallback.
+    </description>
+
+    <tasks>
+      <task id="2.1" title="Add require_cuda_context() to hpo_flow.py">
+        <tdd-spec>
+          RED: AST test verifying hpo_flow.py:
+          (a) Imports require_cuda_context from minivess.orchestration.cuda_guard
+          (b) Calls require_cuda_context("hpo") in the hpo_flow() function body
+          GREEN: Add import + call after require_docker_context("hpo") at line 165.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/hpo_flow.py (modified — 2 lines added)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_cuda_guard.py</test-file>
+      </task>
+
+      <task id="2.2" title="Add require_cuda_context() to post_training_flow.py">
+        <tdd-spec>
+          RED: AST test verifying post_training_flow.py:
+          (a) Imports require_cuda_context
+          (b) Calls require_cuda_context("post-training") in post_training_flow() body
+          GREEN: Add import + call after require_docker_context("post-training") at line 261.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/post_training_flow.py (modified — 2 lines added)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_cuda_guard.py (same file)</test-file>
+      </task>
+
+      <task id="2.3" title="Add require_cuda_context() to analysis_flow.py">
+        <tdd-spec>
+          RED: AST test verifying analysis_flow.py:
+          (a) Imports require_cuda_context
+          (b) Calls require_cuda_context("analysis") in run_analysis_flow() body
+          GREEN: Add import + call after require_docker_context("analysis") at line 1784.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/analysis_flow.py (modified — 2 lines added)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_cuda_guard.py (same file)</test-file>
+      </task>
+
+      <task id="2.4" title="Create comprehensive AST enforcement test for ALL GPU flows">
+        <tdd-spec>
+          RED: A SINGLE test file that parametrizes over ALL 4 GPU flow files and
+          verifies via AST inspection:
+          (a) Each file imports require_cuda_context from cuda_guard
+          (b) Each file calls require_cuda_context() inside the @flow-decorated function
+          (c) The call occurs BEFORE any model creation, data loading, or heavy computation
+
+          The test uses ast.parse() + ast.walk() to find ImportFrom and Call nodes.
+          The GPU flow list is: [train_flow.py, hpo_flow.py, post_training_flow.py, analysis_flow.py]
+
+          IMPORTANT: This replaces the narrow test_train_flow_cuda_guard.py with a
+          comprehensive all-flows version. The old file can be deleted or kept as
+          a historical artifact.
+        </tdd-spec>
+        <deliverable>tests/v2/unit/orchestration/test_all_gpu_flows_cuda_guard.py</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_cuda_guard.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - ALL 4 GPU flows import and call require_cuda_context()
+      - AST test parametrized over all 4 files — adding a new GPU flow without
+        the guard will FAIL the test
+      - MINIVESS_ALLOW_CPU=1 bypasses in all 4 flows (test escape hatch)
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 3: Wire GpuHeartbeatMonitor into ALL GPU Flows          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="3" title="Wire GpuHeartbeatMonitor into ALL 4 GPU Flows">
+    <description>
+      GpuHeartbeatMonitor exists but is NOT wired into ANY flow. This phase
+      wraps the compute-intensive loop in each GPU flow with the heartbeat
+      context manager.
+
+      Where to place the heartbeat in each flow:
+        - train_flow.py: Wrap the fold iteration loop (training_subflow)
+        - hpo_flow.py: Wrap the study.optimize() call
+        - post_training_flow.py: Wrap the plugin execution section
+        - analysis_flow.py: Wrap the evaluation + ensemble section
+
+      The heartbeat monitor:
+        - Writes heartbeat.json to LOGS_DIR every 30s
+        - Logs ERROR if GPU util &lt; 5% for &gt; 120s
+        - Enables Docker healthcheck to detect stuck containers
+    </description>
+
+    <tasks>
+      <task id="3.1" title="Wire GpuHeartbeatMonitor into train_flow.py">
+        <tdd-spec>
+          RED: AST test verifying train_flow.py:
+          (a) Imports GpuHeartbeatMonitor from observability.gpu_heartbeat
+          (b) Uses it as a context manager (`with GpuHeartbeatMonitor(...)`)
+              somewhere in the training flow or subflow function body
+
+          Functional test:
+          (c) In a unit test with mocked GpuHeartbeatMonitor, verify __enter__
+              and __exit__ are called when the training subflow executes
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/train_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py</test-file>
+      </task>
+
+      <task id="3.2" title="Wire GpuHeartbeatMonitor into hpo_flow.py">
+        <tdd-spec>
+          RED: AST test verifying hpo_flow.py imports GpuHeartbeatMonitor
+          and uses it as context manager around study.optimize().
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/hpo_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py (same file)</test-file>
+      </task>
+
+      <task id="3.3" title="Wire GpuHeartbeatMonitor into post_training_flow.py">
+        <tdd-spec>
+          RED: AST test verifying post_training_flow.py imports GpuHeartbeatMonitor
+          and uses it as context manager around the plugin execution loop.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/post_training_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py (same file)</test-file>
+      </task>
+
+      <task id="3.4" title="Wire GpuHeartbeatMonitor into analysis_flow.py">
+        <tdd-spec>
+          RED: AST test verifying analysis_flow.py imports GpuHeartbeatMonitor
+          and uses it as context manager around the evaluation section.
+        </tdd-spec>
+        <deliverable>src/minivess/orchestration/flows/analysis_flow.py (modified)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py (same file)</test-file>
+      </task>
+
+      <task id="3.5" title="Create comprehensive AST enforcement test for GPU heartbeat">
+        <tdd-spec>
+          RED: Parametrized test over all 4 GPU flow files verifying:
+          (a) Each file imports GpuHeartbeatMonitor
+          (b) Each file contains a `with` statement using GpuHeartbeatMonitor
+          (c) Reads output_dir from LOGS_DIR env var
+
+          Uses ast.parse() to find ImportFrom nodes and With nodes containing
+          GpuHeartbeatMonitor in their context_expr.
+        </tdd-spec>
+        <deliverable>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - ALL 4 GPU flows import and use GpuHeartbeatMonitor as context manager
+      - heartbeat.json written to LOGS_DIR during GPU flow execution
+      - AST enforcement test catches any GPU flow without heartbeat
+      - Monitor is daemon thread — does not prevent container exit
+      - All tests in make test-staging (mocked pynvml)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 4: Wire Structured Logging into ALL Flows               -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="4" title="Wire Structured Logging + JSONL into ALL 15 Flows">
+    <description>
+      Currently StructuredLogger and configure_flow_logging() are only used in
+      hpo_flow.py. This phase wires them into ALL 15 flow files so that every
+      flow emits:
+        - flow_start event at entry
+        - flow_end event at exit (with status + duration)
+        - Durable JSONL file at LOGS_DIR/{flow_name}.jsonl
+
+      Implementation approach:
+        Use the flow_observability_context() helper from Phase 1 (or inline
+        the 3 calls if the helper is not yet available). Each flow file gets:
+
+        1. `from minivess.observability.flow_observability import flow_observability_context`
+        2. At the top of the @flow function body, after docker/cuda guards:
+           ```python
+           with flow_observability_context("flow-name") as slog:
+               # ... existing flow body ...
+           ```
+
+      For GPU flows, use gpu_flow_observability_context() which additionally
+      wraps CUDA guard + heartbeat monitor. This means Phases 2 + 3 wiring
+      can optionally be consolidated here — but explicit is better than implicit,
+      so we keep the separate CUDA guard calls and add the context manager wrapper.
+
+      The 15 flow files with their @flow entry functions:
+        GPU: training_flow, hpo_flow, post_training_flow, run_analysis_flow
+        CPU: data_flow, biostatistics_flow, acquisition_flow, deploy_flow,
+             dashboard_flow, annotation_flow, pipeline_flow, qa_flow,
+             drift_simulation_flow, synthetic_generation_flow, maintenance_flow
+    </description>
+
+    <tasks>
+      <task id="4.1" title="Wire structured logging into all GPU flows (4 files)">
+        <tdd-spec>
+          RED: For each GPU flow file, AST test verifying:
+          (a) Imports StructuredLogger from observability.structured_logging
+              OR imports flow_observability_context from observability.flow_observability
+          (b) Creates a StructuredLogger or flow_observability_context with the flow name
+          (c) Calls log_flow_start() (directly or via context manager)
+
+          Also verify configure_flow_logging() is called in each GPU flow
+          (currently only in hpo_flow.py).
+        </tdd-spec>
+        <deliverable>
+          src/minivess/orchestration/flows/train_flow.py (modified)
+          src/minivess/orchestration/flows/hpo_flow.py (modified)
+          src/minivess/orchestration/flows/post_training_flow.py (modified)
+          src/minivess/orchestration/flows/analysis_flow.py (modified)
+        </deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_flows_structured_logging.py</test-file>
+      </task>
+
+      <task id="4.2" title="Wire structured logging into all CPU flows (11 files)">
+        <tdd-spec>
+          RED: For each CPU flow file, AST test verifying:
+          (a) Imports StructuredLogger or flow_observability_context
+          (b) Creates a StructuredLogger with the flow name
+          (c) Calls log_flow_start() (directly or via context manager)
+          (d) Calls configure_flow_logging() for durable JSONL output
+
+          The 11 CPU flow files:
+            data_flow.py, biostatistics_flow.py, acquisition_flow.py,
+            deploy_flow.py, dashboard_flow.py, annotation_flow.py,
+            pipeline_flow.py, qa_flow.py, drift_simulation_flow.py,
+            synthetic_generation_flow.py, maintenance_flow.py
+        </tdd-spec>
+        <deliverable>All 11 CPU flow files (modified — ~5-8 lines each)</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_flows_structured_logging.py (same file)</test-file>
+      </task>
+
+      <task id="4.3" title="Create comprehensive AST enforcement test for ALL flows">
+        <tdd-spec>
+          RED: A SINGLE test file that parametrizes over ALL 15 flow files and verifies:
+          (a) Each file imports StructuredLogger OR flow_observability_context
+          (b) Each file calls configure_flow_logging() for durable JSONL
+
+          The flow file list is maintained as a constant in the test, matching the
+          actual files in src/minivess/orchestration/flows/.
+
+          ADDITIONALLY: A discovery test that scans the flows/ directory for *_flow.py
+          files and verifies that every discovered file is in the parametrized list.
+          This catches new flow files added without observability wiring.
+        </tdd-spec>
+        <deliverable>tests/v2/unit/orchestration/test_all_flows_structured_logging.py</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_flows_structured_logging.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - ALL 15 flow files emit flow_start/flow_end structured events
+      - ALL 15 flow files write durable JSONL logs via configure_flow_logging()
+      - Discovery test catches any new flow file added without observability
+      - LOGS_DIR/{flow_name}.jsonl created for every flow
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 5: Apply Prefect Task Hooks to ALL @task Decorators     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="5" title="Apply Prefect Task Timing Hooks to ALL 76 @task Decorators">
+    <description>
+      create_task_timing_hooks() exists in prefect_hooks.py but is NOT applied
+      to ANY @task decorator in any flow file. This phase applies the hooks to
+      ALL 76 @task decorators across 15 flow files.
+
+      Implementation approach:
+        Each flow file gets these additions at the module level:
+        ```python
+        from minivess.observability.prefect_hooks import create_task_timing_hooks
+        _on_complete, _on_fail = create_task_timing_hooks()
+        ```
+
+        Then every @task decorator changes from:
+        ```python
+        @task(name="task-name")
+        ```
+        to:
+        ```python
+        @task(name="task-name", on_completion=[_on_complete], on_failure=[_on_fail])
+        ```
+
+      This provides:
+        - Task name + duration logged on completion
+        - Task name + duration + error type logged on failure
+        - All visible in Prefect UI + Docker logs + JSONL
+
+      BREAKDOWN by file (76 total @task decorators):
+        data_flow.py:              15 tasks
+        biostatistics_flow.py:     15 tasks
+        analysis_flow.py:          14 tasks
+        acquisition_flow.py:        6 tasks
+        deploy_flow.py:             5 tasks
+        dashboard_flow.py:          5 tasks
+        train_flow.py:              4 tasks
+        qa_flow.py:                 3 tasks
+        drift_simulation_flow.py:   3 tasks
+        annotation_flow.py:         2 tasks
+        synthetic_generation_flow.py: 1 task
+        post_training_flow.py:      1 task
+        pipeline_flow.py:           1 task
+        maintenance_flow.py:        1 task
+        hpo_flow.py:                1 task
+    </description>
+
+    <tasks>
+      <task id="5.1" title="Apply hooks to high-task-count flows (data, biostat, analysis)">
+        <tdd-spec>
+          RED: AST test verifying that every @task decorator in data_flow.py,
+          biostatistics_flow.py, and analysis_flow.py includes on_completion
+          and on_failure keyword arguments.
+
+          AST inspection strategy:
+          1. Parse file with ast.parse()
+          2. Walk the AST looking for FunctionDef nodes decorated with @task
+          3. For each @task Call node, verify it has keyword arguments named
+             "on_completion" and "on_failure"
+          4. Verify the keyword values reference _on_complete and _on_fail
+
+          GREEN: Add the import + variable definition at module level, then
+          modify each @task decorator to include the hooks.
+        </tdd-spec>
+        <deliverable>
+          src/minivess/orchestration/flows/data_flow.py (modified — 15 @task updated)
+          src/minivess/orchestration/flows/biostatistics_flow.py (modified — 15 @task updated)
+          src/minivess/orchestration/flows/analysis_flow.py (modified — 14 @task updated)
+        </deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_tasks_have_hooks.py</test-file>
+      </task>
+
+      <task id="5.2" title="Apply hooks to medium-task-count flows (acq, deploy, dash, train, qa, drift)">
+        <tdd-spec>
+          RED: Same AST test pattern as 5.1, parametrized for:
+          acquisition_flow.py (6), deploy_flow.py (5), dashboard_flow.py (5),
+          train_flow.py (4), qa_flow.py (3), drift_simulation_flow.py (3)
+        </tdd-spec>
+        <deliverable>6 flow files modified</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_tasks_have_hooks.py (same file)</test-file>
+      </task>
+
+      <task id="5.3" title="Apply hooks to low-task-count flows (annotation, synthetic, post_training, pipeline, maintenance, hpo)">
+        <tdd-spec>
+          RED: Same AST test pattern for remaining 6 files with 1-2 tasks each:
+          annotation_flow.py (2), synthetic_generation_flow.py (1),
+          post_training_flow.py (1), pipeline_flow.py (1),
+          maintenance_flow.py (1), hpo_flow.py (1)
+        </tdd-spec>
+        <deliverable>6 flow files modified</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_tasks_have_hooks.py (same file)</test-file>
+      </task>
+
+      <task id="5.4" title="Create comprehensive AST enforcement test for ALL @task hooks">
+        <tdd-spec>
+          RED: A SINGLE test file that:
+          1. Discovers all *_flow.py files in src/minivess/orchestration/flows/
+          2. Parses each with ast.parse()
+          3. Finds ALL @task-decorated functions
+          4. Verifies EVERY @task has on_completion and on_failure kwargs
+          5. Reports WHICH tasks are missing hooks (for easy fixing)
+
+          Additionally:
+          6. Counts total @task decorators found and asserts >= 76 (catches
+             accidental removal of @task decorators)
+          7. Verifies each file imports create_task_timing_hooks
+        </tdd-spec>
+        <deliverable>tests/v2/unit/orchestration/test_all_tasks_have_hooks.py</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_all_tasks_have_hooks.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - ALL 76 @task decorators have on_completion + on_failure hooks
+      - AST enforcement test catches any new @task added without hooks
+      - Total task count assertion prevents accidental decorator removal
+      - Task timing visible in Prefect UI for ALL tasks
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 6: CPU Flow Healthcheck Script                          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="6" title="CPU Flow Healthcheck Script">
+    <description>
+      The existing healthcheck_training.py checks heartbeat.json staleness — this
+      is appropriate for GPU flows that write heartbeat via GpuHeartbeatMonitor.
+      CPU flows do NOT have a heartbeat monitor (they don't use GPU), so they
+      need a different health check strategy.
+
+      CPU flow health check strategy:
+        1. Check if the flow's JSONL log file exists (written by configure_flow_logging)
+        2. Check if the JSONL file has been updated within the last N minutes
+        3. Check if the main flow process is alive (PID 1 in container)
+
+      This is simpler than the GPU heartbeat check but still catches:
+        - Flow that crashed silently
+        - Flow that hung without producing output
+        - Container alive but flow process dead
+
+      The script uses ONLY stdlib (same constraint as healthcheck_training.py).
+    </description>
+
+    <tasks>
+      <task id="6.1" title="Create scripts/healthcheck_cpu_flow.py">
+        <tdd-spec>
+          RED: Test the health check script that:
+          (a) Reads LOGS_DIR and FLOW_NAME from environment variables
+          (b) Checks if LOGS_DIR/{FLOW_NAME}.jsonl exists
+          (c) Returns exit 0 if the JSONL file was modified in the last
+              STALL_THRESHOLD_MINUTES (default 30)
+          (d) Returns exit 1 if the JSONL file is stale or missing
+          (e) Returns exit 0 during grace period (HEALTH_GRACE_PERIOD_MINUTES, default 10)
+          (f) Uses ONLY stdlib — no minivess package imports
+          (g) Handles edge case: flow just started, JSONL not yet created
+
+          Test with tmp_path for LOGS_DIR, monkeypatch for env vars.
+        </tdd-spec>
+        <deliverable>scripts/healthcheck_cpu_flow.py</deliverable>
+        <test-file>tests/v2/unit/scripts/test_healthcheck_cpu_flow.py</test-file>
+      </task>
+
+      <task id="6.2" title="Verify both healthcheck scripts use only stdlib">
+        <tdd-spec>
+          RED: Test that both healthcheck_training.py and healthcheck_cpu_flow.py:
+          (a) Do NOT import anything from the minivess package
+          (b) Do NOT import any third-party package (only stdlib modules)
+          (c) AST inspection: scan all ImportFrom and Import nodes, verify
+              each module is in a known stdlib set
+
+          This ensures the scripts work in ANY container, regardless of which
+          tier's base image it uses.
+        </tdd-spec>
+        <deliverable>tests/v2/unit/scripts/test_healthcheck_stdlib_only.py</deliverable>
+        <test-file>tests/v2/unit/scripts/test_healthcheck_stdlib_only.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - healthcheck_cpu_flow.py works for all CPU flow containers
+      - Uses JSONL file staleness as health signal (not heartbeat.json)
+      - Respects grace period for slow-starting flows
+      - Uses only stdlib — works in any container tier
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 7: Docker Compose Health Checks for ALL Services        -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="7" title="Apply Docker HEALTHCHECK to ALL Flow Services in Compose">
+    <description>
+      The first pass DOCUMENTED healthcheck stanzas (docs/planning/docker-healthcheck-stanzas.md)
+      but did NOT apply them to docker-compose.flows.yml. This phase applies health checks
+      to ALL flow services — both GPU (using healthcheck_training.py) and CPU (using
+      healthcheck_cpu_flow.py).
+
+      The user has authorized compose YAML changes by requesting "full coverage."
+
+      GPU services (use heartbeat-based healthcheck):
+        train, hpo, hpo-worker, post_training, analyze
+
+      CPU services (use JSONL-based healthcheck):
+        acquisition, data, deploy, dashboard, biostatistics, annotation, pipeline
+
+      Non-flow services (no healthcheck — they are static servers):
+        dashboard-api, dashboard-ui, monai-label, gpu-benchmark
+
+      For healthcheck to work, the scripts must be COPYed into the Docker images.
+      Current Dockerfiles already COPY scripts/ (verified in first pass), but we
+      need to verify this for ALL flow Dockerfiles.
+
+      NOTE: We add healthcheck stanza AND the required env vars
+      (STALL_THRESHOLD_MINUTES, HEALTH_GRACE_PERIOD_MINUTES) to x-common-env.
+    </description>
+
+    <tasks>
+      <task id="7.1" title="Add healthcheck to GPU services in docker-compose.flows.yml">
+        <tdd-spec>
+          RED: Test (YAML parsing, NOT regex) that docker-compose.flows.yml:
+          (a) train service has healthcheck with test containing "healthcheck_training.py"
+          (b) hpo service has healthcheck with test containing "healthcheck_training.py"
+          (c) post_training service has healthcheck with test containing "healthcheck_training.py"
+          (d) analyze service has healthcheck with test containing "healthcheck_training.py"
+          (e) All healthchecks have interval, timeout, retries, start_period
+          (f) start_period >= 300s (5 min minimum for GPU flow startup)
+
+          GREEN: Add healthcheck stanzas to each GPU service definition.
+          Use the stanzas from docs/planning/docker-healthcheck-stanzas.md as reference.
+        </tdd-spec>
+        <deliverable>deployment/docker-compose.flows.yml (modified)</deliverable>
+        <test-file>tests/v2/unit/deployment/test_compose_healthchecks.py</test-file>
+      </task>
+
+      <task id="7.2" title="Add healthcheck to CPU services in docker-compose.flows.yml">
+        <tdd-spec>
+          RED: Test (YAML parsing) that docker-compose.flows.yml:
+          (a) acquisition service has healthcheck with "healthcheck_cpu_flow.py"
+          (b) data service has healthcheck with "healthcheck_cpu_flow.py"
+          (c) deploy service has healthcheck with "healthcheck_cpu_flow.py"
+          (d) dashboard service has healthcheck with "healthcheck_cpu_flow.py"
+          (e) biostatistics service has healthcheck with "healthcheck_cpu_flow.py"
+          (f) annotation service has healthcheck with "healthcheck_cpu_flow.py"
+          (g) pipeline service has healthcheck with "healthcheck_cpu_flow.py"
+          (h) All with start_period >= 120s (2 min for CPU flow startup)
+        </tdd-spec>
+        <deliverable>deployment/docker-compose.flows.yml (modified)</deliverable>
+        <test-file>tests/v2/unit/deployment/test_compose_healthchecks.py (same file)</test-file>
+      </task>
+
+      <task id="7.3" title="Add healthcheck env vars to x-common-env">
+        <tdd-spec>
+          RED: Test (YAML parsing) that docker-compose.flows.yml x-common-env contains:
+          (a) STALL_THRESHOLD_MINUTES: ${STALL_THRESHOLD_MINUTES:-30}
+          (b) HEALTH_GRACE_PERIOD_MINUTES: ${HEALTH_GRACE_PERIOD_MINUTES:-10}
+
+          Also test that .env.example contains these variables with matching defaults.
+        </tdd-spec>
+        <deliverable>
+          deployment/docker-compose.flows.yml (x-common-env modified)
+          .env.example (appended)
+        </deliverable>
+        <test-file>tests/v2/unit/deployment/test_compose_healthchecks.py (same file)</test-file>
+      </task>
+
+      <task id="7.4" title="Verify healthcheck scripts are COPYed in ALL flow Dockerfiles">
+        <tdd-spec>
+          RED: For each Dockerfile in deployment/docker/ that corresponds to a flow
+          service (Dockerfile.train, Dockerfile.hpo, etc.), verify via file content
+          inspection (NOT regex — read + str.partition/split) that:
+          (a) The Dockerfile has a COPY instruction that includes the scripts/ directory
+          (b) The scripts directory is available at runtime (not only in builder stage)
+
+          Use Path.read_text() + line iteration + str.startswith("COPY").
+        </tdd-spec>
+        <deliverable>tests/v2/unit/deployment/test_healthcheck_in_all_images.py</deliverable>
+        <test-file>tests/v2/unit/deployment/test_healthcheck_in_all_images.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - ALL GPU flow services have heartbeat-based Docker HEALTHCHECK
+      - ALL CPU flow services have JSONL-based Docker HEALTHCHECK
+      - docker ps shows health status for all flow containers
+      - Stuck containers detected within stall_threshold + retries interval
+      - .env.example updated with healthcheck configuration variables
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 8: .env.example Comprehensive Update                    -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="8" title=".env.example — All Observability Variables in One Batch">
+    <description>
+      Per Rule #22 (Single-Source Config via .env.example), ALL configurable
+      observability values must be in .env.example FIRST. This phase adds a
+      dedicated "Observability" section to .env.example with all variables
+      from the first and second pass.
+
+      New variables to add (if not already present):
+        GPU_HEARTBEAT_INTERVAL_S=30
+        GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT=5
+        GPU_HEARTBEAT_ALERT_AFTER_S=120
+        STALL_THRESHOLD_MINUTES=30
+        HEALTH_GRACE_PERIOD_MINUTES=10
+        OTEL_EXPORTER_OTLP_ENDPOINT=http://minivess-grafana-lgtm:4318
+
+      Variables already present (verify, do not duplicate):
+        GRAFANA_PORT=3000
+        GRAFANA_USER=admin
+        GRAFANA_PASSWORD=admin
+        PROMETHEUS_PORT=9090
+        OTEL_GRPC_PORT=4317
+        OTEL_HTTP_PORT=4318
+    </description>
+
+    <tasks>
+      <task id="8.1" title="Add observability section to .env.example">
+        <tdd-spec>
+          RED: Test that .env.example contains ALL observability variables:
+          - GPU_HEARTBEAT_INTERVAL_S
+          - GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT
+          - GPU_HEARTBEAT_ALERT_AFTER_S
+          - STALL_THRESHOLD_MINUTES
+          - HEALTH_GRACE_PERIOD_MINUTES
+          - OTEL_EXPORTER_OTLP_ENDPOINT
+
+          Use the existing test_env_single_source.py pattern: read the file,
+          parse variable names (str.split("=")[0]), verify expected set is present.
+
+          GREEN: Append the variables to .env.example under a new section header.
+        </tdd-spec>
+        <deliverable>.env.example (appended)</deliverable>
+        <test-file>tests/v2/unit/test_env_single_source.py (extended — add new vars to expected set)</test-file>
+      </task>
+
+      <task id="8.2" title="Add heartbeat env vars to x-common-env in compose">
+        <tdd-spec>
+          RED: Test (YAML parsing) that docker-compose.flows.yml x-common-env contains:
+          - GPU_HEARTBEAT_INTERVAL_S: ${GPU_HEARTBEAT_INTERVAL_S:-30}
+          - GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT: ${GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT:-5}
+          - GPU_HEARTBEAT_ALERT_AFTER_S: ${GPU_HEARTBEAT_ALERT_AFTER_S:-120}
+
+          GREEN: Add the variables to the x-common-env anchor.
+        </tdd-spec>
+        <deliverable>deployment/docker-compose.flows.yml (x-common-env modified)</deliverable>
+        <test-file>tests/v2/unit/deployment/test_compose_healthchecks.py (extended)</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - ALL observability env vars in .env.example
+      - ALL env vars referenced in docker-compose.flows.yml x-common-env
+      - No hardcoded values in Python code (functions read from env or config)
+      - test_env_single_source.py catches any missing variable
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 9: Apply Grafana LGTM + OTEL to Docker Compose          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="9" title="Apply Grafana LGTM + OTEL Stanzas to Docker Compose">
+    <description>
+      The first pass created documentation for the Grafana LGTM stack
+      (docs/planning/grafana-lgtm-compose-stanza.md) and Prefect OTEL config
+      (docs/planning/prefect-otel-config.md). This phase applies these stanzas
+      to the actual docker-compose.yml infrastructure file.
+
+      Changes to docker-compose.yml (infra stack):
+        1. Add grafana-lgtm service (Grafana + OTel Collector + Prometheus + Tempo + Loki)
+        2. Add OTEL_EXPORTER_OTLP_ENDPOINT to the environment for flow containers
+
+      Changes to docker-compose.flows.yml:
+        1. Add OTEL_EXPORTER_OTLP_ENDPOINT to x-common-env
+
+      This enables:
+        - Prefect traces exported to Grafana via OTLP
+        - Training metrics visible in Grafana dashboards
+        - Log aggregation in Loki
+        - Trace visualization in Tempo
+
+      NOTE: grafana-lgtm is an OPTIONAL profile (--profile observability) so it
+      does not add startup overhead for basic development.
+    </description>
+
+    <tasks>
+      <task id="9.1" title="Add grafana-lgtm service to docker-compose.yml">
+        <tdd-spec>
+          RED: Test (YAML parsing) that docker-compose.yml contains a service
+          named "grafana-lgtm" with:
+          (a) image: grafana/otel-lgtm:latest
+          (b) container_name containing "grafana-lgtm" or "otel-lgtm"
+          (c) ports including 4317 (OTLP gRPC) and 4318 (OTLP HTTP)
+          (d) networks including "minivess"
+          (e) profiles including "observability" (optional activation)
+
+          GREEN: Add the service from grafana-lgtm-compose-stanza.md with
+          the observability profile gate.
+        </tdd-spec>
+        <deliverable>deployment/docker-compose.yml (modified)</deliverable>
+        <test-file>tests/v2/unit/deployment/test_compose_observability_stack.py</test-file>
+      </task>
+
+      <task id="9.2" title="Add OTEL endpoint to docker-compose.flows.yml x-common-env">
+        <tdd-spec>
+          RED: Test (YAML parsing) that docker-compose.flows.yml x-common-env
+          contains OTEL_EXPORTER_OTLP_ENDPOINT with a sensible default pointing
+          to the grafana-lgtm container.
+
+          GREEN: Add the variable to x-common-env.
+        </tdd-spec>
+        <deliverable>deployment/docker-compose.flows.yml (x-common-env modified)</deliverable>
+        <test-file>tests/v2/unit/deployment/test_compose_observability_stack.py (same file)</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - grafana-lgtm service available behind --profile observability
+      - OTEL endpoint configured in x-common-env for all flow containers
+      - Does NOT increase default startup time (profile-gated)
+      - All tests in make test-staging
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 10: Wire Stall Detection into Heartbeat Monitor         -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="10" title="Wire MLflow Stall Detection into GpuHeartbeatMonitor">
+    <description>
+      stall_detection.py (detect_mlflow_metric_stall) exists but is NOT wired
+      into the heartbeat monitor. This phase connects them so that the heartbeat
+      monitor periodically checks for MLflow metric staleness IN ADDITION to
+      GPU utilization checks.
+
+      This catches the scenario where:
+        - Container is healthy (heartbeat updating)
+        - GPU is utilized (model loaded, gradients computed)
+        - BUT no new metrics are being logged to MLflow (logging bug, MLflow down)
+
+      The check is OPTIONAL — if MLflow is not available or no run_id is set,
+      the stall check is silently skipped (graceful degradation).
+    </description>
+
+    <tasks>
+      <task id="10.1" title="Add MLflow stall check to GpuHeartbeatMonitor">
+        <tdd-spec>
+          RED: Test that GpuHeartbeatMonitor:
+          (a) Accepts an optional mlflow_run_id parameter
+          (b) When mlflow_run_id is set, calls detect_mlflow_metric_stall()
+              periodically (every N heartbeat cycles, not every cycle — avoid MLflow spam)
+          (c) When stall detected, logs ERROR with stall result details
+          (d) When mlflow_run_id is None, skips the check silently
+          (e) When MLflow is unavailable (ImportError), skips gracefully
+
+          Test with mocked detect_mlflow_metric_stall() returning various StallResults.
+        </tdd-spec>
+        <deliverable>src/minivess/observability/gpu_heartbeat.py (extended)</deliverable>
+        <test-file>tests/v2/unit/observability/test_gpu_heartbeat_stall_integration.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - Heartbeat monitor checks MLflow staleness when run_id available
+      - Graceful degradation when MLflow unavailable
+      - Stall check frequency configurable (not every heartbeat cycle)
+      - ERROR logged with actionable details when stall detected
+      - All tests in make test-staging (mocked MLflow)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- PHASE 11: Observability Contract Enforcement Meta-Test         -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <phase id="11" title="Observability Contract Enforcement — Meta-Test Suite">
+    <description>
+      Create a SINGLE comprehensive meta-test that enforces the observability
+      contract across the entire codebase. This test runs at make test-staging
+      and catches ANY violation of the contract when new code is added.
+
+      The observability contract (must be satisfied by EVERY flow):
+        1. GPU flows: import + call require_cuda_context()
+        2. GPU flows: import + use GpuHeartbeatMonitor as context manager
+        3. ALL flows: import + use StructuredLogger or flow_observability_context
+        4. ALL flows: call configure_flow_logging()
+        5. ALL @task: on_completion + on_failure hooks
+        6. ALL services in compose: HEALTHCHECK stanza
+
+      The meta-test:
+        - Discovers all *_flow.py files in the flows/ directory
+        - Classifies each as GPU or CPU based on a constant mapping
+        - Runs all enforcement checks per classification
+        - Reports ALL violations in a single test run (not fail-fast)
+        - Prints a summary table: flow_name | cuda_guard | heartbeat | logging | hooks | compose_hc
+
+      This is the "guardrail" test — it prevents regression to the
+      first-pass pattern of "wire it into train and forget the rest."
+    </description>
+
+    <tasks>
+      <task id="11.1" title="Create tests/v2/unit/orchestration/test_observability_contract.py">
+        <tdd-spec>
+          RED: The meta-test that:
+          1. Scans src/minivess/orchestration/flows/ for all *_flow.py files
+          2. For each file, parses AST and checks:
+             - GPU flows: require_cuda_context import + call
+             - GPU flows: GpuHeartbeatMonitor import + with statement
+             - ALL flows: StructuredLogger or flow_observability_context import
+             - ALL flows: configure_flow_logging call
+             - ALL @task: on_completion + on_failure kwargs
+          3. Collects all violations without early exit
+          4. Reports violations as a formatted table in the assertion message
+          5. Fails if ANY violation exists
+
+          GPU flow list: ["train_flow.py", "hpo_flow.py", "post_training_flow.py", "analysis_flow.py"]
+          CPU flow list: everything else that matches *_flow.py
+
+          Additionally:
+          6. Parses docker-compose.flows.yml and verifies each flow service has
+             a healthcheck stanza (YAML parsing, not regex)
+          7. Cross-references the flow file list with the compose service list
+             to ensure completeness
+
+          CRITICAL: The GPU flow list is defined as a CONSTANT in this test.
+          When a new GPU flow is added, the developer MUST add it to this list
+          or the test fails. This is intentional — it forces conscious acknowledgment
+          of the observability contract.
+        </tdd-spec>
+        <deliverable>tests/v2/unit/orchestration/test_observability_contract.py</deliverable>
+        <test-file>tests/v2/unit/orchestration/test_observability_contract.py</test-file>
+      </task>
+    </tasks>
+
+    <success-criteria>
+      - Single test file enforces the COMPLETE observability contract
+      - Any new flow file without observability wiring breaks the test
+      - Any new @task without hooks breaks the test
+      - Any compose service without healthcheck breaks the test
+      - Violation report is human-readable (table format)
+      - Test runs in make test-staging (&lt;10s)
+    </success-criteria>
+  </phase>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- EXECUTION ORDER AND DEPENDENCIES                              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <execution-order>
+    <note>
+      Phases can be executed in groups with clear dependencies:
+
+      GROUP 1 (Foundation — no dependencies):
+        Phase 1: Observability helpers
+        Phase 6: CPU healthcheck script
+        Phase 8: .env.example update
+
+      GROUP 2 (GPU flow wiring — depends on Phase 1):
+        Phase 2: CUDA guard for all GPU flows
+        Phase 3: Heartbeat for all GPU flows
+        Phase 10: Stall detection integration
+
+      GROUP 3 (All-flow wiring — depends on Phase 1):
+        Phase 4: Structured logging for all flows
+        Phase 5: Task hooks for all flows
+
+      GROUP 4 (Docker Compose — depends on Phases 6, 8):
+        Phase 7: Compose healthchecks
+        Phase 9: Grafana LGTM + OTEL compose
+
+      GROUP 5 (Enforcement — depends on all above):
+        Phase 11: Meta-test enforcement suite
+
+      Recommended execution order:
+        Phase 1 → Phase 8 → Phase 6 →
+        Phase 2 → Phase 3 → Phase 10 →
+        Phase 4 → Phase 5 →
+        Phase 7 → Phase 9 →
+        Phase 11
+    </note>
+  </execution-order>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TOTAL DELIVERABLE SUMMARY                                     -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+
+  <deliverable-summary>
+    <new-files>
+      <file>src/minivess/observability/flow_observability.py</file>
+      <file>scripts/healthcheck_cpu_flow.py</file>
+      <file>tests/v2/unit/observability/test_flow_observability.py</file>
+      <file>tests/v2/unit/orchestration/test_all_gpu_flows_cuda_guard.py</file>
+      <file>tests/v2/unit/orchestration/test_all_gpu_flows_heartbeat.py</file>
+      <file>tests/v2/unit/orchestration/test_all_flows_structured_logging.py</file>
+      <file>tests/v2/unit/orchestration/test_all_tasks_have_hooks.py</file>
+      <file>tests/v2/unit/scripts/test_healthcheck_cpu_flow.py</file>
+      <file>tests/v2/unit/scripts/test_healthcheck_stdlib_only.py</file>
+      <file>tests/v2/unit/deployment/test_compose_healthchecks.py</file>
+      <file>tests/v2/unit/deployment/test_compose_observability_stack.py</file>
+      <file>tests/v2/unit/deployment/test_healthcheck_in_all_images.py</file>
+      <file>tests/v2/unit/observability/test_gpu_heartbeat_stall_integration.py</file>
+      <file>tests/v2/unit/orchestration/test_observability_contract.py</file>
+    </new-files>
+
+    <modified-files>
+      <!-- All 15 flow files — structured logging + task hooks -->
+      <file>src/minivess/orchestration/flows/train_flow.py</file>
+      <file>src/minivess/orchestration/flows/hpo_flow.py</file>
+      <file>src/minivess/orchestration/flows/post_training_flow.py</file>
+      <file>src/minivess/orchestration/flows/analysis_flow.py</file>
+      <file>src/minivess/orchestration/flows/data_flow.py</file>
+      <file>src/minivess/orchestration/flows/biostatistics_flow.py</file>
+      <file>src/minivess/orchestration/flows/acquisition_flow.py</file>
+      <file>src/minivess/orchestration/flows/deploy_flow.py</file>
+      <file>src/minivess/orchestration/flows/dashboard_flow.py</file>
+      <file>src/minivess/orchestration/flows/annotation_flow.py</file>
+      <file>src/minivess/orchestration/flows/pipeline_flow.py</file>
+      <file>src/minivess/orchestration/flows/qa_flow.py</file>
+      <file>src/minivess/orchestration/flows/drift_simulation_flow.py</file>
+      <file>src/minivess/orchestration/flows/synthetic_generation_flow.py</file>
+      <file>src/minivess/orchestration/flows/maintenance_flow.py</file>
+
+      <!-- Observability modules -->
+      <file>src/minivess/observability/gpu_heartbeat.py</file>
+
+      <!-- Docker Compose -->
+      <file>deployment/docker-compose.flows.yml</file>
+      <file>deployment/docker-compose.yml</file>
+
+      <!-- Config -->
+      <file>.env.example</file>
+
+      <!-- Existing test extensions -->
+      <file>tests/v2/unit/test_env_single_source.py</file>
+    </modified-files>
+
+    <total-new-files>14</total-new-files>
+    <total-modified-files>21</total-modified-files>
+    <total-new-test-files>14</total-new-test-files>
+    <estimated-test-count>~85 new tests</estimated-test-count>
+  </deliverable-summary>
+</plan>

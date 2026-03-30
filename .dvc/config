@@ -1,11 +1,14 @@
 [core]
-    remote = minio
+    remote = dagshub
 ['remote "minio"']
     url = s3://dvc-data
     endpointurl = http://localhost:9000
     access_key_id = minioadmin
     secret_access_key = minioadmin
-# remote_storage (s3://minivessdataset) REMOVED — AWS is BANNED. See CLAUDE.md.
-# remote_readonly REMOVED — same reason.
 ['remote "gcs"']
     url = gs://minivess-mlops-dvc-data
+['remote "dagshub"']
+    url = s3://dvc
+    endpointurl = https://dagshub.com/petteriTeikari/vascadia.s3
+    access_key_id = d1fa831872a7bc08f2d786f01f1fe2dbe6fd99ac
+    secret_access_key = d1fa831872a7bc08f2d786f01f1fe2dbe6fd99ac

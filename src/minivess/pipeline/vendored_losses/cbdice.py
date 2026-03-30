@@ -39,7 +39,7 @@ class CenterlineBoundaryDiceLoss(nn.Module):
         lambda_cl: float = 0.3,
         lambda_bd: float = 0.3,
         *,
-        smooth: float = 1e-5,
+        smooth: float = 1.0,  # MONAI default — 1e-5 causes NaN with mixed precision
         softmax: bool = True,
     ) -> None:
         super().__init__()
@@ -79,7 +79,7 @@ class CenterlineBoundaryDiceLoss(nn.Module):
 
         # Centerline weighting: approximate centerline via erosion-like distance
         # Uses average pooling as a soft distance proxy
-        cl_weight = self._soft_distance_weight(labels_onehot, kernel_size=5)
+        cl_weight = self._soft_distance_weight(labels_onehot, kernel_size=5).clamp(min=1e-6)
         cl_intersection = (probs * labels_onehot * cl_weight).sum(dim=spatial_dims)
         cl_union = (probs * cl_weight).sum(dim=spatial_dims) + (
             labels_onehot * cl_weight
@@ -88,7 +88,7 @@ class CenterlineBoundaryDiceLoss(nn.Module):
         cl_loss = 1.0 - cl_dice.mean()
 
         # Boundary weighting: approximate boundary via gradient magnitude
-        bd_weight = self._boundary_weight(labels_onehot)
+        bd_weight = self._boundary_weight(labels_onehot).clamp(min=1e-6)
         bd_intersection = (probs * labels_onehot * bd_weight).sum(dim=spatial_dims)
         bd_union = (probs * bd_weight).sum(dim=spatial_dims) + (
             labels_onehot * bd_weight
@@ -121,7 +121,11 @@ class CenterlineBoundaryDiceLoss(nn.Module):
 
         flat = labels_onehot.reshape(b * c, 1, *spatial_dims)
         pad = effective_ks // 2
-        avg = F.avg_pool3d(flat, kernel_size=effective_ks, stride=1, padding=pad)
+        # Cast to float32 for avg_pool3d — BFloat16 not supported on Turing GPUs
+        # (RTX 2070 Super). See: CLAUDE.md T4 ban, same Turing architecture limitation.
+        input_dtype = flat.dtype
+        avg = F.avg_pool3d(flat.float(), kernel_size=effective_ks, stride=1, padding=pad)
+        avg = avg.to(input_dtype)
         # Centerline-like: high weight where label is present but far from boundary
         weight = avg * flat  # values near 1 at center, near 0 at edges
         return weight.reshape(b, c, *spatial_dims)

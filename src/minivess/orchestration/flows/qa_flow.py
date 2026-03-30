@@ -18,20 +18,24 @@ from typing import Any
 
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
+
+# QA was merged into the dashboard health adapter (#342, PR #567).
+# backward compatibility until this module is fully retired.
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.docker_guard import require_docker_context
 
-# QA was merged into the dashboard health adapter (#342, PR #567).
-# FLOW_NAME_QA removed from orchestration.constants; defined locally for
-# backward compatibility until this module is fully retired.
 FLOW_NAME_QA: str = "qa-flow"
 
 logger = logging.getLogger(__name__)
 
+_on_complete, _on_fail = create_task_timing_hooks()
 
-@task(name="check-backend-consistency")
+
+@task(name="check-backend-consistency", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_backend_consistency(tracking_uri: str) -> dict[str, Any]:
     """Check MLflow backend type and warn on local filesystem.
 
@@ -65,7 +69,7 @@ def check_backend_consistency(tracking_uri: str) -> dict[str, Any]:
     }
 
 
-@task(name="check-run-params")
+@task(name="check-run-params", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_run_params(run: Any) -> dict[str, Any]:
     """Check that a run has all required parameters.
 
@@ -97,7 +101,7 @@ def check_run_params(run: Any) -> dict[str, Any]:
     }
 
 
-@task(name="check-ghost-runs")
+@task(name="check-ghost-runs", on_completion=[_on_complete], on_failure=[_on_fail])
 def check_ghost_runs(
     client: Any,
     *,
@@ -219,43 +223,45 @@ def qa_flow(
     """
     require_docker_context("qa")
 
-    if tracking_uri is None:
-        tracking_uri = resolve_tracking_uri()
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("qa", logs_dir=logs_dir):
+        if tracking_uri is None:
+            tracking_uri = resolve_tracking_uri()
 
-    checks: list[dict[str, Any]] = []
+        checks: list[dict[str, Any]] = []
 
-    # Check 1: Backend consistency
-    backend_check = check_backend_consistency(tracking_uri)
-    checks.append(backend_check)
+        # Check 1: Backend consistency
+        backend_check = check_backend_consistency(tracking_uri)
+        checks.append(backend_check)
 
-    # Check 2: Ghost runs (if experiment IDs provided)
-    if experiment_ids:
-        from mlflow.tracking import MlflowClient
+        # Check 2: Ghost runs (if experiment IDs provided)
+        if experiment_ids:
+            from mlflow.tracking import MlflowClient
 
-        client = MlflowClient(tracking_uri=tracking_uri)
-        ghost_check = check_ghost_runs(client, experiment_ids=experiment_ids)
-        checks.append(ghost_check)
+            client = MlflowClient(tracking_uri=tracking_uri)
+            ghost_check = check_ghost_runs(client, experiment_ids=experiment_ids)
+            checks.append(ghost_check)
 
-    # Generate report
-    report = generate_qa_report(checks)
-    summary = summarize_qa_results(checks)
+        # Generate report
+        report = generate_qa_report(checks)
+        summary = summarize_qa_results(checks)
 
-    logger.info("QA flow complete: %s", summary)
-    logger.info("\n%s", report)
+        logger.info("QA flow complete: %s", summary)
+        logger.info("\n%s", report)
 
-    # Persist report to disk
-    report_dir = Path(os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard"))
-    report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / "qa_report.md"
-    report_path.write_text(report, encoding="utf-8")
-    logger.info("QA report saved: %s", report_path)
+        # Persist report to disk
+        report_dir = Path(os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard"))
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "qa_report.md"
+        report_path.write_text(report, encoding="utf-8")
+        logger.info("QA report saved: %s", report_path)
 
-    return {
-        "checks": checks,
-        "summary": summary,
-        "report": report,
-        "report_path": str(report_path),
-    }
+        return {
+            "checks": checks,
+            "summary": summary,
+            "report": report,
+            "report_path": str(report_path),
+        }
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 domain: cloud
 description: >
   Cloud provider architecture, data storage, DVC remotes, environment mapping.
-  TWO providers: RunPod (env/dev) + GCP (staging/prod). No others without explicit user authorization.
+  RunPod (primary compute) + DagsHub (experiment tracking + DVC storage).
+  GCP demoted to "documented alternative for well-funded labs" after 26h GPU drought (2026-03-29).
   Each Prefect flow has an INDEPENDENTLY configurable compute target — no flow is hardcoded to any
   provider. Researchers decide where each flow runs via Prefect deployment config.
-last_reviewed: "2026-03-17"
+last_reviewed: "2026-03-29"
 
 decisions:
   cloud_provider_selection:

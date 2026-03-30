@@ -7,17 +7,17 @@ session, and optionally computes agreement with a reference segmentation.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.serving.api_models import SegmentationRequest
@@ -26,7 +26,11 @@ if TYPE_CHECKING:
     from minivess.serving.api_models import SegmentationResponse
     from minivess.serving.inference_client import InferenceClient
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 @dataclass
@@ -110,7 +114,7 @@ def _compute_dice(
     return float(2.0 * intersection / total)
 
 
-@task(name="run-inference")
+@task(name="run-inference", on_completion=[_on_complete], on_failure=[_on_fail])
 def inference_task(
     volume: NDArray[np.float32],
     config: AnnotationFlowConfig,
@@ -127,7 +131,7 @@ def inference_task(
     return client.predict(request)
 
 
-@task(name="record-annotation")
+@task(name="record-annotation", on_completion=[_on_complete], on_failure=[_on_fail])
 def record_annotation_task(
     volume_id: str,
     response: SegmentationResponse,
@@ -186,18 +190,20 @@ def run_annotation_flow(
     """
     require_docker_context("annotation")
 
-    if config is None:
-        config = AnnotationFlowConfig()
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with flow_observability_context("annotation", logs_dir=logs_dir):
+        if config is None:
+            config = AnnotationFlowConfig()
 
-    client = _build_client(config)
-    response = inference_task(volume, config, client)
-    session_report, agreement = record_annotation_task(volume_id, response, reference)
+        client = _build_client(config)
+        response = inference_task(volume, config, client)
+        session_report, agreement = record_annotation_task(volume_id, response, reference)
 
-    return AnnotationFlowResult(
-        response=response.to_dict(),
-        session_report=session_report,
-        agreement_dice=agreement,
-    )
+        return AnnotationFlowResult(
+            response=response.to_dict(),
+            session_report=session_report,
+            agreement_dice=agreement,
+        )
 
 
 if __name__ == "__main__":

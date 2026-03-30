@@ -34,6 +34,7 @@ from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleSpec,
 )
+from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
@@ -67,7 +68,11 @@ if TYPE_CHECKING:
     from minivess.data.test_datasets import HierarchicalDataLoaderDict
     from minivess.pipeline.evaluation_runner import EvaluationResult
 
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+
 logger = logging.getLogger(__name__)
+
+_on_complete, _on_fail = create_task_timing_hooks()
 
 
 def _validate_analysis_env() -> None:
@@ -400,7 +405,7 @@ def _run_mlflow_eval_safe(
 # ---------------------------------------------------------------------------
 
 
-@task(name="load-training-artifacts")
+@task(name="load-training-artifacts", on_completion=[_on_complete], on_failure=[_on_fail])
 def load_training_artifacts(
     eval_config: EvaluationConfig,
     model_config_dict: dict[str, Any],
@@ -437,7 +442,7 @@ def load_training_artifacts(
     return runs
 
 
-@task(name="discover-post-training-models")
+@task(name="discover-post-training-models", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_post_training_models(
     *,
     experiment_name: str = EXPERIMENT_POST_TRAINING,
@@ -501,7 +506,7 @@ def discover_post_training_models(
         return []
 
 
-@task(name="discover-zero-shot-baselines")
+@task(name="discover-zero-shot-baselines", on_completion=[_on_complete], on_failure=[_on_fail])
 def discover_zero_shot_baselines(
     *,
     factorial_yaml: Path | None = None,
@@ -568,7 +573,7 @@ def discover_zero_shot_baselines(
     return baselines
 
 
-@task(name="predict-with-uncertainty")
+@task(name="predict-with-uncertainty", on_completion=[_on_complete], on_failure=[_on_fail])
 def predict_with_uncertainty(
     *,
     models: list[nn.Module],
@@ -610,7 +615,7 @@ def predict_with_uncertainty(
     }
 
 
-@task(name="build-ensembles")
+@task(name="build-ensembles", on_completion=[_on_complete], on_failure=[_on_fail])
 def build_ensembles(
     runs: list[dict[str, Any]],
     eval_config: EvaluationConfig,
@@ -651,7 +656,7 @@ def build_ensembles(
     return ensembles
 
 
-@task(name="log-models-to-mlflow")
+@task(name="log-models-to-mlflow", on_completion=[_on_complete], on_failure=[_on_fail])
 def log_models_to_mlflow(
     runs: list[dict[str, Any]],
     ensembles: dict[str, EnsembleSpec],
@@ -705,7 +710,7 @@ def log_models_to_mlflow(
     return model_uris
 
 
-@task(name="evaluate-all-models")
+@task(name="evaluate-all-models", on_completion=[_on_complete], on_failure=[_on_fail])
 def evaluate_all_models(
     single_models: dict[str, nn.Module],
     ensembles: dict[str, EnsembleSpec],
@@ -780,7 +785,7 @@ def evaluate_all_models(
     return all_results
 
 
-@task(name="evaluate-with-mlflow")
+@task(name="evaluate-with-mlflow", on_completion=[_on_complete], on_failure=[_on_fail])
 def evaluate_with_mlflow(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -822,7 +827,7 @@ def evaluate_with_mlflow(
     return mlflow_results
 
 
-@task(name="generate-comparison")
+@task(name="generate-comparison", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_comparison(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
 ) -> str:
@@ -896,7 +901,7 @@ def generate_comparison(
     return markdown
 
 
-@task(name="register-champion")
+@task(name="register-champion", on_completion=[_on_complete], on_failure=[_on_fail])
 def register_champion_task(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     eval_config: EvaluationConfig,
@@ -999,7 +1004,7 @@ def register_champion_task(
     }
 
 
-@task(name="tag-champion-models")
+@task(name="tag-champion-models", on_completion=[_on_complete], on_failure=[_on_fail])
 def tag_champion_models(
     analysis_entries: list[dict[str, Any]],
     runs: list[dict[str, Any]],
@@ -1086,7 +1091,7 @@ def tag_champion_models(
     }
 
 
-@task(name="generate-report")
+@task(name="generate-report", on_completion=[_on_complete], on_failure=[_on_fail])
 def generate_report(
     all_results: dict[str, dict[str, dict[str, EvaluationResult]]],
     comparison_md: str,
@@ -1173,7 +1178,7 @@ def generate_report(
     return report
 
 
-@task(name="summarize-experiment")
+@task(name="summarize-experiment", on_completion=[_on_complete], on_failure=[_on_fail])
 def summarize_experiment(
     all_results: dict[str, dict[str, dict[str, Any]]],
     promotion_info: dict[str, Any],
@@ -1660,7 +1665,7 @@ class EmbeddingDriftResult:
     mmd_statistic: float
 
 
-@task(name="embedding-drift")
+@task(name="embedding-drift", on_completion=[_on_complete], on_failure=[_on_fail])
 def embedding_drift_task(
     *,
     reference_embeddings: NDArray[np.float32],
@@ -1783,179 +1788,181 @@ def run_analysis_flow(
     """
     require_docker_context("analysis")
 
-    log = get_run_logger()
-    log.info("Starting analysis flow...")
+    logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
+    with gpu_flow_observability_context("analysis", logs_dir=logs_dir):
+        log = get_run_logger()
+        log.info("Starting analysis flow...")
 
-    # Preflight: validate required environment variables
-    _validate_analysis_env()
+        # Preflight: validate required environment variables
+        _validate_analysis_env()
 
-    # Step 0 (optional): Discover post-training models
-    post_training_models: list[dict[str, Any]] = []
-    if include_post_training:
-        post_training_models = discover_post_training_models(
+        # Step 0 (optional): Discover post-training models
+        post_training_models: list[dict[str, Any]] = []
+        if include_post_training:
+            post_training_models = discover_post_training_models(
+                tracking_uri=tracking_uri,
+            )
+            if post_training_models:
+                log.info(
+                    "Discovered %d post-training model(s) for evaluation",
+                    len(post_training_models),
+                )
+
+        # Step 0b: Auto-derive ensemble strategies from factorial YAML (Task 2.13)
+        factorial_yaml_path = os.environ.get("FACTORIAL_YAML")
+        if factorial_yaml_path:
+            override_strategies = _resolve_ensemble_strategies(
+                factorial_yaml=Path(factorial_yaml_path),
+            )
+            if override_strategies:
+                log.info(
+                    "Overriding ensemble strategies from factorial YAML: %s",
+                    override_strategies,
+                )
+
+        # Step 1: Load training artifacts
+        runs = load_training_artifacts(
+            eval_config, model_config_dict, tracking_uri=tracking_uri
+        )
+
+        # Step 2: Build ensembles
+        ensembles = build_ensembles(runs, eval_config, model_config_dict)
+
+        # Step 3: Log models as MLflow pyfunc artifacts
+        model_uris = log_models_to_mlflow(runs, ensembles, eval_config, model_config_dict)
+
+        # Step 4: Extract single-fold models from ensemble members
+        single_models = _extract_single_models_as_modules(ensembles)
+
+        # Step 5: Evaluate all models (single + ensemble with all members)
+        all_results = evaluate_all_models(
+            single_models,
+            ensembles,
+            dataloaders_dict,
+            eval_config,
+            output_dir=output_dir,
+        )
+
+        # Step 6: Run MLflow evaluate with custom metrics
+        mlflow_eval_results = evaluate_with_mlflow(all_results, eval_config)
+
+        # Step 7: Generate comparison
+        comparison_md = generate_comparison(all_results)
+
+        # Step 8: Register champion (with model URIs for actual registration)
+        promotion_info = register_champion_task(
+            all_results,
+            eval_config,
+            model_uris=model_uris,
+            environment=environment,
             tracking_uri=tracking_uri,
         )
-        if post_training_models:
-            log.info(
-                "Discovered %d post-training model(s) for evaluation",
-                len(post_training_models),
-            )
 
-    # Step 0b: Auto-derive ensemble strategies from factorial YAML (Task 2.13)
-    factorial_yaml_path = os.environ.get("FACTORIAL_YAML")
-    if factorial_yaml_path:
-        override_strategies = _resolve_ensemble_strategies(
-            factorial_yaml=Path(factorial_yaml_path),
+        # Step 9: Tag champion models on training runs filesystem
+        analysis_entries = create_analysis_experiment(all_results, eval_config)
+        champion_info = tag_champion_models(
+            analysis_entries,
+            runs,
+            ensembles,
+            eval_config,
         )
-        if override_strategies:
-            log.info(
-                "Overriding ensemble strategies from factorial YAML: %s",
-                override_strategies,
+
+        # Step 10: Generate report
+        report = generate_report(all_results, comparison_md, promotion_info)
+
+        # Step 10b: Experiment summary (agent decision point — deterministic stub)
+        experiment_summary = summarize_experiment(all_results, promotion_info)
+
+        # Step 11: Export comparison tables and figures to disk
+        artifact_paths = _export_analysis_artifacts(
+            comparison_md,
+            all_results,
+            output_dir,
+        )
+
+        log.info(
+            "Analysis flow complete. Champion: %s", promotion_info.get("champion_name")
+        )
+
+        # --- FlowContract: tag run and log completion ---
+        _tracking_uri = tracking_uri or resolve_tracking_uri()
+        # Use provided upstream ID or auto-discover from MLflow
+        if upstream_training_run_id is None:
+            upstream = find_upstream_safely(
+                tracking_uri=_tracking_uri,
+                experiment_name=os.environ.get(
+                    "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
+                ),
+                upstream_flow="train",
             )
+            upstream_training_run_id = upstream["run_id"] if upstream else None
+        mlflow_run_id: str | None = None
+        try:
+            import mlflow
 
-    # Step 1: Load training artifacts
-    runs = load_training_artifacts(
-        eval_config, model_config_dict, tracking_uri=tracking_uri
-    )
+            mlflow.set_tracking_uri(_tracking_uri)
+            mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_EVALUATION))
+            with mlflow.start_run(
+                tags={
+                    "flow_name": FLOW_NAME_ANALYSIS,
+                    "upstream_training_run_id": upstream_training_run_id,
+                }
+            ) as active_run:
+                mlflow_run_id = active_run.info.run_id
+        except Exception:
+            log.warning("Failed to log analysis_flow to MLflow", exc_info=True)
 
-    # Step 2: Build ensembles
-    ensembles = build_ensembles(runs, eval_config, model_config_dict)
-
-    # Step 3: Log models as MLflow pyfunc artifacts
-    model_uris = log_models_to_mlflow(runs, ensembles, eval_config, model_config_dict)
-
-    # Step 4: Extract single-fold models from ensemble members
-    single_models = _extract_single_models_as_modules(ensembles)
-
-    # Step 5: Evaluate all models (single + ensemble with all members)
-    all_results = evaluate_all_models(
-        single_models,
-        ensembles,
-        dataloaders_dict,
-        eval_config,
-        output_dir=output_dir,
-    )
-
-    # Step 6: Run MLflow evaluate with custom metrics
-    mlflow_eval_results = evaluate_with_mlflow(all_results, eval_config)
-
-    # Step 7: Generate comparison
-    comparison_md = generate_comparison(all_results)
-
-    # Step 8: Register champion (with model URIs for actual registration)
-    promotion_info = register_champion_task(
-        all_results,
-        eval_config,
-        model_uris=model_uris,
-        environment=environment,
-        tracking_uri=tracking_uri,
-    )
-
-    # Step 9: Tag champion models on training runs filesystem
-    analysis_entries = create_analysis_experiment(all_results, eval_config)
-    champion_info = tag_champion_models(
-        analysis_entries,
-        runs,
-        ensembles,
-        eval_config,
-    )
-
-    # Step 10: Generate report
-    report = generate_report(all_results, comparison_md, promotion_info)
-
-    # Step 10b: Experiment summary (agent decision point — deterministic stub)
-    experiment_summary = summarize_experiment(all_results, promotion_info)
-
-    # Step 11: Export comparison tables and figures to disk
-    artifact_paths = _export_analysis_artifacts(
-        comparison_md,
-        all_results,
-        output_dir,
-    )
-
-    log.info(
-        "Analysis flow complete. Champion: %s", promotion_info.get("champion_name")
-    )
-
-    # --- FlowContract: tag run and log completion ---
-    _tracking_uri = tracking_uri or resolve_tracking_uri()
-    # Use provided upstream ID or auto-discover from MLflow
-    if upstream_training_run_id is None:
-        upstream = find_upstream_safely(
+        # Log flow completion (best-effort, non-blocking)
+        log_completion_safe(
+            flow_name=FLOW_NAME_ANALYSIS,
             tracking_uri=_tracking_uri,
-            experiment_name=os.environ.get(
-                "UPSTREAM_EXPERIMENT", resolve_experiment_name(EXPERIMENT_TRAINING)
-            ),
-            upstream_flow="train",
-        )
-        upstream_training_run_id = upstream["run_id"] if upstream else None
-    mlflow_run_id: str | None = None
-    try:
-        import mlflow
-
-        mlflow.set_tracking_uri(_tracking_uri)
-        mlflow.set_experiment(resolve_experiment_name(EXPERIMENT_EVALUATION))
-        with mlflow.start_run(
-            tags={
-                "flow_name": FLOW_NAME_ANALYSIS,
-                "upstream_training_run_id": upstream_training_run_id,
-            }
-        ) as active_run:
-            mlflow_run_id = active_run.info.run_id
-    except Exception:
-        log.warning("Failed to log analysis_flow to MLflow", exc_info=True)
-
-    # Log flow completion (best-effort, non-blocking)
-    log_completion_safe(
-        flow_name=FLOW_NAME_ANALYSIS,
-        tracking_uri=_tracking_uri,
-        run_id=mlflow_run_id,
-    )
-
-    # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
-    try:
-        _emitter = LineageEmitter(namespace="minivess")
-        emit_flow_lineage(
-            emitter=_emitter,
-            job_name="analysis-flow",
-            inputs=[
-                {"namespace": "minivess", "name": "checkpoints"},
-                {"namespace": "minivess", "name": "test_datasets"},
-            ],
-            outputs=[
-                {"namespace": "minivess", "name": "evaluation_metrics"},
-                {"namespace": "minivess", "name": "ensemble_models"},
-            ],
-        )
-    except Exception:
-        logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
-
-    # FDA test set firewall: log every test evaluation (Issue #821)
-    try:
-        audit = AuditTrail()
-        audit.log_test_evaluation(
-            model_name=eval_config.primary_metric or "analysis_flow",
-            metrics={"test_set_access_count": 1.0},
-            actor="analysis_flow",
-        )
-    except Exception:
-        logger.warning(
-            "AuditTrail log_test_evaluation failed (non-blocking)", exc_info=True
+            run_id=mlflow_run_id,
         )
 
-    return {
-        "results": all_results,
-        "comparison": comparison_md,
-        "promotion": promotion_info,
-        "report": report,
-        "mlflow_evaluation": mlflow_eval_results,
-        "champion_tags": champion_info,
-        "artifact_paths": artifact_paths,
-        "post_training_models": post_training_models,
-        "experiment_summary": experiment_summary,
-        "mlflow_run_id": mlflow_run_id,
-        "upstream_training_run_id": upstream_training_run_id,
-    }
+        # OpenLineage lineage emission (Issue #799 — IEC 62304 §8 traceability)
+        try:
+            _emitter = LineageEmitter(namespace="minivess")
+            emit_flow_lineage(
+                emitter=_emitter,
+                job_name="analysis-flow",
+                inputs=[
+                    {"namespace": "minivess", "name": "checkpoints"},
+                    {"namespace": "minivess", "name": "test_datasets"},
+                ],
+                outputs=[
+                    {"namespace": "minivess", "name": "evaluation_metrics"},
+                    {"namespace": "minivess", "name": "ensemble_models"},
+                ],
+            )
+        except Exception:
+            logger.warning("OpenLineage emission failed (non-blocking)", exc_info=True)
+
+        # FDA test set firewall: log every test evaluation (Issue #821)
+        try:
+            audit = AuditTrail()
+            audit.log_test_evaluation(
+                model_name=eval_config.primary_metric or "analysis_flow",
+                metrics={"test_set_access_count": 1.0},
+                actor="analysis_flow",
+            )
+        except Exception:
+            logger.warning(
+                "AuditTrail log_test_evaluation failed (non-blocking)", exc_info=True
+            )
+
+        return {
+            "results": all_results,
+            "comparison": comparison_md,
+            "promotion": promotion_info,
+            "report": report,
+            "mlflow_evaluation": mlflow_eval_results,
+            "champion_tags": champion_info,
+            "artifact_paths": artifact_paths,
+            "post_training_models": post_training_models,
+            "experiment_summary": experiment_summary,
+            "mlflow_run_id": mlflow_run_id,
+            "upstream_training_run_id": upstream_training_run_id,
+        }
 
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,12 @@
 
 x-common-env: &common-env
   # All values derive from .env.example — never hardcode here (CLAUDE.md Rule #22).
-  MLFLOW_TRACKING_URI: http://minivess-mlflow:${MLFLOW_PORT:-5000}
+  # MLFLOW_TRACKING_URI: from .env (DagsHub, local, or any MLflow backend).
+  # Default falls back to local Docker MLflow infra stack if .env doesn't set it.
+  MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://minivess-mlflow:${MLFLOW_PORT:-5000}}
+  MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME:-}
+  MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD:-}
+  DAGSHUB_TOKEN: ${DAGSHUB_TOKEN:-}
   PREFECT_API_URL: http://${PREFECT_DOCKER_HOST:-minivess-prefect}:${PREFECT_PORT:-4200}/api
   AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
   AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin_secret}
@@ -49,6 +54,13 @@ x-common-env: &common-env
   # Setting these avoids re-downloading multi-GB weights on every container restart.
   HF_HOME: /model_cache/huggingface
   TORCH_HOME: /model_cache/torch
+  # Observability: heartbeat, stall detection, OTel export
+  GPU_HEARTBEAT_INTERVAL_S: ${GPU_HEARTBEAT_INTERVAL_S:-30}
+  GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT: ${GPU_HEARTBEAT_LOW_UTIL_THRESHOLD_PCT:-5}
+  GPU_HEARTBEAT_ALERT_AFTER_S: ${GPU_HEARTBEAT_ALERT_AFTER_S:-120}
+  STALL_THRESHOLD_MINUTES: ${STALL_THRESHOLD_MINUTES:-30}
+  HEALTH_GRACE_PERIOD_MINUTES: ${HEALTH_GRACE_PERIOD_MINUTES:-10}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
   # DG1.7: Suppress non-actionable ONNX Runtime GPU discovery warning.
   # ORT C++ layer reads this env var before Python code can set it.
   ORT_LOGGING_LEVEL: ${ORT_LOGGING_LEVEL:-3}
@@ -136,6 +148,12 @@ services:
     volumes:
       - raw_data:/app/data/raw
       - logs_data:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -156,6 +174,12 @@ services:
       - data_cache:/app/data/processed
       - configs_splits:/app/configs/splits
       - mlruns_data:/app/mlruns
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -183,35 +207,20 @@ services:
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
 
-  # Flow 2.5: Post-Training (SWA, calibration, conformal)
-  # GPU required: SWA weight averaging, temperature scaling, conformal calibration
-  # all operate on GPU model tensors.
-  post_training:
-    build:
-      context: ../
-      dockerfile: deployment/docker/Dockerfile.post_training
-    image: minivess-post-training:latest
-    container_name: minivess-flow-post-training
-    environment:
-      <<: *common-env
-      FLOW_NAME: post_training
-      POST_TRAINING_OUTPUT_DIR: /app/outputs/post_training
-    volumes:
-      - checkpoint_cache:/app/checkpoints:ro
-      - data_cache:/app/data:ro
-      - post_training_out:/app/outputs/post_training
-      - mlruns_data:/app/mlruns
-      - ${MODEL_CACHE_HOST_PATH}:/model_cache
-    # CDI GPU access — SWA/calibration need GPU for model weight operations
-    devices:
-      - "nvidia.com/gpu=all"
-    networks:
-      - minivess
-    <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
+  # Post-Training (SWAG, calibration, conformal) runs as a SUBFLOW inside
+  # training_flow() — same Docker container, same GPU session. There is NO
+  # standalone post_training service. See post_training_subflow() in train_flow.py.
+  # Deleted: post_training_flow.py, Dockerfile.post_training (Rule #26: no legacy).
 
   # Flow 3: Model Analysis
   # GPU required: sliding_window_inference for model evaluation, ensemble inference.
@@ -236,6 +245,12 @@ services:
     # CDI GPU access — model evaluation uses sliding_window_inference on GPU
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
@@ -257,6 +272,12 @@ services:
       - mlruns_data:/app/mlruns:ro
       - outputs_deploy:/app/outputs/deploy
       - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
@@ -276,6 +297,12 @@ services:
       - mlruns_data:/app/mlruns:ro
       - outputs_analysis:/app/outputs/analysis:ro
       - outputs_dashboard:/app/outputs/dashboard
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
@@ -334,6 +361,12 @@ services:
       - mlruns_data:/app/mlruns:ro
       - outputs_biostatistics:/app/outputs/biostatistics
       - configs_biostatistics:/app/configs/biostatistics:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *cpu-resources, *common-labels]
@@ -358,6 +391,12 @@ services:
       - bentoml_store:${BENTOML_HOME:-/home/minivess/bentoml}:ro
       - data_cache:/app/data:ro
       - mlruns_data:/app/mlruns
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_cpu.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
     networks:
       - minivess
     <<: [*common-security, *default-logging, *light-resources, *common-labels]
@@ -407,6 +446,12 @@ services:
     # CDI GPU access — works without nvidia container runtime (Docker 25+)
     devices:
       - "nvidia.com/gpu=all"
+    healthcheck:
+      test: ["CMD", "python", "scripts/healthcheck_training.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
     networks:
       - minivess
     <<: [*gpu-security, *default-logging, *gpu-resources, *common-labels]
