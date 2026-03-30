@@ -10,7 +10,7 @@
 #
 # Plan: local-dynunet-mechanics-debug-plan-biostats-finish.xml v3.0
 
-library(jsonlite)
+suppressPackageStartupMessages(library(jsonlite))
 
 # Resolve I/O directories from environment or defaults
 r_data_dir <- Sys.getenv("R_DATA_DIR", "/app/r_data")
