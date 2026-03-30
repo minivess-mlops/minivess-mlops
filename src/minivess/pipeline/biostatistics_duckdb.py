@@ -674,6 +674,235 @@ def read_analysis_duckdb(
     return manifest, pv_data
 
 
+def build_biostatistics_results_duckdb(
+    *,
+    pairwise_results: list[Any],
+    anova_results: list[Any],
+    variance_results: list[Any],
+    ranking_results: list[Any],
+    diagnostics: list[dict[str, Any]],
+    tripod_items: list[dict[str, str]],
+    metadata: dict[str, str],
+    output_path: Path,
+) -> Path:
+    """Build biostatistics.duckdb (DuckDB 2) from statistical results.
+
+    9 tables: pairwise_comparisons, anova_results, variance_decomposition,
+    rankings, bayesian_results, specification_curve, diagnostics,
+    tripod_compliance, metadata.
+
+    Parameters
+    ----------
+    pairwise_results:
+        List of PairwiseResult dataclasses.
+    anova_results:
+        List of FactorialAnovaResult dataclasses.
+    variance_results:
+        List of VarianceDecompositionResult dataclasses.
+    ranking_results:
+        List of RankingResult dataclasses.
+    diagnostics:
+        List of diagnostic dicts from compute_power_diagnostics().
+    tripod_items:
+        List of dicts with keys: item_id, item_name, status, evidence, limitation.
+    metadata:
+        Key-value pairs (git_sha, analysis_duckdb_sha256, config JSON, etc.)
+    output_path:
+        Output path for the DuckDB file.
+    """
+    import duckdb
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(output_path))
+
+    _BIOSTATS_V2_TABLES = [
+        "pairwise_comparisons", "anova_results", "variance_decomposition",
+        "rankings", "bayesian_results", "specification_curve",
+        "diagnostics", "tripod_compliance", "metadata",
+    ]
+
+    for table in _BIOSTATS_V2_TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")  # noqa: S608
+
+    conn.execute("""
+        CREATE TABLE pairwise_comparisons (
+            metric VARCHAR, split VARCHAR, test_type VARCHAR,
+            condition_a VARCHAR, condition_b VARCHAR,
+            statistic DOUBLE, p_value DOUBLE, p_adjusted DOUBLE,
+            correction_method VARCHAR, cohens_d DOUBLE,
+            cliffs_delta DOUBLE, vda DOUBLE,
+            ci_lower DOUBLE, ci_upper DOUBLE, ci_method VARCHAR,
+            n_a INTEGER, n_b INTEGER, effect_size_class VARCHAR
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE anova_results (
+            metric VARCHAR, split VARCHAR, model_type VARCHAR,
+            factor VARCHAR, ss DOUBLE, df INTEGER,
+            f_statistic DOUBLE, p_value DOUBLE,
+            eta_squared DOUBLE, partial_eta_squared DOUBLE,
+            omega_squared DOUBLE, is_exploratory BOOLEAN
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE variance_decomposition (
+            metric VARCHAR, split VARCHAR, source VARCHAR,
+            variance DOUBLE, icc DOUBLE, icc_ci_lower DOUBLE,
+            icc_ci_upper DOUBLE, friedman_statistic DOUBLE,
+            friedman_p_value DOUBLE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE rankings (
+            metric VARCHAR, split VARCHAR, condition VARCHAR,
+            mean_rank DOUBLE, mean_value DOUBLE, std_value DOUBLE,
+            cd_value DOUBLE
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE bayesian_results (
+            metric VARCHAR, split VARCHAR, condition_a VARCHAR,
+            condition_b VARCHAR, p_rope DOUBLE, p_left DOUBLE,
+            p_right DOUBLE, rope_width DOUBLE,
+            prior_concentration DOUBLE, decision VARCHAR
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE specification_curve (
+            spec_id INTEGER, metric VARCHAR, split VARCHAR,
+            conditions VARCHAR, value DOUBLE,
+            ci_lower DOUBLE, ci_upper DOUBLE, rank INTEGER
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE diagnostics (
+            metric VARCHAR, test_type VARCHAR,
+            alpha_used DOUBLE, effect_size_assumed DOUBLE,
+            achieved_power DOUBLE, effective_n INTEGER,
+            design_effect DOUBLE, icc_within_fold DOUBLE,
+            min_detectable_effect DOUBLE,
+            recommended_additional_folds INTEGER,
+            recommendation VARCHAR
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE tripod_compliance (
+            item_id VARCHAR PRIMARY KEY, item_name VARCHAR,
+            status VARCHAR, evidence VARCHAR, limitation VARCHAR
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE metadata (
+            key VARCHAR PRIMARY KEY, value VARCHAR
+        )
+    """)
+
+    # Insert pairwise comparisons
+    for r in pairwise_results:
+        conn.execute(
+            "INSERT INTO pairwise_comparisons VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                r.metric, "trainval", "pooled_wilcoxon",
+                r.condition_a, r.condition_b,
+                None, r.p_value, r.p_adjusted,
+                r.correction_method, r.cohens_d,
+                r.cliffs_delta, r.vda,
+                None, None, None,
+                None, None,
+                _classify_effect_size(r.cohens_d),
+            ],
+        )
+
+    # Insert ANOVA results
+    for a in anova_results:
+        for factor in a.factor_names:
+            f_val = a.f_values.get(factor, float("nan"))
+            p_val = a.p_values.get(factor, float("nan"))
+            conn.execute(
+                "INSERT INTO anova_results VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    a.metric, "trainval",
+                    a.replication_method,
+                    factor, None, None,
+                    f_val, p_val,
+                    a.eta_squared_partial.get(factor, float("nan")),
+                    a.eta_squared_partial.get(factor, float("nan")),
+                    a.omega_squared.get(factor, float("nan")),
+                    True,  # exploratory for 2-fold
+                ],
+            )
+
+    # Insert variance decomposition
+    for v in variance_results:
+        conn.execute(
+            "INSERT INTO variance_decomposition VALUES (?,?,?,?,?,?,?,?,?)",
+            [
+                v.metric, "trainval", "condition",
+                None, v.icc_value, v.icc_ci_lower, v.icc_ci_upper,
+                v.friedman_statistic, v.friedman_p,
+            ],
+        )
+
+    # Insert rankings
+    for r in ranking_results:
+        for cond, rank in r.mean_ranks.items():
+            conn.execute(
+                "INSERT INTO rankings VALUES (?,?,?,?,?,?,?)",
+                [r.metric, "trainval", cond, rank, None, None, r.cd_value],
+            )
+
+    # Insert diagnostics
+    for d in diagnostics:
+        conn.execute(
+            "INSERT INTO diagnostics VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                d["metric"], d["test_type"],
+                d["alpha_used"], d["effect_size_assumed"],
+                d["achieved_power"], d["effective_n"],
+                d["design_effect"], d["icc_within_fold"],
+                d.get("min_detectable_effect", d["effect_size_assumed"]),
+                d["recommended_additional_folds"],
+                d["recommendation"],
+            ],
+        )
+
+    # Insert TRIPOD compliance
+    for t in tripod_items:
+        conn.execute(
+            "INSERT INTO tripod_compliance VALUES (?,?,?,?,?)",
+            [t["item_id"], t["item_name"], t["status"],
+             t.get("evidence", ""), t.get("limitation", "")],
+        )
+
+    # Insert metadata
+    for key, value in metadata.items():
+        conn.execute("INSERT INTO metadata VALUES (?,?)", [key, str(value)])
+
+    conn.close()
+
+    logger.info(
+        "Built biostatistics DuckDB 2 at %s: %d pairwise, %d anova, %d diagnostics",
+        output_path,
+        len(pairwise_results),
+        len(anova_results),
+        len(diagnostics),
+    )
+    return output_path
+
+
+def _classify_effect_size(cohens_d: float) -> str:
+    """Classify Cohen's d into effect size category (Cohen 1988)."""
+    d = abs(cohens_d)
+    if d < 0.2:
+        return "negligible"
+    if d < 0.5:
+        return "small"
+    if d < 0.8:
+        return "medium"
+    return "large"
+
+
 def export_analysis_parquet(db_path: Path, output_dir: Path) -> list[Path]:
     """Export all analysis DuckDB tables to Parquet files.
 

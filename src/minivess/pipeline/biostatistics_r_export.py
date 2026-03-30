@@ -144,6 +144,164 @@ def export_rankings(
     return path
 
 
+def export_anova_results(
+    results: list[Any],
+    output_dir: Path,
+) -> Path:
+    """Export factorial ANOVA results as JSON for R interaction plots."""
+    data = []
+    for r in results:
+        for factor in r.factor_names:
+            data.append({
+                "metric": r.metric,
+                "factor": factor,
+                "f_value": r.f_values.get(factor),
+                "p_value": r.p_values.get(factor),
+                "eta_squared_partial": r.eta_squared_partial.get(factor),
+                "omega_squared": r.omega_squared.get(factor),
+                "replication_method": r.replication_method,
+                "n_folds": r.n_folds,
+            })
+    path = output_dir / "anova_results.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, cls=_NumpyEncoder)
+    return path
+
+
+def export_diagnostics(
+    diagnostics: list[dict[str, Any]],
+    output_dir: Path,
+) -> Path:
+    """Export power diagnostics as JSON."""
+    path = output_dir / "diagnostics.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(diagnostics, f, indent=2, cls=_NumpyEncoder)
+    return path
+
+
+def export_calibration_data(
+    per_volume_data: dict[str, dict[str, dict[int, Any]]],
+    output_dir: Path,
+) -> Path:
+    """Export calibration-specific per-volume data for R reliability diagrams."""
+    records: list[dict[str, Any]] = []
+    for metric, conditions in per_volume_data.items():
+        if not metric.startswith("cal_"):
+            continue
+        for condition, folds in conditions.items():
+            for fold_id, scores in folds.items():
+                arr = np.asarray(scores)
+                for i, val in enumerate(arr):
+                    records.append({
+                        "metric": metric,
+                        "condition": condition,
+                        "fold_id": int(fold_id),
+                        "volume_idx": i,
+                        "value": float(val),
+                    })
+    path = output_dir / "calibration_data.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(records, f, indent=2, cls=_NumpyEncoder)
+    return path
+
+
+def export_tripod_compliance(
+    tripod_items: list[dict[str, str]],
+    output_dir: Path,
+) -> Path:
+    """Export TRIPOD+AI compliance items as JSON for supplementary table."""
+    path = output_dir / "tripod_compliance.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(tripod_items, f, indent=2, cls=_NumpyEncoder)
+    return path
+
+
+def export_metadata(
+    metadata: dict[str, Any],
+    output_dir: Path,
+) -> Path:
+    """Export metadata + full BiostatisticsConfig as JSON."""
+    path = output_dir / "metadata.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, cls=_NumpyEncoder)
+    return path
+
+
+def export_bayesian_results(
+    pairwise: list[Any],
+    output_dir: Path,
+) -> Path:
+    """Export Bayesian ROPE results as JSON."""
+    data = [
+        {
+            "condition_a": r.condition_a,
+            "condition_b": r.condition_b,
+            "metric": r.metric,
+            "bayesian_left": r.bayesian_left,
+            "bayesian_rope": r.bayesian_rope,
+            "bayesian_right": r.bayesian_right,
+        }
+        for r in pairwise
+        if r.bayesian_rope is not None
+    ]
+    path = output_dir / "bayesian_results.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, cls=_NumpyEncoder)
+    return path
+
+
+def export_specification_curve(
+    output_dir: Path,
+) -> Path:
+    """Export specification curve placeholder (populated by flow)."""
+    path = output_dir / "specification_curve.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump([], f, indent=2)
+    return path
+
+
+def export_extended_r_data(
+    *,
+    pairwise: list[Any],
+    anova: list[Any],
+    variance: list[Any],
+    rankings: list[Any],
+    diagnostics: list[dict[str, Any]],
+    per_volume_data: dict[str, dict[str, dict[int, Any]]],
+    tripod_items: list[dict[str, str]],
+    metadata: dict[str, Any],
+    output_dir: Path,
+) -> list[Path]:
+    """Export all 11 JSON sidecars for R/ggplot2 consumption.
+
+    Extends export_all_r_data() with ANOVA, diagnostics, calibration,
+    TRIPOD compliance, metadata, Bayesian, and specification curve sidecars.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    paths = [
+        export_pairwise_results(pairwise, output_dir),
+        export_per_volume_data(per_volume_data, output_dir),
+        export_variance_results(variance, output_dir),
+        export_rankings(rankings, output_dir),
+        export_anova_results(anova, output_dir),
+        export_diagnostics(diagnostics, output_dir),
+        export_calibration_data(per_volume_data, output_dir),
+        export_tripod_compliance(tripod_items, output_dir),
+        export_metadata(metadata, output_dir),
+        export_bayesian_results(pairwise, output_dir),
+        export_specification_curve(output_dir),
+    ]
+    logger.info("Exported %d extended R data files to %s", len(paths), output_dir)
+    return paths
+
+
 def export_all_r_data(
     pairwise: list[PairwiseResult],
     variance: list[VarianceDecompositionResult],
