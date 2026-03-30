@@ -349,6 +349,237 @@ def build_per_volume_data_from_duckdb(
 
 
 # ---------------------------------------------------------------------------
+# Analysis Results DuckDB (DuckDB 1) — Plan Task 1.2
+# ---------------------------------------------------------------------------
+#
+# NOTE: analysis_results.duckdb has its OWN schema (different DDL from the
+# biostatistics DuckDB above). "Extend module" = both DuckDB builders live
+# in the same .py file (Rule 26), NOT the same DDL. Two DuckDB files,
+# two schemas, one Python module.
+
+ANALYSIS_TABLES = [
+    "runs",
+    "per_volume_metrics",
+    "fold_metrics",
+    "metadata",
+]
+
+_ANALYSIS_DDL_RUNS = """
+    CREATE TABLE IF NOT EXISTS runs (
+        run_id VARCHAR PRIMARY KEY,
+        experiment_id VARCHAR,
+        experiment_name VARCHAR,
+        loss_function VARCHAR,
+        fold_id INTEGER,
+        model_family VARCHAR,
+        with_aux_calib BOOLEAN,
+        post_training_method VARCHAR DEFAULT 'none',
+        recalibration VARCHAR DEFAULT 'none',
+        ensemble_strategy VARCHAR DEFAULT 'none',
+        is_zero_shot BOOLEAN DEFAULT FALSE,
+        status VARCHAR,
+        condition_key VARCHAR
+    )
+"""
+
+_ANALYSIS_DDL_PER_VOLUME_METRICS = """
+    CREATE TABLE IF NOT EXISTS per_volume_metrics (
+        run_id VARCHAR,
+        fold_id INTEGER,
+        split VARCHAR,
+        dataset VARCHAR,
+        volume_id VARCHAR,
+        metric_name VARCHAR,
+        metric_value DOUBLE,
+        PRIMARY KEY (run_id, fold_id, volume_id, metric_name)
+    )
+"""
+
+_ANALYSIS_DDL_FOLD_METRICS = """
+    CREATE TABLE IF NOT EXISTS fold_metrics (
+        run_id VARCHAR,
+        fold_id INTEGER,
+        split VARCHAR,
+        metric_name VARCHAR,
+        metric_value DOUBLE,
+        PRIMARY KEY (run_id, fold_id, metric_name, split)
+    )
+"""
+
+_ANALYSIS_DDL_METADATA = """
+    CREATE TABLE IF NOT EXISTS metadata (
+        key VARCHAR PRIMARY KEY,
+        value VARCHAR
+    )
+"""
+
+_ANALYSIS_ALL_DDL = [
+    _ANALYSIS_DDL_RUNS,
+    _ANALYSIS_DDL_PER_VOLUME_METRICS,
+    _ANALYSIS_DDL_FOLD_METRICS,
+    _ANALYSIS_DDL_METADATA,
+]
+
+
+def build_analysis_results_duckdb(
+    *,
+    manifest: Any,
+    per_volume_records: list[dict[str, object]],
+    fold_metric_records: list[dict[str, object]],
+    output_path: Path,
+    metadata: dict[str, str],
+) -> Path:
+    """Build analysis_results.duckdb (DuckDB 1) from evaluated run data.
+
+    This is the self-contained dataset for external biostatisticians.
+    Schema is DIFFERENT from the biostatistics DuckDB above.
+
+    Parameters
+    ----------
+    manifest:
+        SourceRunManifest with discovered runs.
+    per_volume_records:
+        List of dicts with keys: run_id, fold_id, split, dataset,
+        volume_id, metric_name, metric_value.
+    fold_metric_records:
+        List of dicts with keys: run_id, fold_id, split,
+        metric_name, metric_value.
+    output_path:
+        Output path for the DuckDB file.
+    metadata:
+        Key-value pairs for the metadata table (git_sha, config JSON, etc.)
+
+    Returns
+    -------
+    Path to the created DuckDB file.
+    """
+    import duckdb
+
+    from minivess.pipeline.biostatistics_statistics import encode_condition_key
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = duckdb.connect(str(output_path))
+
+    # Drop all tables for idempotent rebuild
+    for table in ANALYSIS_TABLES:
+        conn.execute(f"DROP TABLE IF EXISTS {table}")  # noqa: S608
+
+    # Create schema
+    for ddl in _ANALYSIS_ALL_DDL:
+        conn.execute(ddl)
+
+    # Insert runs with condition_key
+    for run in manifest.runs:
+        condition_key = encode_condition_key({
+            "ensemble_strategy": str(getattr(run, "ensemble_strategy", "none")),
+            "loss_function": run.loss_function,
+            "model_family": run.model_family,
+            "post_training_method": str(
+                getattr(run, "post_training_method", "none")
+            ),
+            "recalibration": str(getattr(run, "recalibration", "none")),
+            "with_aux_calib": str(run.with_aux_calib).lower(),
+        })
+        conn.execute(
+            "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                run.run_id,
+                run.experiment_id,
+                run.experiment_name,
+                run.loss_function,
+                run.fold_id,
+                run.model_family,
+                run.with_aux_calib,
+                getattr(run, "post_training_method", "none"),
+                getattr(run, "recalibration", "none"),
+                getattr(run, "ensemble_strategy", "none"),
+                getattr(run, "is_zero_shot", False),
+                run.status,
+                condition_key,
+            ],
+        )
+
+    # Insert per-volume metrics
+    for rec in per_volume_records:
+        conn.execute(
+            "INSERT INTO per_volume_metrics VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                rec["run_id"],
+                rec["fold_id"],
+                rec["split"],
+                rec["dataset"],
+                rec["volume_id"],
+                rec["metric_name"],
+                rec["metric_value"],
+            ],
+        )
+
+    # Insert fold-level metrics
+    for rec in fold_metric_records:
+        conn.execute(
+            "INSERT INTO fold_metrics VALUES (?, ?, ?, ?, ?)",
+            [
+                rec["run_id"],
+                rec["fold_id"],
+                rec["split"],
+                rec["metric_name"],
+                rec["metric_value"],
+            ],
+        )
+
+    # Insert metadata
+    for key, value in metadata.items():
+        conn.execute(
+            "INSERT INTO metadata VALUES (?, ?)",
+            [key, str(value)],
+        )
+
+    conn.close()
+
+    logger.info(
+        "Built analysis_results DuckDB at %s: %d runs, %d per-volume, %d fold metrics",
+        output_path,
+        len(manifest.runs),
+        len(per_volume_records),
+        len(fold_metric_records),
+    )
+    return output_path
+
+
+def export_analysis_parquet(db_path: Path, output_dir: Path) -> list[Path]:
+    """Export all analysis DuckDB tables to Parquet files.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the analysis_results.duckdb file.
+    output_dir:
+        Directory for Parquet files.
+
+    Returns
+    -------
+    List of created Parquet file paths.
+    """
+    import duckdb
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path), read_only=True)
+
+    paths: list[Path] = []
+    for table in ANALYSIS_TABLES:
+        parquet_path = output_dir / f"{table}.parquet"
+        conn.execute(
+            f"COPY {table} TO '{parquet_path}' (FORMAT PARQUET)"  # noqa: S608
+        )
+        paths.append(parquet_path)
+
+    conn.close()
+    logger.info("Exported %d analysis Parquet files to %s", len(paths), output_dir)
+    return paths
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
