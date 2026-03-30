@@ -65,17 +65,73 @@ decisions:
 
   calibration_metrics:
     status: resolved
-    winner: two_tier_ece_ba_ece
+    winner: two_tier_global_and_spatial
     rationale: >
-      Two-tier calibration metrics system:
-      Tier 1 (fast, training loop): ECE, MCE, Brier, NLL, overconfidence error, debiased ECE
-      Tier 2 (comprehensive, analysis flow): ACE (Nixon 2019), BA-ECE (Zeevi 2025), spatial maps
-      Co-primary calibration metrics: ECE + BA-ECE (Holm-Bonferroni at alpha/2)
-      BA-ECE is clinically critical — measures calibration at vessel boundaries.
+      TWO GRANULARITY LEVELS (both required for segmentation):
+
+      GLOBAL (image-level) calibration: "across all voxels, is mean confidence ≈ mean accuracy?"
+        - ECE (Guo 2017): equal-width bins, population-weighted
+        - MCE (Naeini 2015): worst-case bin miscalibration
+        - ACE (Nixon 2019): equal-count bins, all-class
+        - D-ECE (Kumar 2019): bias-corrected ECE
+        - Brier score: MSE of probabilities
+        - NLL: negative log-likelihood
+        - Overconfidence error (Thulasidasan 2019): one-directional
+        - Limitation: dominated by background class in vessel segmentation
+
+      SPATIAL (voxel-level) calibration: "at each location type, is confidence calibrated?"
+        - BA-ECE (Zeevi 2025): stratified by distance from boundary — CLINICALLY CRITICAL
+        - pECE (Li 2025): pixel-wise ECE + FP overconfidence penalty
+        - SPACE (Zeevi 2025): local uncertainty-error overlap via Gaussian convolution
+        - BUC (Zeevi 2025): boundary vs interior uncertainty concentration
+        - Per-voxel Brier map: spatial heatmap of calibration error
+        - Advantage: reveals that vessel boundaries are systematically miscalibrated
+          even when global ECE looks good
+
+      "A model with good global ECE can have terrible calibration at thin vessel boundaries."
+
+      Co-primary calibration metrics: ECE (global) + BA-ECE (spatial) — Holm-Bonferroni at alpha/2.
+
+      KEY INTERMEDIATE: Kandinsky conformal prediction (Brunekreef 2024 CVPR) —
+      aggregates non-conformity scores over "similar" pixels, an intermediate between
+      marginal (image-level) and conditional (pixel-level) calibration. Data-efficient
+      for medical imaging where calibration data is scarce.
+
+      TRAINING-TIME APPROACHES:
+        - hL1-ACE (Barfoot 2025): auxiliary loss targeting global calibration
+        - MEEP (Larrazabal 2023 MICCAI): max entropy on erroneous pixels only
+        - Spectral entropy regularization (Cheng 2025 ICLR): frequency-domain calibration
+        - DA-Cal (Li 2026): pixel-level Meta Temperature Network for cross-domain
+
+      POST-HOC APPROACHES:
+        - Temperature scaling (Guo 2017): global scalar
+        - Local temperature scaling: per-pixel temperature map
+        - Isotonic regression
+        - Conformal prediction (split conformal, CRC, ConSeCo)
+
+      ENSEMBLE CALIBRATION:
+        - Diverse ensembles improve calibration (Stickland & Murray 2020)
+        - Joint regularization + calibration in deep ensembles (Fredsgaard & Schmidt 2025)
+        - Calibration-aware ensemble selection (Issue #896)
+
     implementation:
-      - src/minivess/pipeline/calibration_metrics.py  # All metrics
-      - src/minivess/pipeline/metrics.py  # Tier 1 in validation loop
-      - src/minivess/pipeline/evaluation_runner.py  # Tier 1+2 in analysis
+      - src/minivess/pipeline/calibration_metrics.py  # All metrics (global + spatial)
+      - src/minivess/pipeline/metrics.py  # Tier 1 (fast, global) in validation loop
+      - src/minivess/pipeline/evaluation_runner.py  # Tier 1+2 (comprehensive) in analysis
+    related_issues: ["#896", "#897", "#898", "#899", "#798", "#19", "#311"]
+    references:
+      - "Guo et al. (2017). On Calibration of Modern Neural Networks. ICML."
+      - "Nixon et al. (2019). Measuring Calibration in Deep Learning. CVPR-W."
+      - "Zeevi et al. (2025). Spatially-Aware Evaluation of Segmentation Uncertainty. arXiv:2506.16589."
+      - "Brunekreef et al. (2024). Kandinsky Conformal Prediction. CVPR. doi:10.1109/CVPR52733.2024.00396."
+      - "Barfoot et al. (2025). Average Calibration Losses. IEEE TMI. arXiv:2506.03942."
+      - "Larrazabal et al. (2023). Maximum Entropy on Erroneous Predictions. MICCAI."
+      - "Cheng et al. (2025). Spectral Entropy Regularization. ICLR."
+      - "Li et al. (2026). DA-Cal Cross-Domain Calibration. arXiv:2602.20860."
+      - "Mehrtash et al. (2020). Confidence Calibration. IEEE TMI."
+      - "Stickland & Murray (2020). Diverse Ensembles. arXiv:2007.04206."
+      - "Fredsgaard & Schmidt (2025). Joint Regularization. arXiv:2511.04160."
+      - "Moreo (2025). Calibration-Quantification-Accuracy under Shift. arXiv:2505.11380."
     last_reviewed: "2026-03-30"
 
   three_evaluation_axes:
