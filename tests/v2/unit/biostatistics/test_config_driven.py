@@ -11,7 +11,6 @@ import ast
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from minivess.config.biostatistics_config import BiostatisticsConfig
 

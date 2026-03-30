@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_DATA,
     FLOW_NAME_DATA,
     resolve_experiment_name,
 )
-from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.flow_contract import (
     FlowContract,  # noqa: F401  # used via log_completion_safe
@@ -806,7 +806,7 @@ def run_data_flow(
     require_docker_context("data")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("data", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("data", logs_dir=logs_dir):
         import mlflow
 
         logger.info("Starting data flow → %s", data_dir)

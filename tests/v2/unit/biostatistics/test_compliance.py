@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from minivess.pipeline.biostatistics_compliance import (
     generate_consort_data,
     generate_limitations_paragraph,
@@ -41,7 +39,7 @@ class TestConsortData:
         assert data["external_test"]["n_volumes"] == 7
 
     def test_writes_to_file(self, tmp_path: Path) -> None:
-        data = generate_consort_data(output_dir=tmp_path)
+        generate_consort_data(output_dir=tmp_path)
         path = tmp_path / "consort_data.json"
         assert path.exists()
         with path.open(encoding="utf-8") as f:

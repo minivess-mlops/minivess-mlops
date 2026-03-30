@@ -16,6 +16,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+
+# Thread-local storage for passing event_logger from flow context to @task.
+# Prefect @task params must be serializable; StructuredEventLogger is not.
+# Safe because all tasks run in-process for single-machine Docker.
+import threading as _threading
 import time
 import warnings
 from dataclasses import dataclass, field
@@ -28,6 +33,7 @@ import yaml
 from prefect import flow, task
 
 from minivess.compliance.audit import AuditTrail
+from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.observability.infrastructure_timing import (
     estimate_cost_from_first_epoch,
     generate_timing_jsonl,
@@ -35,6 +41,7 @@ from minivess.observability.infrastructure_timing import (
 )
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.metric_keys import MetricKeys
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 from minivess.observability.prometheus_metrics import update_estimated_cost_gauges
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
@@ -43,15 +50,7 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     FLOW_NAME_TRAINING_SUBFLOW,
 )
-from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
-
-# Thread-local storage for passing event_logger from flow context to @task.
-# Prefect @task params must be serializable; StructuredEventLogger is not.
-# Safe because all tasks run in-process for single-machine Docker.
-import threading as _threading
-
-_flow_context = _threading.local()
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
     log_completion_safe,
@@ -61,9 +60,11 @@ from minivess.pipeline.resume_discovery import (
     find_completed_config,
     load_fold_result_from_mlflow,
 )
-from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
+
+# Thread-local for passing event_logger from flow context to @task (Pass 4 G1)
+_flow_context = _threading.local()
 
 _on_complete, _on_fail = create_task_timing_hooks()
 

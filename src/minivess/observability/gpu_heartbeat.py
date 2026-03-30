@@ -131,7 +131,9 @@ class GpuHeartbeatMonitor:
         if self._mlflow_run_id is None:
             return
         try:
-            from minivess.observability.stall_detection import detect_mlflow_metric_stall
+            from minivess.observability.stall_detection import (
+                detect_mlflow_metric_stall,
+            )
 
             result = detect_mlflow_metric_stall(self._mlflow_run_id)
             if result.stale:

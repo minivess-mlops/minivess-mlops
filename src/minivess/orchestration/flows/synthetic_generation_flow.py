@@ -21,11 +21,10 @@ import numpy as np
 from prefect import flow, task
 
 from minivess.data.synthetic import generate_stack, list_generators
-from minivess.orchestration.constants import FLOW_NAME_SYNTHETIC_GENERATION
 from minivess.observability.flow_observability import flow_observability_context
-from minivess.orchestration.docker_guard import require_docker_context
-
 from minivess.observability.prefect_hooks import create_task_timing_hooks
+from minivess.orchestration.constants import FLOW_NAME_SYNTHETIC_GENERATION
+from minivess.orchestration.docker_guard import require_docker_context
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +111,7 @@ def synthetic_generation_flow(
     require_docker_context("synthetic-generation")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("synthetic-generation", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("synthetic-generation", logs_dir=logs_dir):
         results: list[dict[str, Any]] = []
 
         methods = list_generators() if method == "all" else [method]

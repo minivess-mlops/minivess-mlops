@@ -11,7 +11,7 @@ import logging
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from prefect import flow, task
 
@@ -21,12 +21,11 @@ from minivess.config.acquisition_config import (
     DatasetAcquisitionStatus,
 )
 from minivess.data.downloaders import get_downloader
+from minivess.observability.flow_observability import flow_observability_context
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import FLOW_NAME_ACQUISITION
-from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
-
-from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +297,7 @@ def run_acquisition_flow(
     require_docker_context("acquisition")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("acquisition", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("acquisition", logs_dir=logs_dir):
         from minivess.config.acquisition_config import AcquisitionConfig
 
         if config is None:

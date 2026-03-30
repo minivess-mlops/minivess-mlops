@@ -17,8 +17,8 @@ import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from prefect import flow, task
 
-from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
 from minivess.observability.flow_observability import flow_observability_context
+from minivess.orchestration.constants import FLOW_NAME_ANNOTATION
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.serving.api_models import SegmentationRequest
 
@@ -191,7 +191,7 @@ def run_annotation_flow(
     require_docker_context("annotation")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("annotation", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("annotation", logs_dir=logs_dir):
         if config is None:
             config = AnnotationFlowConfig()
 

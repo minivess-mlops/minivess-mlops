@@ -49,7 +49,7 @@ class TestFlowObservabilityContextManager:
             gpu_flow_observability_context,
         )
 
-        with patch("minivess.orchestration.cuda_guard.require_cuda_context") as mock_cuda:
+        with patch("minivess.orchestration.cuda_guard.require_cuda_context"):
             # Also need ALLOW_CPU since the real guard runs before our mock
             import os
             os.environ["MINIVESS_ALLOW_CPU"] = "1"
@@ -62,12 +62,12 @@ class TestFlowObservabilityContextManager:
         # What matters: gpu_flow_observability_context invokes the guard
 
     def test_gpu_flow_creates_heartbeat(self, tmp_path: Path) -> None:
+        # Use MINIVESS_ALLOW_CPU=1 to bypass CUDA check in test
+        import os
+
         from minivess.observability.flow_observability import (
             gpu_flow_observability_context,
         )
-
-        # Use MINIVESS_ALLOW_CPU=1 to bypass CUDA check in test
-        import os
         os.environ["MINIVESS_ALLOW_CPU"] = "1"
         try:
             with gpu_flow_observability_context("train", logs_dir=tmp_path):
@@ -85,11 +85,11 @@ class TestFlowObservabilityParams:
     """Wrappers accept configurable parameters from .env."""
 
     def test_accepts_heartbeat_interval(self, tmp_path: Path) -> None:
+        import os
+
         from minivess.observability.flow_observability import (
             gpu_flow_observability_context,
         )
-
-        import os
         os.environ["MINIVESS_ALLOW_CPU"] = "1"
         try:
             with gpu_flow_observability_context(

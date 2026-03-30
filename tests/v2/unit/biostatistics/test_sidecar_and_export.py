@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from minivess.pipeline.biostatistics_sidecar import (
     FigureSidecar,

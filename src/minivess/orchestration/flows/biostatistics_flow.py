@@ -20,9 +20,10 @@ import numpy as np
 from prefect import flow, task
 
 from minivess.config.biostatistics_config import BiostatisticsConfig
-from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
-from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
 from minivess.observability.flow_observability import flow_observability_context
+from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
+from minivess.observability.prefect_hooks import create_task_timing_hooks
+from minivess.orchestration.constants import FLOW_NAME_BIOSTATISTICS
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.pipeline.biostatistics_discovery import (
     discover_source_runs,
@@ -52,7 +53,6 @@ from minivess.pipeline.biostatistics_statistics import (
 )
 from minivess.pipeline.biostatistics_tables import generate_tables
 from minivess.pipeline.biostatistics_types import BiostatisticsResult
-from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -404,7 +404,7 @@ def run_biostatistics_flow(
     require_docker_context("biostatistics")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("biostatistics", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("biostatistics", logs_dir=logs_dir):
         logger.info("Starting biostatistics flow (source: %s)", trigger_source)
 
         # Load config

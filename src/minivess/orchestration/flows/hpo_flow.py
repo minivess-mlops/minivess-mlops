@@ -23,8 +23,8 @@ import optuna
 from prefect import flow, task
 from prefect.deployments import run_deployment
 
-from minivess.orchestration.constants import FLOW_NAME_HPO, FLOW_NAME_TRAIN
 from minivess.observability.flow_observability import gpu_flow_observability_context
+from minivess.orchestration.constants import FLOW_NAME_HPO, FLOW_NAME_TRAIN
 from minivess.orchestration.docker_guard import require_docker_context
 
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ def hpo_flow(
     require_docker_context("hpo")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with gpu_flow_observability_context("hpo", logs_dir=logs_dir) as event_logger:
+    with gpu_flow_observability_context("hpo", logs_dir=logs_dir):
         from minivess.optimization.hpo_engine import AllocationStrategy, HPOEngine
 
         strategy = AllocationStrategy(allocation_strategy.lower())

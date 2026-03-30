@@ -34,6 +34,7 @@ from minivess.ensemble.builder import (
     EnsembleBuilder,
     EnsembleSpec,
 )
+from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
@@ -44,7 +45,6 @@ from minivess.orchestration.constants import (
     FLOW_NAME_TRAIN,
     resolve_experiment_name,
 )
-from minivess.observability.flow_observability import gpu_flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -1789,7 +1789,7 @@ def run_analysis_flow(
     require_docker_context("analysis")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with gpu_flow_observability_context("analysis", logs_dir=logs_dir) as event_logger:
+    with gpu_flow_observability_context("analysis", logs_dir=logs_dir):
         log = get_run_logger()
         log.info("Starting analysis flow...")
 

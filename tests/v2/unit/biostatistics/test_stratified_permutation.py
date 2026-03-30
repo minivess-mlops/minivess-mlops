@@ -11,10 +11,8 @@ Fix: stratified permutation test with volume-level pairing via (fold_id, volume_
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from minivess.config.biostatistics_config import BiostatisticsConfig
-
 
 # ---------------------------------------------------------------------------
 # Synthetic data fixtures with known statistical properties

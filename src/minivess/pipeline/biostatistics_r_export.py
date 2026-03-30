@@ -10,17 +10,18 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from minivess.pipeline.biostatistics_sidecar import FigureSidecar, write_sidecar
-from minivess.pipeline.biostatistics_types import (
-    PairwiseResult,
-    RankingResult,
-    VarianceDecompositionResult,
-)
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from minivess.pipeline.biostatistics_types import (
+        PairwiseResult,
+        RankingResult,
+        VarianceDecompositionResult,
+    )
 
 logger = logging.getLogger(__name__)
 

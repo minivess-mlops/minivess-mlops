@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING, Any
 
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_TRAINING,
     FLOW_NAME_DASHBOARD,
     resolve_experiment_name,
 )
-from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 
 if TYPE_CHECKING:
@@ -403,7 +403,7 @@ def run_dashboard_flow(
     require_docker_context("dashboard")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("dashboard", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("dashboard", logs_dir=logs_dir):
         if output_dir is None:
             output_dir = Path(
                 os.environ.get("DASHBOARD_OUTPUT_DIR", "/app/outputs/dashboard")

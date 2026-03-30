@@ -5,9 +5,10 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from minivess.observability.stall_detection import StallResult, detect_mlflow_metric_stall
+from minivess.observability.stall_detection import (
+    StallResult,
+    detect_mlflow_metric_stall,
+)
 
 
 class TestDetectMlflowMetricStall:

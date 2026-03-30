@@ -56,7 +56,6 @@ def detect_mlflow_metric_stall(
         run = client.get_run(run_id)
 
         # Get the most recent metric timestamp
-        last_ts = None
         metrics = run.data.metrics
         if not metrics:
             return StallResult(

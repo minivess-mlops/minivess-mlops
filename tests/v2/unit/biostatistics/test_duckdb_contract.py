@@ -15,8 +15,8 @@ import pytest
 
 from minivess.config.biostatistics_config import BiostatisticsConfig
 from minivess.pipeline.biostatistics_duckdb import (
-    BIOSTATISTICS_TABLES,
     _ALL_DDL,
+    BIOSTATISTICS_TABLES,
 )
 
 _CFG = BiostatisticsConfig()

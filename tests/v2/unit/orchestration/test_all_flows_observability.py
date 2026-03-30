@@ -43,9 +43,8 @@ def _file_imports(path: Path, name: str) -> bool:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            if node.names and any(alias.name == name for alias in node.names):
-                return True
+        if isinstance(node, ast.ImportFrom) and node.names and any(alias.name == name for alias in node.names):
+            return True
     return False
 
 
@@ -54,9 +53,8 @@ def _file_calls(path: Path, name: str) -> bool:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id == name:
-                return True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name:
+            return True
     return False
 
 

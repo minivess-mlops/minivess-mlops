@@ -18,18 +18,17 @@ from typing import Any
 
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.mlflow_backend import detect_backend_type
 from minivess.observability.mlflow_schema import check_required_params
-from minivess.observability.tracking import resolve_tracking_uri
-from minivess.observability.flow_observability import flow_observability_context
-from minivess.orchestration.docker_guard import require_docker_context
 
 # QA was merged into the dashboard health adapter (#342, PR #567).
-# FLOW_NAME_QA removed from orchestration.constants; defined locally for
 # backward compatibility until this module is fully retired.
-FLOW_NAME_QA: str = "qa-flow"
-
 from minivess.observability.prefect_hooks import create_task_timing_hooks
+from minivess.observability.tracking import resolve_tracking_uri
+from minivess.orchestration.docker_guard import require_docker_context
+
+FLOW_NAME_QA: str = "qa-flow"
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +224,7 @@ def qa_flow(
     require_docker_context("qa")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("qa", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("qa", logs_dir=logs_dir):
         if tracking_uri is None:
             tracking_uri = resolve_tracking_uri()
 

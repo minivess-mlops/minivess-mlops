@@ -38,9 +38,7 @@ def _get_flow_functions(filepath: Path) -> list[tuple[str, ast.FunctionDef]]:
             continue
         for dec in node.decorator_list:
             is_flow = False
-            if isinstance(dec, ast.Name) and dec.id == "flow":
-                is_flow = True
-            elif isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name) and dec.func.id == "flow":
+            if isinstance(dec, ast.Name) and dec.id == "flow" or isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name) and dec.func.id == "flow":
                 is_flow = True
             if is_flow:
                 results.append((filepath.name, node))

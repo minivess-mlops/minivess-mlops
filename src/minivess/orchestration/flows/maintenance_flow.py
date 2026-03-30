@@ -17,16 +17,15 @@ from typing import Any
 from mlflow.tracking import MlflowClient
 from prefect import flow, task
 
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.ghost_cleanup import cleanup_ghost_runs, find_ghost_runs
+from minivess.observability.prefect_hooks import create_task_timing_hooks
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
     EXPERIMENT_TRAINING,
     FLOW_NAME_MAINTENANCE,
 )
-from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
-
-from minivess.observability.prefect_hooks import create_task_timing_hooks
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +100,7 @@ def maintenance_flow(
     require_docker_context("maintenance")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("maintenance", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("maintenance", logs_dir=logs_dir):
         logger.info("Maintenance flow started (dry_run=%s)", dry_run)
 
         result = cleanup_stale_runs_task(

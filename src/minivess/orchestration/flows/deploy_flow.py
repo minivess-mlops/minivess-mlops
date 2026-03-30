@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from prefect import flow, get_run_logger, task
 
 from minivess.config.deploy_config import DeployConfig
+from minivess.observability.flow_observability import flow_observability_context
 from minivess.observability.lineage import LineageEmitter, emit_flow_lineage
 from minivess.observability.tracking import resolve_tracking_uri
 from minivess.orchestration.constants import (
@@ -30,7 +31,6 @@ from minivess.orchestration.constants import (
     FLOW_NAME_DEPLOY,
     resolve_experiment_name,
 )
-from minivess.observability.flow_observability import flow_observability_context
 from minivess.orchestration.docker_guard import require_docker_context
 from minivess.orchestration.mlflow_helpers import (
     find_upstream_safely,
@@ -233,7 +233,7 @@ def deploy_flow(
     require_docker_context("deploy")
 
     logs_dir = Path(os.environ.get("LOGS_DIR", "/app/logs"))
-    with flow_observability_context("deploy", logs_dir=logs_dir) as event_logger:
+    with flow_observability_context("deploy", logs_dir=logs_dir):
         if config is None:
             config = DeployConfig.from_env()
 
