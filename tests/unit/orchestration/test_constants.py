@@ -74,14 +74,12 @@ class TestFlowNameConstants:
             FLOW_NAME_DATA,
             FLOW_NAME_DEPLOY,
             FLOW_NAME_HPO,
-            FLOW_NAME_POST_TRAINING,
             FLOW_NAME_TRAIN,
         )
 
         for name in [
             FLOW_NAME_TRAIN,
             FLOW_NAME_DATA,
-            FLOW_NAME_POST_TRAINING,
             FLOW_NAME_ANALYSIS,
             FLOW_NAME_DEPLOY,
             FLOW_NAME_DASHBOARD,
@@ -107,7 +105,6 @@ class TestFlowNameConstants:
             "EXPERIMENT_HPO",
             "FLOW_NAME_TRAIN",
             "FLOW_NAME_DATA",
-            "FLOW_NAME_POST_TRAINING",
             "FLOW_NAME_ANALYSIS",
             "FLOW_NAME_DEPLOY",
             "FLOW_NAME_DASHBOARD",

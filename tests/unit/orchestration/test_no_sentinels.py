@@ -12,7 +12,6 @@ from minivess.orchestration.mlflow_helpers import find_upstream_safely
 
 FLOW_FILES = [
     Path("src/minivess/orchestration/flows/train_flow.py"),
-    Path("src/minivess/orchestration/flows/post_training_flow.py"),
     Path("src/minivess/orchestration/flows/analysis_flow.py"),
     Path("src/minivess/orchestration/flows/deploy_flow.py"),
 ]

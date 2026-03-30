@@ -17,7 +17,6 @@ _FLOWS_DIR = Path("src/minivess/orchestration/flows")
 _GPU_FLOWS = [
     "train_flow.py",
     "hpo_flow.py",
-    "post_training_flow.py",
     "analysis_flow.py",
 ]
 

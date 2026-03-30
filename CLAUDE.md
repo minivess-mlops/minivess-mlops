@@ -293,11 +293,14 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
     Every failure point must use `try/except` with `logger.error()` so both humans
     reading logs AND Claude Code monitoring runs understand what is happening.
     See: `.claude/metalearning/2026-03-19-external-test-datasets-never-wired-silent-failure.md`
-26. **Greenfield Project — No Legacy (Non-Negotiable)** — This is a greenfield project
-    with zero production users and zero legacy data. NEVER maintain backward compatibility.
-    NEVER create migration/normalization layers. NEVER offer "keep both formats." When
-    changing conventions (metric keys, config formats, API schemas), DELETE the old
-    convention entirely. Clean slate always.
+26. **Greenfield Project — No Legacy, No Deprecation Notices (Non-Negotiable)** — This
+    is a greenfield project with zero production users and zero legacy data. NEVER maintain
+    backward compatibility. NEVER create migration/normalization layers. NEVER offer "keep
+    both formats." NEVER add deprecation notices or "deprecated" comments — DELETE the old
+    code entirely. No "keep for reference," no "marked as deprecated," no dual implementations.
+    When there are two ways to do the same thing, DELETE one immediately. When changing
+    conventions (metric keys, config formats, flow architecture), DELETE the old convention
+    entirely. Clean slate always. One way to do each thing.
     See: `.claude/metalearning/2026-03-19-backward-compat-resistance-greenfield-project.md`
 27. **Debug Run = Full Production (Non-Negotiable)** — A debug run is the FULL production
     experiment with ONLY 3 differences: (1) fewer epochs, (2) less data, (3) fewer folds.

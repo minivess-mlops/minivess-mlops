@@ -267,7 +267,6 @@ _FLOW_FILES = [
     "train_flow",
     "data_flow",
     "analysis_flow",
-    "post_training_flow",
     "deploy_flow",
     "acquisition_flow",
     "dashboard_flow",

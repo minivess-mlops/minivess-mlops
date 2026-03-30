@@ -141,7 +141,6 @@ def test_all_flow_dockerfiles_inherit_from_base() -> None:
 TIER_MAPPING: dict[str, str] = {
     "Dockerfile.train": "minivess-base:latest",
     "Dockerfile.hpo": "minivess-base:latest",
-    "Dockerfile.post_training": "minivess-base:latest",
     "Dockerfile.analyze": "minivess-base:latest",
     "Dockerfile.deploy": "minivess-base:latest",
     "Dockerfile.data": "minivess-base:latest",

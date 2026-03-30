@@ -82,7 +82,6 @@ class TestFlowDecoratorNames:
             FLOW_NAME_DATA,
             FLOW_NAME_DEPLOY,
             FLOW_NAME_HPO,
-            FLOW_NAME_POST_TRAINING,
             FLOW_NAME_TRAIN,
         )
 
@@ -96,7 +95,6 @@ class TestFlowDecoratorNames:
         core_constants = {
             FLOW_NAME_TRAIN,
             FLOW_NAME_DATA,
-            FLOW_NAME_POST_TRAINING,
             FLOW_NAME_ANALYSIS,
             FLOW_NAME_DEPLOY,
             FLOW_NAME_DASHBOARD,

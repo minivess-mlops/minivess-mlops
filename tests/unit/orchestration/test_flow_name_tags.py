@@ -20,7 +20,6 @@ EXPECTED_TAGS: dict[Path, set[str]] = {
         "training-flow",           # parent flow + training subflow MLflow run
         "post-training-subflow",   # post-training subflow MLflow run
     },
-    FLOWS_DIR / "post_training_flow.py": {"post-training-flow"},
     FLOWS_DIR / "analysis_flow.py": {"analysis-flow"},
     FLOWS_DIR / "data_flow.py": {"data-flow"},
     FLOWS_DIR / "deploy_flow.py": {"deploy-flow"},

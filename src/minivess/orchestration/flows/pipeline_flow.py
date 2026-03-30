@@ -42,7 +42,6 @@ from minivess.orchestration.constants import (
     FLOW_NAME_DATA,
     FLOW_NAME_DEPLOY,
     FLOW_NAME_PIPELINE,
-    FLOW_NAME_POST_TRAINING,
     FLOW_NAME_TRAIN,
 )
 from minivess.observability.flow_observability import flow_observability_context
@@ -92,7 +91,6 @@ _PIPELINE_STEPS: list[tuple[str, bool]] = [
     (f"{FLOW_NAME_ACQUISITION}/default", True),
     (f"{FLOW_NAME_DATA}/default", True),
     (f"{FLOW_NAME_TRAIN}/default", True),
-    (f"{FLOW_NAME_POST_TRAINING}/default", False),
     (f"{FLOW_NAME_ANALYSIS}/default", True),
     (f"{FLOW_NAME_BIOSTATISTICS}/default", False),
     (f"{FLOW_NAME_DEPLOY}/default", True),
