@@ -1,0 +1,1061 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LOCAL DYNUNET MECHANICS — BIOSTATISTICS FINISH PLAN v3.0
+  =========================================================
+
+  COUNCIL REVIEW:
+    Iteration 1: Biostatistician 6/10, Platform Eng 7/10, Protocols Editor 6/10
+    Iteration 2: Biostatistician 8/10, Platform Eng 8/10, Protocols Editor 8/10
+    Iteration 3: Surgical fixes for 8 remaining issues (nomenclature, MixedLM formula,
+      column naming, volume mounts, hardcoded defaults, DiagrammeR, diagnostics columns,
+      TRIPOD sidecar)
+  Key fixes in v2.0:
+    - Deleted redundant Task 1.2 (per_volume_evaluator.py) — FoldResult already has per-volume data
+    - Stratified permutation test is PRIMARY pairwise analysis, pooled Wilcoxon is SENSITIVITY
+    - ANOVA fixed to 2-way (loss × aux_calib) — post_training_method is constant in this experiment
+    - Added mixed-effects model with fold as random intercept
+    - Added diagnostics/power table to DuckDB 2
+    - Fixed Docker build commands (direct docker build, not compose)
+    - Added F10 calibration reliability diagram + T7 calibration comparison table
+    - Added task to DELETE matplotlib figure generators (Rule 26)
+    - Fixed CONSORT diagram: zero hardcoded defaults
+    - Removed condition_key denormalization from metric tables
+    - Removed training_curves table (available in MLflow, not needed for statistics)
+    - Single-stage R Dockerfile (builder=runner is pointless multi-stage)
+    - Added TRIPOD+AI compliance artifacts (sample size, subgroup, data availability)
+    - Config override: min_folds_per_condition=2 for this 2-fold experiment
+    - R scripts moved to src/minivess/pipeline/r_scripts/ for project consistency
+
+  COUNCIL:
+    - Biostatistician: paired bootstrap validity, stratified permutation, mixed-effects ANOVA
+    - ML Platform Engineer: Docker, Prefect, DagsHub MLflow, DuckDB materialization
+    - Nature Protocols Editor: TRIPOD+AI compliance, figure/table standards, reproducibility
+
+  PURPOSE:
+    Complete the Train → Analysis → Biostatistics pipeline by wiring per-volume
+    metrics through the two-DuckDB architecture, generating R/ggplot2 publication
+    figures + LaTeX tables, and verifying statistical correctness.
+
+  PREDECESSOR:
+    local-dynunet-mechanics-debug-plan.xml (v1.1) — Phases 0-5 complete.
+    Training: 8 fold runs DONE on DagsHub (experiment 10).
+    Blocker: Per-volume metrics not available → biostatistics results empty.
+
+  TWO-DUCKDB ARCHITECTURE:
+    DuckDB 1 (analysis_results.duckdb):
+      - Producer: Analysis Flow task_export_analysis_duckdb()
+      - Content: Raw per-volume + fold-level metrics from all evaluated runs
+      - Consumer: Biostatistics Flow, external biostatisticians
+      - Schema extends existing biostatistics_duckdb.py MODULE (no parallel .py file)
+        NOTE: analysis_results.duckdb has its OWN schema (different DDL from
+        biostatistics DuckDB). "Extend module" = add functions to same .py file,
+        NOT extend same DDL. Two DuckDB files, two schemas, one Python module.
+
+    DuckDB 2 (biostatistics.duckdb):
+      - Producer: Biostatistics Flow statistical engine
+      - Content: Statistical results + diagnostics + TRIPOD artifacts
+      - Consumer: R/ggplot2 figure generation, LaTeX table generation
+      - Input: Reads from DuckDB 1
+
+    PARALLEL AGENT FLOWS:
+      Agent A: Reads DuckDB 1 → statistical analysis → DuckDB 2
+      Agent B: Reads DuckDB 2 → R/ggplot2 figures (10 figures)
+      Agent C: Reads DuckDB 2 → LaTeX tables (7 tables)
+      Agents B + C can run concurrently after Agent A completes.
+
+  STATISTICAL DESIGN (council-resolved):
+    - Primary pairwise test: stratified within-fold permutation (Stouffer Z combination)
+    - Sensitivity analysis: pooled Wilcoxon signed-rank (labeled, not primary)
+    - ANOVA: 2-way (loss × aux_calib) mixed-effects model, fold as random intercept
+    - Multiple comparison: Holm-Bonferroni for co-primaries, BH-FDR for secondaries
+    - Co-primary metrics: clDice + ASSD (topology + boundary, ASSD = Average Symmetric Surface Distance)
+    - Foil metric: DSC (intentionally to show rank inversion)
+    - Power: simulation-based, report minimum detectable effect at 80%
+    - N=2 folds: all results reported with explicit underpowered caveats
+
+  CONSTRAINTS:
+    - Docker + Prefect for ALL execution (Rules 17-19, 33)
+    - R/ggplot2 ONLY for publication figures (matplotlib BANNED, DELETE old generators)
+    - Config-driven parameters ONLY (Rule 29)
+    - Zero regex for structured data (Rule 16)
+    - Extend existing biostatistics_duckdb.py (Rule 26 — no parallel modules)
+    - JSON sidecars bridge Python → R (no rpy2, no subprocess)
+    - DeepVess external test OBLIGATORY
+
+  PROVENANCE:
+    - Biostatistics DuckDB: src/minivess/pipeline/biostatistics_duckdb.py (EXTEND, not duplicate)
+    - Biostatistics statistics: src/minivess/pipeline/biostatistics_statistics.py
+    - Biostatistics figures: src/minivess/pipeline/biostatistics_figures.py (DELETE matplotlib figs)
+    - R export: src/minivess/pipeline/biostatistics_r_export.py
+    - JSON sidecars: src/minivess/pipeline/biostatistics_sidecar.py
+    - Analysis Flow: src/minivess/orchestration/flows/analysis_flow.py
+    - Biostatistics Flow: src/minivess/orchestration/flows/biostatistics_flow.py
+    - R scripts: src/minivess/pipeline/r_scripts/ (NEW location)
+-->
+<plan id="local-dynunet-biostats-finish"
+      version="3.0"
+      created="2026-03-30"
+      updated="2026-03-30"
+      council_iteration="3"
+      target_branch="hotfix/pass-10-and-11"
+      predecessor="local-dynunet-mechanics-debug-plan.xml v1.1">
+
+  <related_issues>
+    <issue id="985" title="Biostatistics discovery must handle per-volume metrics from remote MLflow" />
+    <issue id="979" title="Implement SPACE calibration metric" />
+    <issue id="981" title="Implement pECE calibration metric" status="DONE" />
+  </related_issues>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       TWO-DUCKDB SCHEMA DEFINITIONS (v2 — council-reviewed)
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <schema name="analysis_results.duckdb">
+    <description>
+      Raw experimental results materialized from MLflow. Self-contained:
+      a biostatistician receives THIS file alone and can reproduce all analyses.
+      Extends existing biostatistics_duckdb.py schema (no parallel module).
+    </description>
+
+    <table name="runs">
+      <column name="run_id" type="VARCHAR" pk="true" />
+      <column name="experiment_id" type="VARCHAR" />
+      <column name="experiment_name" type="VARCHAR" />
+      <column name="loss_function" type="VARCHAR" />
+      <column name="fold_id" type="INTEGER" />
+      <column name="model_family" type="VARCHAR" />
+      <column name="with_aux_calib" type="BOOLEAN" />
+      <column name="post_training_method" type="VARCHAR" />
+      <column name="recalibration" type="VARCHAR" />
+      <column name="ensemble_strategy" type="VARCHAR" />
+      <column name="is_zero_shot" type="BOOLEAN" />
+      <column name="status" type="VARCHAR" />
+      <column name="condition_key" type="VARCHAR" />
+      <!-- condition_key ONLY here — no denormalization into metric tables -->
+    </table>
+
+    <table name="per_volume_metrics">
+      <!-- Segmentation AND calibration metrics in ONE table (no separate calibration table) -->
+      <column name="run_id" type="VARCHAR" />
+      <column name="fold_id" type="INTEGER" />
+      <column name="split" type="VARCHAR" />
+      <column name="dataset" type="VARCHAR" />
+      <column name="volume_id" type="VARCHAR" />
+      <column name="metric_name" type="VARCHAR" />
+      <!-- metric_name: dsc, hd95, assd, nsd, cldice, be_0, be_1, junction_f1,
+           cal_ece, cal_mce, cal_brier, cal_nll, cal_ace, cal_ba_ece, cal_pece -->
+      <column name="metric_value" type="DOUBLE" />
+      <!-- Column named "metric_value" (not "value") to match existing biostatistics_duckdb.py convention -->
+      <pk>run_id, fold_id, volume_id, metric_name</pk>
+      <!-- JOIN to runs ON run_id for condition_key -->
+    </table>
+
+    <table name="fold_metrics">
+      <column name="run_id" type="VARCHAR" />
+      <column name="fold_id" type="INTEGER" />
+      <column name="split" type="VARCHAR" />
+      <column name="metric_name" type="VARCHAR" />
+      <column name="metric_value" type="DOUBLE" />
+      <pk>run_id, fold_id, metric_name, split</pk>
+    </table>
+
+    <table name="metadata">
+      <column name="key" type="VARCHAR" pk="true" />
+      <column name="value" type="VARCHAR" />
+      <!-- Keys: created_at, git_sha, factorial_yaml, n_runs, n_conditions,
+           n_folds, source_experiment, dagshub_uri, sha256_fingerprint,
+           biostatistics_config_json (full serialized config for reproducibility) -->
+    </table>
+  </schema>
+
+  <schema name="biostatistics.duckdb">
+    <description>
+      Statistical analysis results + diagnostics. Visualization developers
+      receive THIS file + JSON sidecars to create publication figures.
+    </description>
+
+    <table name="pairwise_comparisons">
+      <column name="metric" type="VARCHAR" />
+      <column name="split" type="VARCHAR" />
+      <column name="test_type" type="VARCHAR" />
+      <!-- test_type: 'stratified_permutation' (PRIMARY) or 'pooled_wilcoxon' (SENSITIVITY) -->
+      <column name="condition_a" type="VARCHAR" />
+      <column name="condition_b" type="VARCHAR" />
+      <column name="statistic" type="DOUBLE" />
+      <column name="p_value" type="DOUBLE" />
+      <column name="p_adjusted" type="DOUBLE" />
+      <column name="correction_method" type="VARCHAR" />
+      <column name="cohens_d" type="DOUBLE" />
+      <column name="cliffs_delta" type="DOUBLE" />
+      <column name="vda" type="DOUBLE" />
+      <column name="ci_lower" type="DOUBLE" />
+      <column name="ci_upper" type="DOUBLE" />
+      <column name="ci_method" type="VARCHAR" />
+      <!-- ci_method: 'bca' when N >= bca_min_n, else 'percentile' -->
+      <column name="n_a" type="INTEGER" />
+      <column name="n_b" type="INTEGER" />
+      <column name="effect_size_class" type="VARCHAR" />
+      <!-- effect_size_class: 'negligible', 'small', 'medium', 'large' per Cohen (1988) -->
+    </table>
+
+    <table name="anova_results">
+      <!-- 2-way ANOVA (loss × aux_calib) for this experiment; supports N-way for future -->
+      <column name="metric" type="VARCHAR" />
+      <column name="split" type="VARCHAR" />
+      <column name="model_type" type="VARCHAR" />
+      <!-- model_type: 'mixed_effects' (preferred) or 'fixed_effects' (fallback, flagged) -->
+      <column name="factor" type="VARCHAR" />
+      <column name="ss" type="DOUBLE" />
+      <column name="df" type="INTEGER" />
+      <column name="f_statistic" type="DOUBLE" />
+      <column name="p_value" type="DOUBLE" />
+      <column name="eta_squared" type="DOUBLE" />
+      <column name="partial_eta_squared" type="DOUBLE" />
+      <column name="omega_squared" type="DOUBLE" />
+      <column name="is_exploratory" type="BOOLEAN" />
+      <!-- is_exploratory: true when no multiplicity correction applied -->
+    </table>
+
+    <table name="variance_decomposition">
+      <column name="metric" type="VARCHAR" />
+      <column name="split" type="VARCHAR" />
+      <column name="source" type="VARCHAR" />
+      <column name="variance" type="DOUBLE" />
+      <column name="icc" type="DOUBLE" />
+      <column name="icc_ci_lower" type="DOUBLE" />
+      <column name="icc_ci_upper" type="DOUBLE" />
+      <column name="friedman_statistic" type="DOUBLE" />
+      <column name="friedman_p_value" type="DOUBLE" />
+    </table>
+
+    <table name="rankings">
+      <column name="metric" type="VARCHAR" />
+      <column name="split" type="VARCHAR" />
+      <column name="condition" type="VARCHAR" />
+      <column name="mean_rank" type="DOUBLE" />
+      <column name="mean_value" type="DOUBLE" />
+      <column name="std_value" type="DOUBLE" />
+      <column name="cd_value" type="DOUBLE" />
+    </table>
+
+    <table name="bayesian_results">
+      <column name="metric" type="VARCHAR" />
+      <column name="split" type="VARCHAR" />
+      <column name="condition_a" type="VARCHAR" />
+      <column name="condition_b" type="VARCHAR" />
+      <column name="p_rope" type="DOUBLE" />
+      <column name="p_left" type="DOUBLE" />
+      <column name="p_right" type="DOUBLE" />
+      <column name="rope_width" type="DOUBLE" />
+      <column name="prior_concentration" type="DOUBLE" />
+      <!-- prior_concentration: Dirichlet process prior parameter for baycomp -->
+      <column name="decision" type="VARCHAR" />
+    </table>
+
+    <table name="specification_curve">
+      <column name="spec_id" type="INTEGER" />
+      <column name="metric" type="VARCHAR" />
+      <column name="split" type="VARCHAR" />
+      <column name="conditions" type="VARCHAR[]" />
+      <!-- DuckDB native LIST(VARCHAR) — no JSON encoding needed -->
+      <column name="value" type="DOUBLE" />
+      <column name="ci_lower" type="DOUBLE" />
+      <column name="ci_upper" type="DOUBLE" />
+      <column name="rank" type="INTEGER" />
+    </table>
+
+    <table name="diagnostics">
+      <!-- Power analysis, effective N, design effects — council-mandated addition -->
+      <column name="metric" type="VARCHAR" />
+      <column name="test_type" type="VARCHAR" />
+      <column name="alpha_used" type="DOUBLE" />
+      <!-- alpha_used: significance level for power calculation (from config) -->
+      <column name="effect_size_assumed" type="DOUBLE" />
+      <!-- effect_size_assumed: Cohen's d used for this row's power estimate -->
+      <column name="achieved_power" type="DOUBLE" />
+      <column name="effective_n" type="INTEGER" />
+      <column name="design_effect" type="DOUBLE" />
+      <column name="icc_within_fold" type="DOUBLE" />
+      <column name="min_detectable_effect_d02" type="DOUBLE" />
+      <!-- Minimum detectable effect at 80% power for d=0.2 -->
+      <column name="min_detectable_effect_d05" type="DOUBLE" />
+      <column name="min_detectable_effect_d08" type="DOUBLE" />
+      <column name="recommended_additional_folds" type="INTEGER" />
+      <column name="recommendation" type="VARCHAR" />
+    </table>
+
+    <table name="tripod_compliance">
+      <!-- TRIPOD+AI artifact chain — Items 9a, 18e, 24 -->
+      <column name="item_id" type="VARCHAR" pk="true" />
+      <column name="item_name" type="VARCHAR" />
+      <column name="status" type="VARCHAR" />
+      <!-- status: 'addressed', 'limitation_documented', 'not_applicable' -->
+      <column name="evidence" type="VARCHAR" />
+      <column name="limitation" type="VARCHAR" />
+    </table>
+
+    <table name="metadata">
+      <column name="key" type="VARCHAR" pk="true" />
+      <column name="value" type="VARCHAR" />
+      <!-- Keys: created_at, git_sha, analysis_duckdb_sha256, config_hash,
+           biostatistics_config_json (full serialized config),
+           co_primary_metrics, foil_metrics, alpha, n_bootstrap, seed -->
+    </table>
+  </schema>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 1: PER-VOLUME METRICS PIPELINE (4 tasks — 1.2 deleted per council)
+       ════════════════════════════════════════════════════════════════════
+
+       COUNCIL FIX: Deleted Task 1.2 (per_volume_evaluator.py) — FoldResult
+       already contains per_volume_metrics. The blocker is WIRING, not COMPUTATION.
+       Also: extend existing biostatistics_duckdb.py, no parallel module.
+  -->
+
+  <phase id="1" name="Per-Volume Metrics Pipeline">
+    <gate>
+      analysis_results.duckdb exists with non-empty per_volume_metrics table.
+      At least 8 runs × 2 folds × 15 metrics. All 4 conditions distinguishable.
+      DuckDB round-trips correctly.
+    </gate>
+
+    <task id="1.1" name="Retroactively tag DagsHub runs + fix training flow">
+      <description>
+        The 8 existing DagsHub runs lack with_aux_calib tag. Use MlflowClient.set_tag()
+        to retroactively add all factorial metadata. Also fix training_flow.py to log
+        with_aux_calib for future runs.
+
+        Config → tag mapping:
+          local_dynunet_dice_ce → loss_function=dice_ce, with_aux_calib=false
+          local_dynunet_dice_ce_auxcalib → loss_function=dice_ce, with_aux_calib=true
+          local_dynunet_cbdice_cldice → loss_function=cbdice_cldice, with_aux_calib=false
+          local_dynunet_cbdice_cldice_auxcalib → loss_function=cbdice_cldice, with_aux_calib=true
+          All: model_family=dynunet, post_training_method=none, is_zero_shot=false
+
+        Retroactive tagging script: DELETE-AFTER-USE (Rule 26 — one-off migration).
+        Or better: implement as a Prefect task within the analysis flow.
+
+        PREREQUISITE: .env must have DAGSHUB_TOKEN, MLFLOW_TRACKING_URI,
+        MLFLOW_TRACKING_USERNAME for the MLflow client to connect.
+      </description>
+      <tdd_spec>
+        RED: Test set_factorial_tags() applies correct tags given run_id + config map.
+        RED: Test training_flow logs with_aux_calib tag.
+        GREEN: Implement using MlflowClient.set_tag().
+      </tdd_spec>
+      <files>
+        <file action="create">src/minivess/pipeline/mlflow_tag_utils.py</file>
+        <file action="modify">src/minivess/orchestration/flows/training_flow.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_mlflow_tag_utils.py</file>
+      </files>
+      <acceptance>
+        All 8 DagsHub runs have correct tags (4 distinct conditions).
+        discover_source_runs_from_api() returns 4 conditions.
+        Training flow logs with_aux_calib for future runs.
+        Tests: >= 4.
+      </acceptance>
+    </task>
+
+    <task id="1.2" name="Extend biostatistics_duckdb.py with analysis DuckDB builder">
+      <description>
+        COUNCIL FIX: Extend the EXISTING biostatistics_duckdb.py module (Rule 26 —
+        no parallel modules). Add build_analysis_results_duckdb() function.
+
+        build_analysis_results_duckdb(
+            runs: list[SourceRun],
+            per_volume_data: dict,   # From FoldResult.per_volume_metrics (already exists!)
+            fold_metrics: dict,
+            output_path: Path,
+            metadata: dict[str, str],  # Includes full BiostatisticsConfig JSON
+        ) -> Path
+
+        Creates analysis_results.duckdb with 4 tables (runs, per_volume_metrics,
+        fold_metrics, metadata). NO separate calibration table — calibration metrics
+        go into per_volume_metrics with cal_ prefix. NO training_curves table
+        (available in MLflow, not needed for statistics).
+
+        Also exports all tables to Parquet at output_path.parent / "parquet/".
+        NO condition_key in metric tables — only in runs table.
+
+        PURE function — no MLflow, no Prefect dependency.
+      </description>
+      <tdd_spec>
+        RED: Test build_analysis_results_duckdb() creates 4-table DuckDB from mock data.
+        RED: Test Parquet export — all .parquet files exist.
+        RED: Test round-trip: write → read → data matches.
+        RED: Test condition_key ONLY in runs table, NOT in metric tables.
+        RED: Test metadata has biostatistics_config_json key.
+        GREEN: Implement in biostatistics_duckdb.py using duckdb.connect().
+      </tdd_spec>
+      <files>
+        <file action="modify">src/minivess/pipeline/biostatistics_duckdb.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_analysis_results_duckdb.py</file>
+      </files>
+      <acceptance>
+        DuckDB with 4 tables, correct schema.
+        Parquet export for all tables.
+        Round-trip integrity verified.
+        Tests: >= 8.
+      </acceptance>
+    </task>
+
+    <task id="1.3" name="Wire task_export_analysis_duckdb() into Analysis Flow">
+      <description>
+        Add Prefect task to Analysis Flow:
+          1. Collects per-volume results from upstream evaluate tasks
+             (FoldResult.per_volume_metrics already exists — this is WIRING, not computation)
+          2. Calls build_analysis_results_duckdb()
+          3. Logs DuckDB as MLflow artifact on DagsHub
+          4. Returns output path
+
+        Wire after per-fold evaluations, before champion selection:
+          evaluate_all_models() → task_export_analysis_duckdb() → register_champion_task()
+          (Using actual task names from analysis_flow.py, not idealized names.)
+
+        Update docker-compose.flows.yml: add ANALYSIS_OUTPUT_DIR env var
+        and volume mount for the analyze service output directory.
+
+        PREREQUISITE: Verify DAGSHUB_TOKEN and MLFLOW_TRACKING_URI in .env.
+      </description>
+      <tdd_spec>
+        RED: Test Analysis Flow includes task_export_analysis_duckdb.
+        RED: Test task produces analysis_results.duckdb at expected path.
+        GREEN: Wire task into analysis_flow.py.
+        GREEN: Update docker-compose.flows.yml.
+      </tdd_spec>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/analysis_flow.py</file>
+        <file action="modify">deployment/docker-compose.flows.yml</file>
+        <file action="create">tests/v2/unit/orchestration/test_analysis_duckdb_task.py</file>
+      </files>
+      <acceptance>
+        Analysis Flow produces analysis_results.duckdb as Prefect artifact.
+        Logged as MLflow artifact on DagsHub.
+        Docker volume mount correct.
+        Tests: >= 4.
+      </acceptance>
+    </task>
+
+    <task id="1.4" name="Create biostatistics config override for 2-fold experiment">
+      <description>
+        COUNCIL FIX: The default min_folds_per_condition=3 will REJECT this 2-fold
+        experiment. Create a specific config file:
+          configs/biostatistics/local_dynunet_debug.yaml
+
+        Override values:
+          min_folds_per_condition: 2  (this experiment has 2 folds)
+          experiment_names: ["local_dynunet_mechanics_training"]
+          analysis_duckdb_path: "outputs/analysis/analysis_results.duckdb"  (NEW field)
+          co_primary_metrics: ["cldice", "assd"]  (topology + boundary)
+          foil_metrics: ["dsc"]  (intentional rank inversion demo)
+          calibration_co_primary_metrics: ["cal_ece", "cal_ba_ece"]
+          splits: ["trainval", "test"]
+
+        Also add analysis_duckdb_path field to BiostatisticsConfig with None default.
+      </description>
+      <tdd_spec>
+        RED: Test BiostatisticsConfig loads with min_folds_per_condition=2.
+        RED: Test analysis_duckdb_path field exists and is optional.
+        GREEN: Create YAML config and update Pydantic model.
+      </tdd_spec>
+      <files>
+        <file action="create">configs/biostatistics/local_dynunet_debug.yaml</file>
+        <file action="modify">src/minivess/config/biostatistics_config.py</file>
+        <file action="create">tests/v2/unit/config/test_biostatistics_config_2fold.py</file>
+      </files>
+      <acceptance>
+        Config validates with min_folds=2, experiment-specific fields.
+        validate_source_completeness() passes with 2 folds.
+        Tests: >= 3.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 2: BIOSTATISTICS STATISTICAL ENGINE (TWO-DUCKDB)
+       ════════════════════════════════════════════════════════════════════
+
+       COUNCIL FIXES:
+       - Stratified permutation test = PRIMARY (not pooled Wilcoxon)
+       - 2-way ANOVA (loss × aux_calib), mixed-effects with fold as random intercept
+       - Power/diagnostics table in DuckDB 2
+       - TRIPOD compliance artifact table
+       - Bayesian prior_concentration stored
+       - specification_curve uses LIST(VARCHAR), not JSON
+  -->
+
+  <phase id="2" name="Biostatistics Statistical Engine (Two-DuckDB)">
+    <gate>
+      biostatistics.duckdb with 9 tables, all non-empty.
+      P-values in [0, 1]. Stratified permutation test is PRIMARY.
+      Diagnostics table reports achieved power. TRIPOD items addressed.
+      11 JSON sidecars exported.
+    </gate>
+
+    <task id="2.1" name="Implement read_analysis_duckdb() for Biostatistics input">
+      <description>
+        Add to existing biostatistics_duckdb.py:
+
+        read_analysis_duckdb(duckdb_path: Path) -> tuple[SourceRunManifest, PerVolumeData]
+
+        Reads DuckDB 1, returns:
+          - SourceRunManifest: runs with factorial metadata
+          - PerVolumeData: metric → condition_key → fold → per-volume scores
+            (condition_key from runs table JOIN, not from metric tables)
+
+        When BiostatisticsConfig.analysis_duckdb_path is None, falls back to MLflow API.
+      </description>
+      <tdd_spec>
+        RED: Test read_analysis_duckdb() returns correct manifest from mock DuckDB.
+        RED: Test PerVolumeData has 4 conditions, 2 folds.
+        RED: Test fallback to MLflow API when path is None.
+        GREEN: Implement using duckdb.connect(read_only=True) + SQL JOINs.
+      </tdd_spec>
+      <files>
+        <file action="modify">src/minivess/pipeline/biostatistics_duckdb.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_read_analysis_duckdb.py</file>
+      </files>
+      <acceptance>
+        Correct parsing into SourceRunManifest + PerVolumeData.
+        4 conditions, 2 folds, ~23 val + 7 test volumes per fold.
+        Tests: >= 6.
+      </acceptance>
+    </task>
+
+    <task id="2.2" name="Run statistical engine — stratified permutation PRIMARY">
+      <description>
+        COUNCIL FIX: stratified_permutation_test() is the PRIMARY pairwise test.
+        compute_pairwise_comparisons() (pooled Wilcoxon) is SENSITIVITY only.
+
+        Wire read_analysis_duckdb() output into:
+          1. stratified_permutation_test() — PRIMARY (Stouffer Z within-fold)
+          2. compute_pairwise_comparisons() — SENSITIVITY (pooled Wilcoxon, labeled)
+          3. compute_factorial_anova() — 2-way ONLY (loss × aux_calib)
+             MUST use mixed-effects model (fold as random intercept):
+               statsmodels.formula.api.mixedlm(
+                 "metric_value ~ C(loss_function) * C(with_aux_calib)",
+                 data=df, groups=df["fold_id"]
+               )
+             The existing pg.anova(between=[..., "fold"]) treats fold as FIXED effect
+             (wrong model — inflates residual DF). Replace it, do not keep as fallback.
+             Fall back to fixed-effects ANOVA ONLY if MixedLM convergence fails, and
+             flag as is_exploratory=true with pseudoreplication warning.
+          4. compute_bayesian_comparisons() — Store prior_concentration parameter.
+          5. compute_variance_decomposition() — Match volumes by volume_id across
+             conditions WITHIN same fold (correct repeated-measures design).
+          6. compute_rankings() — Multi-metric with Nemenyi CD.
+          7. compute_power_diagnostics() — NEW: simulation-based power for stratified
+             permutation test at d=0.2, 0.5, 0.8. Report effective N, design effect,
+             ICC within fold, recommended additional folds for 80% power.
+
+        All parameters from BiostatisticsConfig (alpha, n_bootstrap, seed, rope_values).
+        ZERO hardcoded values (Rule 29).
+
+        CLEANUP SUB-TASK: Strip ALL hardcoded parameter defaults from existing
+        statistical functions. These MUST become required keyword-only arguments:
+          - stratified_permutation_test(): seed=42 → seed (required)
+          - bootstrap_ci(): seed=42 → seed (required)
+          - compute_bayesian_comparisons(): rope=0.01 → rope (required)
+          - compute_pairwise_comparisons(): primary_metric="val_dice" → primary_metric (required)
+          - compute_factorial_anova(): factor_names=None → factor_names (required)
+        Callers MUST pass values from BiostatisticsConfig. No silent defaults.
+
+        ANOVA DETAIL (council-resolved):
+          This experiment has 4 conditions: 2 losses × 2 aux_calib states.
+          post_training_method="none" for all runs (constant factor — EXCLUDE from ANOVA).
+          Effective design is 2×2 factorial with 2 replicates (folds) per cell.
+          Per-volume analysis uses ~23 volumes per fold, but volumes are NESTED within
+          folds — mixed model required (fold as random intercept, volume as observation).
+      </description>
+      <tdd_spec>
+        RED: Test pairwise results have BOTH test_type='stratified_permutation' and 'pooled_wilcoxon'.
+        RED: Test ANOVA has 2 factors (loss, aux_calib), NOT 3.
+        RED: Test diagnostics table has achieved_power values.
+        RED: Test p-values in [0, 1] and effect sizes finite.
+        GREEN: Wire all statistical functions with correct inputs.
+      </tdd_spec>
+      <files>
+        <file action="modify">src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file action="modify">src/minivess/pipeline/biostatistics_statistics.py</file>
+        <file action="create">src/minivess/pipeline/biostatistics_diagnostics.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_biostats_stratified_primary.py</file>
+      </files>
+      <acceptance>
+        Pairwise: 6 pairs × 8+ metrics × 2 test_types × 2 splits.
+        ANOVA: 2 factors (loss, aux_calib) × 8+ metrics. model_type reported.
+        Diagnostics: power estimates for d=0.2, 0.5, 0.8 per metric.
+        Tests: >= 8.
+      </acceptance>
+    </task>
+
+    <task id="2.3" name="Build biostatistics.duckdb + JSON sidecars + TRIPOD artifacts">
+      <description>
+        Materialize all statistical results into biostatistics.duckdb (DuckDB 2).
+        9 tables: pairwise_comparisons, anova_results, variance_decomposition,
+        rankings, bayesian_results, specification_curve, diagnostics,
+        tripod_compliance, metadata.
+
+        TRIPOD compliance artifacts (council-mandated):
+          Item 9a: Sample size justification — "N=2 folds, 70 MiniVess volumes,
+            7 DeepVess volumes. Dataset collected before study design."
+          Item 18e: Data availability — s3://minivessdataset (read-only),
+            DagsHub MLflow (tracking), analysis_results.duckdb (complete dataset)
+          Item 24: Subgroup definitions — volume-size quartiles, per-fold stratification
+
+        JSON sidecars (11 files):
+          r_data/pairwise_results.json (stratified + pooled, with test_type)
+          r_data/per_volume_data.json (flattened records from DuckDB 1)
+          r_data/variance_decomposition.json
+          r_data/rankings.json
+          r_data/anova_results.json
+          r_data/bayesian_results.json
+          r_data/specification_curve.json
+          r_data/diagnostics.json (power analysis, with alpha_used + effect_size_assumed)
+          r_data/calibration_data.json (ECE/Brier per condition for reliability diagram)
+          r_data/tripod_compliance.json (Items 9a/18e/24 for supplementary table T8)
+          r_data/metadata.json (provenance + full BiostatisticsConfig)
+
+        VOLUME MOUNT FIX (council Iteration 2): The biostatistics service in
+        docker-compose.flows.yml needs read access to outputs_analysis volume
+        to read analysis_results.duckdb. Add:
+          outputs_analysis:/app/outputs/analysis:ro
+        to the biostatistics service volumes.
+      </description>
+      <tdd_spec>
+        RED: Test biostatistics.duckdb has 9 tables with correct schemas.
+        RED: Test all 11 JSON sidecars exported.
+        RED: Test metadata.analysis_duckdb_sha256 matches DuckDB 1 hash.
+        RED: Test TRIPOD table has items 9a, 18e, 24.
+        GREEN: Implement DuckDB builder + JSON export.
+      </tdd_spec>
+      <files>
+        <file action="modify">src/minivess/pipeline/biostatistics_duckdb.py</file>
+        <file action="modify">src/minivess/pipeline/biostatistics_r_export.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_biostatistics_duckdb_v2.py</file>
+      </files>
+      <acceptance>
+        9 tables in DuckDB 2, all non-empty.
+        10 JSON sidecars with FigureSidecar/TableSidecar schemas.
+        SHA-256 provenance chain intact.
+        Tests: >= 10.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 3: R/GGPLOT2 PUBLICATION FIGURES + LATEX TABLES
+       ════════════════════════════════════════════════════════════════════
+
+       COUNCIL FIXES:
+       - Added F10: Calibration reliability diagram (aux_calib is primary factor!)
+       - Added T7: Calibration comparison table
+       - Single-stage R Dockerfile (multi-stage with same base is pointless)
+       - R scripts at src/minivess/pipeline/r_scripts/ (project consistency)
+       - Task to DELETE matplotlib figure generators (Rule 26)
+       - Fixed CONSORT: zero hardcoded defaults, all from config
+       - Forest plot: BCa bootstrap CIs (not bars), ggforestplot package
+       - Nature Protocols dimensions: 89mm single, 183mm double column
+  -->
+
+  <phase id="3" name="R/ggplot2 Publication Figures + LaTeX Tables">
+    <gate>
+      10 PDF figures + 7 .tex tables. Nature Protocols formatting.
+      Matplotlib figure generators DELETED (Rule 26).
+    </gate>
+
+    <task id="3.1" name="Create R Docker image (single-stage, rocker base)">
+      <description>
+        COUNCIL FIX: Single-stage build (multi-stage with same base is complexity
+        for zero size savings).
+
+        Dockerfile: deployment/docker/Dockerfile.r_figures
+          FROM rocker/r-ver:4.4.0
+          RUN apt-get install -y libcurl4-openssl-dev libxml2-dev libfontconfig1-dev
+          RUN apt-get install -y librsvg2-dev
+          RUN R -e 'install.packages(c("ggplot2","ggrain","patchwork","scales","jsonlite",
+            "kableExtra","xtable","tidyverse","ggforestplot","ggsignif","ggrepel",
+            "boot","PMCMRplus","viridis","cowplot","DiagrammeR","DiagrammeRsvg","rsvg"),
+            repos="https://cloud.r-project.org")'
+          # DiagrammeRsvg + rsvg: converts DiagrammeR grViz() SVG → PDF for CONSORT figure F2
+          # librsvg2-dev: system dependency for rsvg R package
+          COPY src/minivess/pipeline/r_scripts/ /app/r_scripts/
+          WORKDIR /app
+          CMD ["Rscript", "r_scripts/render_all.R"]
+
+        Add to docker-compose.flows.yml as service 'r_figures' (no profile — same
+        invocation pattern as biostatistics service).
+      </description>
+      <tdd_spec>
+        RED: Test Dockerfile builds.
+        RED: Test R packages load.
+        GREEN: Write Dockerfile + compose service.
+      </tdd_spec>
+      <files>
+        <file action="create">deployment/docker/Dockerfile.r_figures</file>
+        <file action="modify">deployment/docker-compose.flows.yml</file>
+      </files>
+      <acceptance>
+        Docker image builds in less than 15 minutes.
+        All R packages load without errors.
+        Compose service defined with r_data (ro) + r_output (rw) volumes.
+      </acceptance>
+    </task>
+
+    <task id="3.2" name="Write R scripts for 10 publication figures">
+      <description>
+        Each reads JSON sidecar, outputs PDF + PNG. Nature Protocols formatting:
+          Width: 89mm (single) or 183mm (double). Font: Helvetica 7pt.
+          300+ DPI PNG. Vector PDF. Colorblind-safe: viridis or Okabe-Ito.
+          Use cairo_pdf() and png(type="cairo") for anti-aliased output.
+
+        Figures:
+          F1: fig_distribution.R — Raincloud per condition per metric
+          F2: fig_consort.R — CONSORT flow (DiagrammeR). ALL numbers from config
+              (ZERO hardcoded defaults — reads from metadata.json for n_volumes,
+              n_folds, n_val_per_fold). Validated: n_train + n_val = n_total.
+          F3: fig_effect_size_heatmap.R — Cliff's delta heatmap (stratified test only)
+          F4: fig_forest_plot.R — ggforestplot with BCa bootstrap CIs (whiskers, not bars)
+              CI method from diagnostics.json: BCa when N >= bca_min_n, else percentile.
+          F5: fig_interaction.R — 2-way interaction (loss × aux_calib) with 95% CI
+          F6: fig_specification_curve.R — Specification curve with fraction-significant
+          F7: fig_generalization_gap.R — MiniVess vs DeepVess gap
+          F8: fig_cd_diagram.R — Critical difference diagram (Nemenyi)
+          F9: fig_variance_lollipop.R — Variance decomposition
+          F10: fig_calibration.R — Reliability diagram (predicted vs observed) per condition
+               COUNCIL-MANDATED: aux_calib is a primary factor, must visualize calibration.
+               Shows ECE bars + calibration curves for each of 4 conditions.
+
+        render_all.R sources all 10 sequentially with error handling.
+      </description>
+      <tdd_spec>
+        RED: Test each R script with synthetic JSON data.
+        GREEN: Write R scripts reading sidecars, producing PDF+PNG.
+      </tdd_spec>
+      <files>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_distribution.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_consort.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_effect_size_heatmap.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_forest_plot.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_interaction.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_specification_curve.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_generalization_gap.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_cd_diagram.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_variance_lollipop.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/fig_calibration.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/render_all.R</file>
+      </files>
+      <acceptance>
+        All 10 R scripts produce PDF + PNG from test data.
+        Nature Protocols dimensions verified.
+        CONSORT has zero hardcoded values.
+        Tests: Rscript render_all.R completes in Docker.
+      </acceptance>
+    </task>
+
+    <task id="3.3" name="Write R scripts for 7 LaTeX tables">
+      <description>
+        LaTeX booktabs with kableExtra. All significant results bolded (p less than alpha).
+
+        Tables:
+          T1: tab_comparison.R — Main comparison with bootstrap CIs
+          T2: tab_effect_sizes.R — Cohen's d + Cliff's delta (stratified test)
+          T3: tab_variance.R — ICC + Friedman + power caveat
+          T4: tab_rankings.R — Mean ranks + Nemenyi CD
+          T5: tab_anova.R — 2-way ANOVA summary (loss × aux_calib)
+              COUNCIL FIX: 2-way, not 3-way. model_type column shown.
+          T6: tab_power.R — Achieved power + recommended additional folds
+          T7: tab_calibration.R — ECE/Brier/pECE comparison per condition
+              COUNCIL-MANDATED: calibration metrics comparison table.
+              Highlights aux_calib=true vs false contrast.
+
+        Each outputs .tex + .csv. Footnotes for statistical methods.
+      </description>
+      <tdd_spec>
+        RED: Test each R script with synthetic JSON.
+        GREEN: Write R scripts producing .tex + .csv.
+      </tdd_spec>
+      <files>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_comparison.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_effect_sizes.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_variance.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_rankings.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_anova.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_power.R</file>
+        <file action="create">src/minivess/pipeline/r_scripts/tab_calibration.R</file>
+      </files>
+      <acceptance>
+        7 .tex files compile in standalone LaTeX.
+        7 .csv companion files.
+        Significant results bolded. Footnotes present.
+      </acceptance>
+    </task>
+
+    <task id="3.4" name="DELETE matplotlib figure generators (Rule 26)">
+      <description>
+        COUNCIL-MANDATED: Delete all matplotlib publication figure functions from
+        biostatistics_figures.py. R/ggplot2 is the ONLY publication renderer.
+
+        DELETE these functions:
+          _generate_effect_size_heatmap()
+          _generate_forest_plot()
+          _generate_distribution_plot()
+          _generate_interaction_plot()
+          _generate_variance_lollipop()
+          _generate_instability_plot()
+
+        KEEP generate_cost_breakdown_figure() ONLY if it has no R equivalent
+        (exploratory/internal use only).
+
+        Update any callers to skip matplotlib figure generation.
+        Update tests that reference deleted functions.
+      </description>
+      <tdd_spec>
+        RED: Test that deleted functions do not exist in module (AST check).
+        GREEN: Delete functions and update callers/tests.
+      </tdd_spec>
+      <files>
+        <file action="modify">src/minivess/pipeline/biostatistics_figures.py</file>
+        <file action="modify">src/minivess/orchestration/flows/biostatistics_flow.py</file>
+        <file action="modify">tests/v2/unit/pipeline/test_biostatistics_figures.py</file>
+      </files>
+      <acceptance>
+        No matplotlib publication figure functions in biostatistics_figures.py.
+        No dual rendering paths. One way to generate each figure (R only).
+        Tests updated, no import errors.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 4: DOCKER REBUILD + PIPELINE EXECUTION
+       ════════════════════════════════════════════════════════════════════
+
+       COUNCIL FIX: Correct Docker build commands (not compose build base).
+       Added VRAM budget note for RTX 2070 Super.
+  -->
+
+  <phase id="4" name="Docker Rebuild + Pipeline Execution">
+    <gate>
+      Complete artifact chain: analysis_results.duckdb → biostatistics.duckdb →
+      JSON sidecars → PDF figures + LaTeX tables.
+      All logged to DagsHub MLflow.
+    </gate>
+
+    <task id="4.1" name="Rebuild Docker images with all code fixes">
+      <description>
+        COUNCIL FIX: Correct build commands (no compose build base).
+
+        Build order:
+          1. DOCKER_BUILDKIT=1 docker build -t minivess-base:latest \
+               -f deployment/docker/Dockerfile.base .
+          2. DOCKER_BUILDKIT=1 docker build -t minivess-base-cpu:latest \
+               -f deployment/docker/Dockerfile.base-cpu .
+          3. docker build -t minivess-r-figures:latest \
+               -f deployment/docker/Dockerfile.r_figures .
+          4. docker compose -f deployment/docker-compose.flows.yml \
+               build analyze biostatistics
+
+        Then verify imports in each image:
+          GPU: python3 -c "from minivess.pipeline.biostatistics_duckdb import build_analysis_results_duckdb"
+          CPU: python3 -c "from minivess.pipeline.biostatistics_diagnostics import compute_power_diagnostics"
+          R:   Rscript -e "library(ggplot2); library(jsonlite); library(ggforestplot)"
+      </description>
+      <files>
+        <file action="use">deployment/docker/Dockerfile.base</file>
+        <file action="use">deployment/docker/Dockerfile.base-cpu</file>
+        <file action="use">deployment/docker/Dockerfile.r_figures</file>
+      </files>
+      <acceptance>
+        All 4 images build. Import checks pass.
+      </acceptance>
+    </task>
+
+    <task id="4.2" name="Execute Analysis Flow for per-volume evaluation">
+      <description>
+        Run Analysis Flow in Docker — evaluates 8 training checkpoints per-volume.
+
+        VRAM BUDGET (council note): RTX 2070 Super = 8 GB.
+          DynUNet inference with sliding_window_inference: sw_batch_size=1, overlap=0.25.
+          One model at a time (sequential, not parallel).
+          Expect ~5-10 min per run × 8 runs = 40-80 minutes.
+
+        Command:
+          docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+            --shm-size 8g \
+            -e ANALYSIS_SOURCE_EXPERIMENT=local_dynunet_mechanics_training \
+            -e ANALYSIS_OUTPUT_DIR=/app/outputs/analysis \
+            analyze
+
+        PREREQUISITE: .env has DAGSHUB_TOKEN, MLFLOW_TRACKING_URI.
+        Monitor: docker logs -f, GPU heartbeat, DagsHub MLflow.
+      </description>
+      <acceptance>
+        analysis_results.duckdb exists with >= 3600 rows in per_volume_metrics.
+        4 conditions × 2 folds. DeepVess test metrics present.
+      </acceptance>
+    </task>
+
+    <task id="4.3" name="Execute Biostatistics Flow with analysis DuckDB input">
+      <description>
+        Run Biostatistics Flow reading from analysis_results.duckdb:
+
+          docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+            -e BIOSTATISTICS_CONFIG=/app/configs/biostatistics/local_dynunet_debug.yaml \
+            -e ANALYSIS_DUCKDB_PATH=/app/outputs/analysis/analysis_results.duckdb \
+            biostatistics
+
+        Expected: ~5-10 minutes. Produces biostatistics.duckdb + 10 JSON sidecars.
+      </description>
+      <acceptance>
+        biostatistics.duckdb with 9 tables. 10 JSON sidecars in r_data/.
+        Stratified permutation results in pairwise_comparisons.
+        Diagnostics table has power estimates.
+      </acceptance>
+    </task>
+
+    <task id="4.4" name="Execute R rendering in Docker">
+      <description>
+        Run R container to render all figures and tables:
+
+          docker compose --env-file .env -f deployment/docker-compose.flows.yml run --rm \
+            r_figures
+
+        Volume mounts (from compose):
+          outputs/biostatistics/r_data/:/app/r_data/:ro
+          outputs/biostatistics/r_output/:/app/r_output/:rw
+
+        Verify: 10 PDF + 10 PNG + 7 .tex + 7 .csv = 34 output files.
+      </description>
+      <acceptance>
+        34 output files in r_output/.
+        PDFs valid, PNGs 300+ DPI.
+        LaTeX tables compile standalone.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       PHASE 5: VERIFICATION + INTEGRATION
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <phase id="5" name="Verification + Integration">
+    <gate>
+      All checks pass. make test-staging clean. PR ready.
+    </gate>
+
+    <task id="5.1" name="Artifact integrity + statistical correctness verification">
+      <description>
+        Combined verification (council feedback: 5.1 + 5.2 are independent but
+        both needed before 5.3):
+
+        ARTIFACT INTEGRITY:
+          1. DuckDB 1: 4 tables, SHA-256 matches metadata
+          2. DuckDB 2: 9 tables, analysis_duckdb_sha256 matches DuckDB 1
+          3. JSON sidecars: 10 files, valid schemas
+          4. R output: 34 files (10 PDF, 10 PNG, 7 .tex, 7 .csv)
+
+        STATISTICAL CORRECTNESS:
+          1. P-values in [0, 1], no NaN
+          2. Effect sizes finite. Cohen's d in [-5, 5]. Cliff's delta in [-1, 1].
+          3. Bootstrap CIs: lower less than point estimate less than upper
+          4. ANOVA F-statistics non-negative. Eta-squared in [0, 1].
+          5. Rankings: sum = n*(n+1)/2
+          6. Bayesian: p_rope + p_left + p_right ≈ 1.0
+
+        SCIENTIFIC CONSISTENCY:
+          1. DSC and clDice rankings SHOULD differ (rank inversion)
+          2. aux_calib should improve ECE (known finding)
+          3. DeepVess metrics lower than MiniVess (generalization gap)
+          4. Bayesian-frequentist disagreements documented (expected at low N)
+
+        COUNCIL FIX: Verify Bayesian-frequentist agreement/disagreement and
+        document as transparency finding, not error.
+      </description>
+      <tdd_spec>
+        RED: Test verify_artifact_chain() catches missing/corrupt files.
+        RED: Test validate_statistical_results() catches NaN p-values.
+        RED: Test validate_bootstrap_ci_ordering().
+        GREEN: Implement verification suite.
+      </tdd_spec>
+      <files>
+        <file action="create">src/minivess/pipeline/biostatistics_verification.py</file>
+        <file action="create">tests/v2/unit/pipeline/test_biostatistics_verification.py</file>
+      </files>
+      <acceptance>
+        All checks pass. No NaN/Inf. Provenance chain intact.
+        Scientific consistency documented.
+        Tests: >= 10.
+      </acceptance>
+    </task>
+
+    <task id="5.2" name="Full test suite + merge preparation">
+      <description>
+        1. make test-staging — ZERO failures, ZERO non-hardware skips
+        2. uv run ruff check src/ tests/ — ZERO errors
+        3. uv run mypy src/ — clean
+
+        Create PR targeting main:
+          Title: "feat: two-DuckDB biostatistics pipeline + R/ggplot2 figures"
+          Summary: analysis_results.duckdb (raw data) + biostatistics.duckdb
+            (statistics), stratified permutation as primary test, 10 R figures,
+            7 LaTeX tables, diagnostics/power table, TRIPOD compliance artifacts.
+      </description>
+      <acceptance>
+        make test-staging: 0 failures.
+        ruff: 0 errors. mypy: clean.
+        PR created targeting main.
+      </acceptance>
+    </task>
+  </phase>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       EXECUTION ORDER + DEPENDENCIES
+       ════════════════════════════════════════════════════════════════════ -->
+
+  <execution_order>
+    <note>
+      Code tasks (1.x, 2.x, 3.1-3.4) use uv run pytest locally.
+      Docker tasks (4.x) require working Docker daemon.
+      Verification (5.x) runs after pipeline execution.
+
+      Parallelism:
+        - 1.1 || 1.2 (tag fix vs DuckDB builder)
+        - 3.1 || 3.2 || 3.3 (Docker image, figure scripts, table scripts)
+        - 3.2 || 3.3 || 3.4 (figures, tables, matplotlib deletion)
+    </note>
+
+    <dependency from="1.3" to="1.2" />
+    <dependency from="1.4" to="1.1" reason="Config must reference correct experiment" />
+    <dependency from="2.1" to="1.2" />
+    <dependency from="2.2" to="2.1" />
+    <dependency from="2.3" to="2.2" />
+    <dependency from="3.4" to="3.2" reason="Delete matplotlib only after R verified" />
+    <dependency from="4.1" to="1.3" />
+    <dependency from="4.1" to="2.3" />
+    <dependency from="4.1" to="3.1" />
+    <dependency from="4.2" to="4.1" />
+    <dependency from="4.3" to="4.2" />
+    <dependency from="4.4" to="4.3" />
+    <dependency from="4.4" to="3.2" />
+    <dependency from="4.4" to="3.3" />
+    <dependency from="5.1" to="4.4" />
+    <dependency from="5.2" to="5.1" />
+  </execution_order>
+
+  <cost_estimate>
+    <compute>Local RTX 2070 Super — $0 cloud cost</compute>
+    <total_wall_clock_hours>5-7</total_wall_clock_hours>
+    <breakdown>
+      <phase_1_code_hours>1.0</phase_1_code_hours>
+      <phase_2_code_hours>1.5</phase_2_code_hours>
+      <phase_3_code_hours>2.0</phase_3_code_hours>
+      <docker_rebuild_minutes>40</docker_rebuild_minutes>
+      <r_package_install_minutes>30</r_package_install_minutes>
+      <analysis_flow_minutes>60-80</analysis_flow_minutes>
+      <biostatistics_flow_minutes>10</biostatistics_flow_minutes>
+      <r_rendering_minutes>5</r_rendering_minutes>
+      <verification_minutes>30</verification_minutes>
+    </breakdown>
+  </cost_estimate>
+
+</plan>
