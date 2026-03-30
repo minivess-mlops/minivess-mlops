@@ -453,6 +453,10 @@ Full stack details: `src/minivess/observability/CLAUDE.md`, `deployment/CLAUDE.m
   the SAME session that created them. Use context compaction if needed, not session breaks.
   See: `.claude/metalearning/2026-03-28-context-amnesia-deferred-deepvess-whac-a-mole.md`
 - Confabulate — web-search instead. Hardcode task names, cloud providers, GPU types.
+- Use matplotlib/seaborn as a "fallback" for figures. R/ggplot2 is the ONLY publication
+  figure renderer. JSON sidecars are the data interface. No dual rendering systems.
+- Propose skipping DeepVess external test evaluation. It is the ONLY test dataset and
+  is OBLIGATORY for every experiment run. Without it, results show overfitting only.
 - Use `import re` for structured data. Use pip/conda/poetry. Skip pre-commit hooks.
 - Suggest `python scripts/*.py` for training — use Prefect flows in Docker.
 - Use `/tmp` for artifacts. Write citations without hyperlinks. Use T4 GPU for SAM3/VesselFM.
